@@ -1,0 +1,15 @@
+/node_modules
+*.zip
+*.exe
+/data
+/data1
+/db
+/db1 
+/dist
+/dist*
+/python/venv
+/python/Python311
+/img
+/pdf
+/OneStep
+/client/node_modules
