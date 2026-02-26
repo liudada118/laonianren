@@ -1,0 +1,7 @@
+前端界面状态记录：
+1. 登录页面：需要输入密钥和机构名称
+2. 密钥验证逻辑在前端config.txt中（AES加密）
+3. 前端WebSocket连接到ws://localhost:3001（前端模拟后端）
+4. 前端使用WebSerial API直接连接串口设备
+5. 后端WebSocket在ws://localhost:19999
+6. 后端HTTP API在http://localhost:19245

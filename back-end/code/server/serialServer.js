@@ -574,6 +574,9 @@ function getActiveSendIntervalMs() {
 
 function updateSendTimerForActiveTypes() {
   const interval = getActiveSendIntervalMs()
+  console.log('[DEBUG] updateSendTimer: interval=', interval, 'activeSendTypes=', activeSendTypes, 'dataMap keys=', Object.keys(dataMap), 'parserArr keys=', Object.keys(parserArr))
+  // Log HZ values for each device in dataMap
+  Object.keys(dataMap).forEach(k => { console.log('[DEBUG] dataMap[' + k + '] type=', dataMap[k]?.type, 'HZ=', dataMap[k]?.HZ, 'stamp=', dataMap[k]?.stamp) })
   if (!activeSendTypes || !Array.isArray(activeSendTypes) || !activeSendTypes.length) return
   const ms = Math.max(MIN_SEND_INTERVAL_MS, Math.floor(interval ?? DEFAULT_SEND_MS))
   if (currentSendIntervalMs === ms && playtimer) return
@@ -1325,8 +1328,17 @@ app.get('/getSystem', async (req, res) => {
 
 // 鏌ヨ涓插彛
 app.get('/getPort', async (req, res) => {
-  const ports = await SerialPort.list()
-  const portsRes = getPort(ports)
+  let ports, portsRes
+  if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+    try {
+      portsRes = JSON.parse(process.env.VIRTUAL_PORT_LIST || '[]')
+    } catch (e) {
+      portsRes = []
+    }
+  } else {
+    ports = await SerialPort.list()
+    portsRes = getPort(ports)
+  }
   res.json(new HttpResult(0, portsRes, '鑾峰彇璁惧鍒楄〃鎴愬姛'));
 })
 
@@ -2167,8 +2179,20 @@ var sendMacNum = 0, successNum = 0, sendDataLength = 0
 const oldTimeObj = {}
 async function connectPort() {
   macInfo = {}
-  let ports = await SerialPort.list()
-  ports = getPort(ports)
+  let ports
+  if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+    // 测试模式：使用虚拟串口列表
+    try {
+      ports = JSON.parse(process.env.VIRTUAL_PORT_LIST || '[]')
+      console.log('[TEST] Using virtual serial ports:', ports.length)
+    } catch (e) {
+      ports = []
+      console.error('[TEST] Failed to parse VIRTUAL_PORT_LIST:', e.message)
+    }
+  } else {
+    ports = await SerialPort.list()
+    ports = getPort(ports)
+  }
   console.log(ports, 'ports')
   // 鍒涘缓骞惰繛鎺ユ暟鎹€氶亾骞朵笖璁剧疆鍥炶皟
   for (let i = 0; i < ports.length; i++) {
@@ -2202,7 +2226,17 @@ async function connectPort() {
     // if()
 
       if (!(parserItem.port && parserItem.port.isOpen)) {
-        const detectedBaud = await detectBaudRate(path)
+        let detectedBaud = null
+        if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+          // 测试模式：从环境变量获取预设波特率
+          try {
+            const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
+            detectedBaud = baudMap[path] || null
+          } catch (e) {}
+          console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || portBaudRate)
+        } else {
+          detectedBaud = await detectBaudRate(path)
+        }
         if (detectedBaud) {
           portBaudRate = detectedBaud
         }
@@ -2240,7 +2274,31 @@ async function connectPort() {
 
       parserItem.port = port
       // connection established -> send AT to query device info
-      sendMacCommand(port, path, portBaudRate, parserItem)
+      if (process.env.VIRTUAL_SERIAL_TEST === 'true' && portBaudRate === 3000000) {
+        // 测试模式：直接从虚拟串口名推断MAC和type，跳过AT指令
+        const virtualMacMap = JSON.parse(process.env.VIRTUAL_MAC_MAP || '{}');
+        const portName = path.split('/').pop().replace('_app', '');
+        const macEntry = virtualMacMap[portName];
+        if (macEntry) {
+          const uniqueId = macEntry.mac;
+          const version = 'C40510';
+          console.log(`[TEST] Auto-assigning MAC for ${path}: ${uniqueId}`);
+          successNum++;
+          parserItem.macReady = true;
+          macInfo[path] = { uniqueId, version };
+          const mappedType = getTypeFromSerialCache(uniqueId);
+          if (mappedType) {
+            dataItem.type = String(mappedType).trim();
+            dataItem.premission = true;
+            console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path}`);
+          }
+          if (Object.keys(macInfo).length == ports.length) {
+            socketSendData(server, JSON.stringify({ macInfo }));
+          }
+        }
+      } else {
+        sendMacCommand(port, path, portBaudRate, parserItem)
+      }
       parser.on("data", async function (data) {
 
 
@@ -2249,10 +2307,17 @@ async function connectPort() {
 
         pointArr = new Array();
 
-        if (![18, 1024, 130, 146].includes(buffer.length)) {
-
-          // console.log(JSON.stringify(buffer) , path,pointArr, pointArr.length, new Date().getTime())
-          // console.log(pointArr)
+        if (![18, 1024, 130, 146, 4096].includes(buffer.length)) {
+          if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+            console.log('[DEBUG] Unexpected frame length:', buffer.length, 'from', path)
+          }
+        } else if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+          if (!global._frameLogCount) global._frameLogCount = {};
+          if (!global._frameLogCount[path]) global._frameLogCount[path] = 0;
+          global._frameLogCount[path]++;
+          if (global._frameLogCount[path] <= 3) {
+            console.log('[DEBUG] Frame received: len=' + buffer.length + ' from ' + path + ' type=' + (dataItem.type || 'unknown'));
+          }
         }
 
         for (var i = 0; i < buffer.length; i++) {

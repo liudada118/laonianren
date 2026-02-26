@@ -7,6 +7,7 @@ import EChart from '../../components/ui/EChart';
 import { HeatmapCanvas } from '../../lib/heatmap';
 import { mapLeftHand, mapRightHand, generateSimulatedSensorData } from '../../lib/gripDataMapping';
 import { gloveService } from '../../lib/GloveSerialService';
+import { backendBridge } from '../../lib/BackendBridge';
 import SerialLogPanel from '../../components/debug/SerialLogPanel';
 import { generateGripReportData } from '../../lib/gripReportGenerator';
 
@@ -192,6 +193,8 @@ export default function GripAssessment() {
 
   const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isBackendMode, setIsBackendMode] = useState(false);
+  const backendCleanupRef = useRef(null);
   const [leftGloveConnected, setLeftGloveConnected] = useState(false);
   const [rightGloveConnected, setRightGloveConnected] = useState(false);
   const [phase, setPhase] = useState('left-idle');
@@ -360,18 +363,81 @@ export default function GripAssessment() {
 
   /* ─── 断开手套 ─── */
   const handleDisconnect = useCallback(async () => {
+    // 断开后端模式
+    if (isBackendMode) {
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
+      backendBridge.disconnect();
+      setIsBackendMode(false);
+    }
     await gloveService.disconnect();
     setDeviceStatus('disconnected');
     setLeftGloveConnected(false);
     setRightGloveConnected(false);
     setIsSimulating(false);
-  }, []);
+  }, [isBackendMode]);
 
   /* ─── 模拟模式 ─── */
   const handleSimulate = useCallback(() => {
     setIsSimulating(true);
     setDeviceStatus('connected');
   }, []);
+
+  /* ─── 后端模式：通过 WebSocket 连接后端 serialServer ─── */
+  const handleBackendConnect = useCallback(async () => {
+    try {
+      setDeviceStatus('connecting');
+      addSimLog('正在连接后端服务...', 'info');
+
+      // 先调用后端API连接串口设备
+      const connResult = await backendBridge.connPort();
+      addSimLog(`后端连接结果: ${JSON.stringify(connResult)}`, 'info');
+
+      // 设置手套模式 (mode=1)
+      await backendBridge.setActiveMode(1);
+      addSimLog('已设置为手套模式 (mode=1)', 'info');
+
+      // 连接WebSocket
+      backendBridge.connect();
+
+      // 监听数据
+      const unsubLeft = backendBridge.on('leftHandData', (arr) => {
+        if (gloveService.onLeftHandData) {
+          gloveService.onLeftHandData(arr);
+        }
+      });
+      const unsubRight = backendBridge.on('rightHandData', (arr) => {
+        if (gloveService.onRightHandData) {
+          gloveService.onRightHandData(arr);
+        }
+      });
+      const unsubConnect = backendBridge.on('connect', () => {
+        addSimLog('WebSocket 已连接', 'info');
+        setDeviceStatus('connected');
+      });
+      const unsubDisconnect = backendBridge.on('disconnect', () => {
+        addSimLog('WebSocket 已断开', 'error');
+      });
+
+      // 保存清理函数
+      backendCleanupRef.current = () => {
+        unsubLeft();
+        unsubRight();
+        unsubConnect();
+        unsubDisconnect();
+      };
+
+      setIsBackendMode(true);
+      setDeviceStatus('connected');
+      addSimLog('后端模式已启动，等待数据...', 'info');
+    } catch (e) {
+      console.error('后端连接失败:', e);
+      addSimLog(`后端连接失败: ${e.message}`, 'error');
+      setDeviceStatus('disconnected');
+    }
+  }, [addSimLog]);
 
   /* ─── 开始采集 ─── */
   const startRecording = () => {
@@ -427,6 +493,23 @@ export default function GripAssessment() {
           addSimLog(`模拟帧 #${frameRef.current}: avg=${avgPressure.toFixed(1)}, max=${max}, nonZero=${nonZero}/256`, 'data');
         }
       }, 100);
+    } else if (isBackendMode) {
+      // 后端模式：调用后端API开始采集，数据通过WebSocket自动流入
+      addSimLog(`后端模式开始采集 ${isLeft ? '左手' : '右手'}`, 'info');
+      backendBridge.startCol({
+        name: patientInfo?.name || 'test',
+        assessmentId: `grip_${Date.now()}`,
+        sampleType: isLeft ? 'grip_left' : 'grip_right',
+        date: new Date().toISOString(),
+        colName: isLeft ? '左手握力' : '右手握力',
+      }).then(() => {
+        addSimLog('后端采集已启动', 'info');
+      }).catch(e => {
+        addSimLog(`后端采集启动失败: ${e.message}`, 'error');
+      });
+      timerRef.current = setInterval(() => {
+        setTimer(p => p + 1);
+      }, 100);
     } else {
       // 真实设备模式：数据通过串口回调自动流入，只需要计时器
       timerRef.current = setInterval(() => {
@@ -439,6 +522,15 @@ export default function GripAssessment() {
     clearInterval(timerRef.current);
     timerRef.current = null;
     isRecordingRef.current = false;
+
+    // 后端模式：调用后端API结束采集
+    if (isBackendMode) {
+      backendBridge.endCol().then(() => {
+        addSimLog('后端采集已结束', 'info');
+      }).catch(e => {
+        addSimLog(`后端采集结束失败: ${e.message}`, 'error');
+      });
+    }
 
     if (phase === 'left-recording') {
       setShowLeftToast(true);
@@ -491,6 +583,11 @@ export default function GripAssessment() {
     if (gloveService.connected) {
       gloveService.disconnect();
     }
+    // 清理后端连接
+    if (backendCleanupRef.current) {
+      backendCleanupRef.current();
+    }
+    backendBridge.disconnect();
   }, []);
 
   /* ─── 报告模式 ─── */
@@ -573,6 +670,7 @@ export default function GripAssessment() {
 
   /* ─── 设备连接状态文本 ─── */
   const getDeviceStatusText = () => {
+    if (isBackendMode) return '后端模式';
     if (isSimulating) return '模拟模式';
     if (leftGloveConnected && rightGloveConnected) return '左右手已连接';
     if (leftGloveConnected) return '左手已连接';
@@ -582,6 +680,7 @@ export default function GripAssessment() {
   };
 
   const getDeviceStatusColor = () => {
+    if (isBackendMode) return '#7C3AED';
     if (isSimulating) return '#0891B2';
     if (leftGloveConnected || rightGloveConnected) return 'var(--success)';
     if (gloveService.connected) return '#F59E0B';
@@ -619,6 +718,8 @@ export default function GripAssessment() {
                 <button onClick={handleConnectGlove} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)', background: 'none', border: 'none', cursor: 'pointer' }}>连接手套</button>
                 <span style={{ color: 'var(--border-medium)' }}>|</span>
                 <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: '#0891B2', background: 'none', border: 'none', cursor: 'pointer' }}>模拟</button>
+                <span style={{ color: 'var(--border-medium)' }}>|</span>
+                <button onClick={handleBackendConnect} className="text-xs font-medium" style={{ color: '#7C3AED', background: 'none', border: 'none', cursor: 'pointer' }}>后端</button>
               </>
             )}
 
@@ -728,6 +829,9 @@ export default function GripAssessment() {
                     <button onClick={handleSimulate}
                       className="text-[11px] py-1.5 px-3 rounded-lg font-medium"
                       style={{ color: '#0891B2', background: 'rgba(8,145,178,0.08)', border: '1px solid rgba(8,145,178,0.2)' }}>模拟</button>
+                    <button onClick={handleBackendConnect}
+                      className="text-[11px] py-1.5 px-3 rounded-lg font-medium"
+                      style={{ color: '#7C3AED', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>后端</button>
                   </div>
                 </div>
               )}

@@ -16,7 +16,8 @@ if (typeof process.env.isPackaged !== 'undefined') {
     if (app) isPackaged = app.isPackaged
   } catch {}
 }
-console.log(process.resourcesPath,path.join(__dirname,  'python', 'app', 'server.py') ,path.join(process.resourcesPath, 'python', 'app', 'server.py'), !isPackaged , isPackaged , 'isPackaged')
+const _resPath = process.resourcesPath || __dirname
+console.log(_resPath, path.join(__dirname,  'python', 'app', 'server.py') ,path.join(_resPath, 'python', 'app', 'server.py'), !isPackaged , isPackaged , 'isPackaged')
 function pythonBin() {
   const isDev = !isPackaged;
   if (process.platform === 'win32') {
