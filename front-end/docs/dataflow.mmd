@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant HW as 硬件传感器
+    participant Serial as Web Serial API
+    participant Service as SerialService / GloveService
+    participant Hook as useDevice Hook
+    participant Page as Assessment Page
+    participant Report as ReportGenerator
+    participant Ctx as AssessmentContext
+    participant Storage as localStorage
+
+    Note over HW,Serial: 1. 设备连接阶段
+    Page->>Hook: connectDevice() / startSimulation()
+    Hook->>Service: connect(baudRate)
+    Service->>Serial: navigator.serial.requestPort()
+    Serial->>HW: 打开串口连接
+    HW-->>Serial: 连接成功
+    Serial-->>Service: port.open()
+    Service-->>Hook: status: connected
+
+    Note over HW,Storage: 2. 实时数据采集阶段
+    loop 每帧 (20Hz)
+        HW->>Serial: 原始字节流
+        Serial->>Service: processData(chunk)
+        Note right of Service: 帧协议解析<br/>分隔符: AA 55 03 99<br/>手套: 两帧合并→256字节<br/>脚垫: 4096字节→64×64矩阵
+        Service->>Hook: onFrame(matrix/sensorData)
+        Hook->>Page: 更新实时显示<br/>3D模型 + 压力曲线 + 正态分布
+    end
+
+    Note over HW,Storage: 3. 采集结束 → 报告生成
+    Page->>Hook: stopCollecting()
+    Hook-->>Page: frames[] (所有采集帧)
+    Page->>Report: generateReport(frames, patientInfo)
+    Note right of Report: 计算统计指标:<br/>· 各区域力值(N)<br/>· 峰值帧提取<br/>· 时间序列分析<br/>· 正态分布参数
+    Report-->>Page: reportData
+    Page->>Ctx: completeAssessment(type, report, data)
+    Ctx->>Storage: saveAssessmentSession()
+
+    Note over HW,Storage: 4. 报告展示
+    Page->>Report: 渲染报告组件<br/>HandPressureMap / GripReport / StandingReport

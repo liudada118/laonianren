@@ -1,0 +1,120 @@
+graph TB
+    subgraph 用户层["🖥️ 用户层"]
+        Browser["Chrome/Edge 浏览器<br/>Web Serial API"]
+    end
+
+    subgraph 前端应用["⚛️ 前端应用 (Vite + React 18)"]
+        direction TB
+        Router["React Router v6<br/>路由管理"]
+        
+        subgraph Pages["📄 页面层"]
+            Login["Login<br/>登录页"]
+            Dashboard["Dashboard<br/>仪表盘"]
+            GripPage["GripAssessment<br/>握力评估"]
+            SitStandPage["SitStandAssessment<br/>坐站评估"]
+            StandingPage["StandingAssessment<br/>站立评估"]
+            GaitPage["GaitAssessment<br/>步态评估"]
+            History["AssessmentHistory<br/>历史记录"]
+            HistoryReport["HistoryReportView<br/>历史报告查看"]
+        end
+        
+        subgraph Components["🧩 组件层"]
+            direction LR
+            subgraph UI["UI 基础组件"]
+                Button & Card & Input & Select & Dialog & Toast & EChart
+            end
+            subgraph ThreeJS["Three.js 3D 组件"]
+                HandModel["HandModel<br/>手部3D模型"]
+                FootModel["FootModel<br/>足部3D模型"]
+                InsoleModel["InsoleModel<br/>鞋垫3D模型"]
+                HumanModel["HumanModel<br/>人体3D模型"]
+            end
+            subgraph Report["报告组件"]
+                GripReport["GripReport<br/>握力报告"]
+                StandingReport["StandingReport<br/>站立报告"]
+                HandPressureMap["HandPressureMap<br/>手部热力图"]
+                InteractiveArchChart["InteractiveArchChart<br/>足弓图表"]
+                InteractiveCOPChart["InteractiveCOPChart<br/>COP图表"]
+                ReportViewer["ReportViewer<br/>报告查看器"]
+            end
+            subgraph Layout["布局组件"]
+                Header["Header<br/>顶部导航"]
+                DeviceConnector["DeviceConnector<br/>设备连接器"]
+                PatientInfoDialog["PatientInfoDialog<br/>患者信息"]
+            end
+        end
+        
+        subgraph StateManagement["🔄 状态管理"]
+            AssessmentCtx["AssessmentContext<br/>评估全局状态"]
+            ThemeCtx["ThemeContext<br/>主题管理"]
+        end
+        
+        subgraph Hooks["🪝 Hooks"]
+            useDevice["useDevice<br/>设备连接/模拟"]
+            usePressureScene["usePressureScene<br/>压力场景"]
+            useWebSocket["useWebSocket<br/>WebSocket通信"]
+        end
+        
+        subgraph Libs["📚 核心库"]
+            direction LR
+            subgraph Serial["串口通信"]
+                SerialService["SerialService<br/>64×64 脚垫串口<br/>波特率 3,000,000"]
+                GloveService["GloveSerialService<br/>16×16 手套串口<br/>波特率 921,600"]
+            end
+            subgraph SDK["Footpad SDK"]
+                FootpadSerial["FootpadSerialService<br/>脚垫串口服务"]
+                FootpadScene["FootpadScene<br/>脚垫3D场景"]
+                PressureShaders["pressureShaders<br/>压力着色器"]
+            end
+            subgraph ReportGen["报告生成器"]
+                GripGen["gripReportGenerator<br/>握力报告"]
+                SitStandGen["sitstandReportGenerator<br/>坐站报告"]
+                GaitGen["gaitReportGenerator<br/>步态报告"]
+            end
+            subgraph Utils["工具库"]
+                GripMapping["gripDataMapping<br/>握力数据映射"]
+                FootAnalysis["FootAnalysis<br/>足部分析"]
+                Heatmap["heatmap<br/>热力图"]
+                HistoryService["historyService<br/>历史记录"]
+            end
+        end
+    end
+
+    subgraph Backend["🖧 后端服务 (Express + WebSocket)"]
+        ExpressAPI["REST API<br/>端口 3001"]
+        WSServer["WebSocket Server<br/>实时数据推送"]
+        FileStorage["文件存储<br/>data/history.json<br/>data/reports/"]
+    end
+
+    subgraph Hardware["🔌 硬件设备层"]
+        Glove["压力手套<br/>16×16 传感器矩阵<br/>左/右手"]
+        FootPad["脚垫传感器<br/>64×64 传感器矩阵<br/>4块脚垫"]
+        IMU["IMU 惯性传感器<br/>四元数/欧拉角"]
+    end
+
+    Browser --> Router
+    Router --> Pages
+    Pages --> Components
+    Pages --> Hooks
+    Components --> Libs
+    Hooks --> Libs
+    StateManagement --> Pages
+    
+    Serial -->|"Web Serial API"| Hardware
+    GloveService -->|"AA 55 03 99 帧协议"| Glove
+    SerialService -->|"AA 55 03 99 帧协议"| FootPad
+    
+    useWebSocket --> WSServer
+    ExpressAPI --> FileStorage
+    
+    classDef page fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef component fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1px
+    classDef lib fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px
+    classDef hardware fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef backend fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    
+    class Login,Dashboard,GripPage,SitStandPage,StandingPage,GaitPage,History,HistoryReport page
+    class Button,Card,Input,Select,Dialog,Toast,EChart,HandModel,FootModel,InsoleModel,HumanModel,GripReport,StandingReport,HandPressureMap,InteractiveArchChart,InteractiveCOPChart,ReportViewer,Header,DeviceConnector,PatientInfoDialog component
+    class SerialService,GloveService,FootpadSerial,FootpadScene,PressureShaders,GripGen,SitStandGen,GaitGen,GripMapping,FootAnalysis,Heatmap,HistoryService lib
+    class Glove,FootPad,IMU hardware
+    class ExpressAPI,WSServer,FileStorage backend
