@@ -203,10 +203,8 @@ export function mapRightHand(arr) {
   }
 
   // Apply the same coordinate mapping as left hand
-  const mapped = handSkinChange(adapted);
-
-  // Horizontally flip for right hand (model is X-axis mirrored)
-  return flipHorizontal(mapped);
+  // Note: no horizontal flip needed because the 3D model already mirrors via scale.x = -1
+  return handSkinChange(adapted);
 }
 
 /**
