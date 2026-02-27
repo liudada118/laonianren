@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getHistory } from '../lib/historyService';
+import { getRecord } from '../lib/historyService';
 import GripReport from '../components/report/GripReport';
 import StandingReport from '../components/report/StandingReport';
 
@@ -124,10 +124,25 @@ export default function HistoryReportView() {
   const recordId = searchParams.get('id');
   const assessmentType = searchParams.get('type');
 
-  // 从 localStorage 获取记录
-  const record = useMemo(() => {
-    const history = getHistory();
-    return history.find(r => r.id === recordId);
+  // 从后端数据库获取记录
+  const [record, setRecord] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!recordId) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    getRecord(recordId).then(data => {
+      if (!cancelled) {
+        setRecord(data);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [recordId]);
 
   const patientName = record?.patientName || '未知';
@@ -135,6 +150,26 @@ export default function HistoryReportView() {
   const handleBack = () => navigate('/history');
 
   const renderReport = () => {
+    if (loading) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 rounded-full animate-spin mb-4 mx-auto"
+              style={{ borderColor: 'var(--border-light)', borderTopColor: 'var(--zeiss-blue)' }} />
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载中...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!record) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <p style={{ color: 'var(--text-muted)' }}>未找到对应的记录</p>
+        </div>
+      );
+    }
+
     switch (assessmentType) {
       case 'grip':
         return <GripReport patientName={patientName} onClose={handleBack} />;
