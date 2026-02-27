@@ -32,9 +32,12 @@ FRONTEND_REPORT_DIR = os.path.normpath(
     os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app', 'frontendReport')
 )
 
-# 禁用 matplotlib 的 GUI 后端
-import matplotlib
-matplotlib.use('Agg')
+# 尝试设置 matplotlib 后端（不在顶层 import，避免启动失败）
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except ImportError:
+    pass  # matplotlib 不可用时，某些算法可能不需要它
 
 
 # ============================================================
@@ -59,7 +62,8 @@ def register(name):
 @register('generate_grip_render_report')
 def _grip_report(params):
     grip_dir = os.path.join(FRONTEND_REPORT_DIR, '握力')
-    sys.path.insert(0, grip_dir)
+    if grip_dir not in sys.path:
+        sys.path.insert(0, grip_dir)
     from glove_render_data import generate_grip_report
     return generate_grip_report(
         sensor_data=params.get('sensor_data', []),
@@ -76,7 +80,8 @@ def _grip_report(params):
 @register('generate_gait_render_report')
 def _gait_report(params):
     gait_dir = os.path.join(FRONTEND_REPORT_DIR, '步态')
-    sys.path.insert(0, gait_dir)
+    if gait_dir not in sys.path:
+        sys.path.insert(0, gait_dir)
     from gait_render_data import generate_gait_report
     return generate_gait_report(
         board_data=params.get('board_data', [[], [], [], []]),
@@ -91,7 +96,8 @@ def _gait_report(params):
 @register('generate_sit_stand_render_report')
 def _sitstand_report(params):
     sitstand_dir = os.path.join(FRONTEND_REPORT_DIR, '起坐')
-    sys.path.insert(0, sitstand_dir)
+    if sitstand_dir not in sys.path:
+        sys.path.insert(0, sitstand_dir)
     from sit_stand_render_data import generate_sit_stand_report
     return generate_sit_stand_report(
         stand_data=params.get('stand_data', []),
@@ -107,7 +113,8 @@ def _sitstand_report(params):
 @register('generate_standing_render_report')
 def _standing_report(params):
     standing_dir = os.path.join(FRONTEND_REPORT_DIR, '站立')
-    sys.path.insert(0, standing_dir)
+    if standing_dir not in sys.path:
+        sys.path.insert(0, standing_dir)
     from one_step_render_data import generate_standing_report
     return generate_standing_report(
         data_array=params.get('data_array', []),
@@ -139,42 +146,56 @@ def _json_serializer(obj):
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
+def _output_result(success, data=None, error=None):
+    """统一输出结果"""
+    output = {"success": success, "data": data, "error": error}
+    sys.stdout.write("__PY_RESULT_START__\n")
+    sys.stdout.write(json.dumps(output, ensure_ascii=False, default=_json_serializer))
+    sys.stdout.write("\n__PY_RESULT_END__\n")
+    sys.stdout.flush()
+
+
 # ============================================================
 # 主入口
 # ============================================================
 
 def main():
     try:
+        # 打印诊断信息到 stderr（不影响 stdout 的 JSON 输出）
+        print(f"[bridge.py] Python {sys.version}", file=sys.stderr)
+        print(f"[bridge.py] FRONTEND_REPORT_DIR: {FRONTEND_REPORT_DIR}", file=sys.stderr)
+        print(f"[bridge.py] FRONTEND_REPORT_DIR exists: {os.path.isdir(FRONTEND_REPORT_DIR)}", file=sys.stderr)
+
         # 从 stdin 读取 JSON 输入
         raw_input = sys.stdin.read()
+        if not raw_input.strip():
+            _output_result(False, error="Empty stdin input")
+            return
+
         params = json.loads(raw_input)
 
         func_name = params.get('func', '')
         func_params = params.get('params', {})
 
+        print(f"[bridge.py] 调用函数: {func_name}", file=sys.stderr)
+
         if func_name not in FUNC_REGISTRY:
-            raise ValueError(
+            _output_result(False, error=(
                 f"未知的函数名: {func_name}, "
                 f"可用: {list(FUNC_REGISTRY.keys())}"
-            )
+            ))
+            return
 
         # 调用对应算法
         result = FUNC_REGISTRY[func_name](func_params)
 
         # 输出结果
-        output = {"success": True, "data": result}
-        sys.stdout.write("__PY_RESULT_START__\n")
-        sys.stdout.write(json.dumps(output, ensure_ascii=False, default=_json_serializer))
-        sys.stdout.write("\n__PY_RESULT_END__\n")
-        sys.stdout.flush()
+        _output_result(True, data=result)
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-        output = {"success": False, "data": None, "error": error_msg}
-        sys.stdout.write("__PY_RESULT_START__\n")
-        sys.stdout.write(json.dumps(output, ensure_ascii=False))
-        sys.stdout.write("\n__PY_RESULT_END__\n")
-        sys.stdout.flush()
+        print(f"[bridge.py] 错误: {error_msg}", file=sys.stderr)
+        _output_result(False, error=error_msg)
 
 
 if __name__ == '__main__':
