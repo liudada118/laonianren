@@ -38,60 +38,12 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
         username (str): 用户名
 
     Returns:
-        dict: 包含所有分析指标和前端渲染数据的完整结果，结构如下:
-            {
-                'duration_stats': {
-                    'total_duration': float,
-                    'num_cycles': int,
-                    'avg_duration': float,
-                    'cycle_durations': [float],       # 每个周期的时长
-                    'min_cycle_duration': float,      # 最快周期
-                    'max_cycle_duration': float,      # 最慢周期
-                },
-                'stand_frames': int,
-                'sit_frames': int,
-                'stand_peaks': int,
-                'username': str,
-                'test_date': str,                     # 测试日期
-                'symmetry': {
-                    'left_right_ratio': float,        # 左右脚对称性 (%)
-                    'left_total': float,              # 左脚总力
-                    'right_total': float,             # 右脚总力
-                },
-                'pressure_stats': {
-                    'sit_max': float,                 # 坐垫最大总压力
-                    'sit_avg': float,                 # 坐垫平均总压力
-                    'foot_max': float,                # 脚垫最大总压力
-                    'foot_avg': float,                # 脚垫平均总压力
-                    'max_sit_change_rate': float,     # 坐垫最大变化率
-                    'max_foot_change_rate': float,    # 脚垫最大变化率
-                },
-                'cycle_peak_forces': [float],         # 各峰值力
-                'heatmap_data': {
-                    'stand_evolution': [{'label', 'sublabel', 'matrix': [[float]]}],
-                    'sit_evolution': [{'label', 'matrix': [[float]]}],
-                },
-                'cop_data': {
-                    'stand_left': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]], 'bbox': [int]},
-                    'stand_right': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]], 'bbox': [int]},
-                    'sit': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]]},
-                },
-                'force_curves': {
-                    'stand_times': [float],
-                    'stand_force': [float],
-                    'sit_times': [float],
-                    'sit_force': [float],
-                    'stand_peaks_idx': [int],
-                },
-            }
+        dict: 包含所有分析指标和前端渲染数据的完整结果
     """
     if callable(generate_report_from_content):
         import tempfile
-
-        # 将数组转换为CSV文本格式，传给 generate_report_from_content
         stand_csv = _array_to_pressure_csv(stand_data)
         sit_csv = _array_to_pressure_csv(sit_data)
-
         tmp_dir = tempfile.mkdtemp(prefix='sitstand_render_')
         result = generate_report_from_content(
             stand_csv, sit_csv,
@@ -100,6 +52,11 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
         return result
     return _fallback_generate_sit_stand_report(stand_data, sit_data, username)
 
+
+# ============================================================
+# Fallback 实现 - 不依赖 generate_report_from_content
+# 包含完整的热力图、COP轨迹、周期分析等计算
+# ============================================================
 
 def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     from datetime import datetime
@@ -123,90 +80,24 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     elif sit.shape[1] > 1024:
         sit = sit[:, :1024]
 
-    stand_force = stand.sum(axis=1)
-    sit_force = sit.sum(axis=1)
+    # reshape 为 3D 矩阵
+    stand_3d = stand.reshape(-1, 64, 64)
+    sit_3d = sit.reshape(-1, 32, 32)
+
+    # 基本去噪
+    stand_3d[stand_3d <= 4] = 0
+    sit_3d[sit_3d <= 10] = 0
+
+    # 旋转脚垫数据（与 generate_sit_stand_pdf_v3 一致）
+    stand_3d = np.rot90(np.flip(stand_3d, axis=2), k=1, axes=(1, 2))
+
+    stand_force = stand_3d.sum(axis=(1, 2))
+    sit_force = sit_3d.sum(axis=(1, 2))
     stand_times = (np.arange(len(stand_force), dtype=float) * 0.08).tolist()
     sit_times = (np.arange(len(sit_force), dtype=float) * 0.08).tolist()
 
     # ── 起坐次数检测 ──
-    # 策略：优先用坐垫(sit)数据的谷值检测（站起来时坐垫压力骤降，信号特征最明显）
-    # 回退：用脚垫(stand)数据的峰值检测（站起来时脚垫压力增大）
-    peaks = []
-    sit_std = float(np.std(sit_force)) if len(sit_force) > 1 else 0
-    sit_range = float(np.max(sit_force) - np.min(sit_force)) if len(sit_force) > 1 else 0
-    use_sit = sit_std > 100 and sit_range > 1000  # 坐垫数据有足够的变化幅度
-
-    try:
-        from scipy.signal import find_peaks as _find_peaks
-        _has_scipy = True
-    except ImportError:
-        _has_scipy = False
-
-    if use_sit and len(sit_force) >= 3:
-        # 方案A：坐垫谷值检测 —— 站起来时坐垫压力降到接近0
-        min_dist = max(38, len(sit_force) // 25)  # 起坐周期通常 >= 3秒，38帧 ≈ 3s @12.5Hz
-        sit_mean = float(np.mean(sit_force))
-        # 站起来时坐垫压力应明显低于均值，用均值的一半作为过滤阈值
-        valley_threshold = sit_mean * 0.5
-        if _has_scipy:
-            # 对 -sit_force 找峰值 = 找 sit_force 的谷值
-            prom = max(sit_std * 0.5, sit_range * 0.15)
-            valleys, _ = _find_peaks(-sit_force, distance=min_dist, prominence=prom)
-            # 过滤：只保留坐垫压力明显低于均值的谷值（真正站起来了）
-            peaks = [int(v) for v in valleys if sit_force[v] < valley_threshold]
-        else:
-            # 简单谷值检测
-            for i in range(1, len(sit_force) - 1):
-                if sit_force[i] < sit_force[i - 1] and sit_force[i] < sit_force[i + 1]:
-                    if sit_force[i] < valley_threshold:
-                        if not peaks or (i - peaks[-1]) >= min_dist:
-                            peaks.append(i)
-        # 末尾检测：如果最后一次站起来后信号结束（没有再坐下），补充最后一个谷值
-        if peaks:
-            last_peak = peaks[-1]
-            tail = sit_force[last_peak:]
-            # 在最后一个谷值之后，是否有一次"坐下→站起"的完整周期
-            # 即：压力先升高（坐下）再降低（站起）并保持低值直到结束
-            if len(tail) > min_dist:
-                # 检查是否有一次坐下（压力超过均值）
-                had_sit_down = any(float(x) > sit_mean for x in tail)
-                if had_sit_down:
-                    # 检查末尾是否保持低值（最后站起来了）
-                    tail_end = sit_force[-min(20, len(sit_force) // 10):]
-                    if float(np.mean(tail_end)) < valley_threshold:
-                        # 找到末尾低值区间的起始位置作为最后一个谷值
-                        tail_idx = len(sit_force) - 1
-                        for i in range(len(sit_force) - 1, last_peak, -1):
-                            if sit_force[i] < valley_threshold:
-                                tail_idx = i
-                            else:
-                                break
-                        if (tail_idx - last_peak) >= min_dist:
-                            peaks.append(tail_idx)
-    elif len(stand_force) >= 3:
-        # 方案B：脚垫峰值检测 —— 站起来时脚垫压力增大
-        min_dist = max(75, len(stand_force) // 15)  # 较大间距避免噪声
-        if _has_scipy:
-            stand_std = float(np.std(stand_force))
-            prom = max(stand_std * 1.5, (float(np.max(stand_force)) - float(np.min(stand_force))) * 0.2)
-            _peaks, _ = _find_peaks(stand_force, distance=min_dist, prominence=prom)
-            peaks = _peaks.tolist()
-        else:
-            # 平滑后简单峰值检测
-            window = min(15, max(3, len(stand_force) // 30))
-            if window % 2 == 0:
-                window += 1
-            smoothed = np.convolve(stand_force, np.ones(window) / window, mode='same')
-            signal_range = float(np.max(smoothed) - np.min(smoothed))
-            min_prominence = signal_range * 0.2
-            for i in range(1, len(smoothed) - 1):
-                if smoothed[i] > smoothed[i - 1] and smoothed[i] > smoothed[i + 1]:
-                    left_min = float(np.min(smoothed[max(0, i - min_dist):i])) if i > 0 else smoothed[i]
-                    right_min = float(np.min(smoothed[i + 1:min(len(smoothed), i + min_dist + 1)])) if i < len(smoothed) - 1 else smoothed[i]
-                    prom = float(smoothed[i]) - max(left_min, right_min)
-                    if prom >= min_prominence:
-                        if not peaks or (i - peaks[-1]) >= min_dist:
-                            peaks.append(i)
+    peaks = _detect_peaks(stand_force, sit_force, stand_times)
 
     total_duration = float(stand_times[-1] - stand_times[0]) if len(stand_times) >= 2 else 0.0
     num_cycles = len(peaks)
@@ -221,8 +112,7 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     # 各周期峰值力 (使用脚垫数据)
     cycle_peak_forces = [round(float(stand_force[p]), 1) for p in peaks if p < len(stand_force)]
 
-    # 左右脚对称性 (脚垫 64x64, 左半:列0-31, 右半:列32-63)
-    stand_3d = stand.reshape(-1, 64, 64)
+    # 左右脚对称性 (左半:列0-31, 右半:列32-63)
     left_total = float(stand_3d[:, :, :32].sum())
     right_total = float(stand_3d[:, :, 32:].sum())
     symmetry_ratio = (min(left_total, right_total) / max(left_total, right_total) * 100
@@ -238,6 +128,14 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     max_sit_rate = float(np.max(np.abs(sit_force_diff))) if len(sit_force_diff) > 0 else 0
     max_foot_rate = float(np.max(np.abs(foot_force_diff))) if len(foot_force_diff) > 0 else 0
 
+    # ── 生成热力图演变数据 ──
+    stand_evo_data = _generate_stand_evolution(stand_3d, peaks)
+    sit_evo_data = _generate_sit_evolution(sit_3d)
+
+    # ── 生成 COP 轨迹数据 ──
+    stand_cop_data = _generate_stand_cop(stand_3d, peaks)
+    sit_cop_data = _generate_sit_cop(sit_3d, peaks, sit_force)
+
     return {
         'duration_stats': {
             'total_duration': round(total_duration, 2),
@@ -247,8 +145,8 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
             'min_cycle_duration': round(min(cycle_durations), 2) if cycle_durations else 0,
             'max_cycle_duration': round(max(cycle_durations), 2) if cycle_durations else 0,
         },
-        'stand_frames': int(stand.shape[0]),
-        'sit_frames': int(sit.shape[0]),
+        'stand_frames': int(stand_3d.shape[0]),
+        'sit_frames': int(sit_3d.shape[0]),
         'stand_peaks': int(num_cycles),
         'username': username,
         'test_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -267,13 +165,13 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
         },
         'cycle_peak_forces': cycle_peak_forces,
         'heatmap_data': {
-            'stand_evolution': [],
-            'sit_evolution': [],
+            'stand_evolution': stand_evo_data,
+            'sit_evolution': sit_evo_data,
         },
         'cop_data': {
-            'stand_left': None,
-            'stand_right': None,
-            'sit': None,
+            'stand_left': stand_cop_data.get('left'),
+            'stand_right': stand_cop_data.get('right'),
+            'sit': sit_cop_data,
         },
         'force_curves': {
             'stand_times': stand_times,
@@ -285,22 +183,360 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     }
 
 
+# ============================================================
+# 峰值检测
+# ============================================================
+
+def _detect_peaks(stand_force, sit_force, stand_times):
+    """检测起坐周期的峰值/谷值"""
+    peaks = []
+    sit_std = float(np.std(sit_force)) if len(sit_force) > 1 else 0
+    sit_range = float(np.max(sit_force) - np.min(sit_force)) if len(sit_force) > 1 else 0
+    use_sit = sit_std > 100 and sit_range > 1000
+
+    try:
+        from scipy.signal import find_peaks as _find_peaks
+        _has_scipy = True
+    except ImportError:
+        _has_scipy = False
+
+    if use_sit and len(sit_force) >= 3:
+        min_dist = max(38, len(sit_force) // 25)
+        sit_mean = float(np.mean(sit_force))
+        valley_threshold = sit_mean * 0.5
+        if _has_scipy:
+            prom = max(sit_std * 0.5, sit_range * 0.15)
+            valleys, _ = _find_peaks(-sit_force, distance=min_dist, prominence=prom)
+            peaks = [int(v) for v in valleys if sit_force[v] < valley_threshold]
+        else:
+            for i in range(1, len(sit_force) - 1):
+                if sit_force[i] < sit_force[i - 1] and sit_force[i] < sit_force[i + 1]:
+                    if sit_force[i] < valley_threshold:
+                        if not peaks or (i - peaks[-1]) >= min_dist:
+                            peaks.append(i)
+        # 末尾检测
+        if peaks:
+            last_peak = peaks[-1]
+            tail = sit_force[last_peak:]
+            if len(tail) > min_dist:
+                had_sit_down = any(float(x) > sit_mean for x in tail)
+                if had_sit_down:
+                    tail_end = sit_force[-min(20, len(sit_force) // 10):]
+                    if float(np.mean(tail_end)) < valley_threshold:
+                        tail_idx = len(sit_force) - 1
+                        for i in range(len(sit_force) - 1, last_peak, -1):
+                            if sit_force[i] < valley_threshold:
+                                tail_idx = i
+                            else:
+                                break
+                        if (tail_idx - last_peak) >= min_dist:
+                            peaks.append(tail_idx)
+    elif len(stand_force) >= 3:
+        min_dist = max(75, len(stand_force) // 15)
+        if _has_scipy:
+            stand_std = float(np.std(stand_force))
+            prom = max(stand_std * 1.5, (float(np.max(stand_force)) - float(np.min(stand_force))) * 0.2)
+            _peaks, _ = _find_peaks(stand_force, distance=min_dist, prominence=prom)
+            peaks = _peaks.tolist()
+        else:
+            window = min(15, max(3, len(stand_force) // 30))
+            if window % 2 == 0:
+                window += 1
+            smoothed = np.convolve(stand_force, np.ones(window) / window, mode='same')
+            signal_range = float(np.max(smoothed) - np.min(smoothed))
+            min_prominence = signal_range * 0.2
+            for i in range(1, len(smoothed) - 1):
+                if smoothed[i] > smoothed[i - 1] and smoothed[i] > smoothed[i + 1]:
+                    left_min = float(np.min(smoothed[max(0, i - min_dist):i])) if i > 0 else smoothed[i]
+                    right_min = float(np.min(smoothed[i + 1:min(len(smoothed), i + min_dist + 1)])) if i < len(smoothed) - 1 else smoothed[i]
+                    prom_val = float(smoothed[i]) - max(left_min, right_min)
+                    if prom_val >= min_prominence:
+                        if not peaks or (i - peaks[-1]) >= min_dist:
+                            peaks.append(i)
+    return peaks
+
+
+# ============================================================
+# 热力图演变数据生成
+# ============================================================
+
+def _smooth_matrix(matrix, upscale=4, sigma=0.6):
+    """简单平滑矩阵（不依赖 scipy.ndimage.zoom，使用 numpy 重复采样）"""
+    mat = np.array(matrix, dtype=float)
+    if np.sum(mat) == 0:
+        return mat
+
+    # 简单上采样：每个像素重复 upscale 次
+    h, w = mat.shape
+    upsampled = np.repeat(np.repeat(mat, upscale, axis=0), upscale, axis=1)
+
+    # 简单高斯平滑（用均值滤波近似）
+    try:
+        from scipy.ndimage import gaussian_filter
+        smoothed = gaussian_filter(upsampled, sigma=sigma * upscale)
+    except ImportError:
+        # 简单 3x3 均值滤波
+        kernel_size = max(3, int(sigma * upscale * 2 + 1))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        pad = kernel_size // 2
+        padded = np.pad(upsampled, pad, mode='edge')
+        smoothed = np.zeros_like(upsampled)
+        for i in range(upsampled.shape[0]):
+            for j in range(upsampled.shape[1]):
+                smoothed[i, j] = padded[i:i + kernel_size, j:j + kernel_size].mean()
+
+    smoothed = np.clip(smoothed, 0, None)
+
+    # 降采样回合理大小（最大 64x64）
+    max_dim = 64
+    if smoothed.shape[0] > max_dim or smoothed.shape[1] > max_dim:
+        scale = max_dim / max(smoothed.shape)
+        new_h = max(1, int(smoothed.shape[0] * scale))
+        new_w = max(1, int(smoothed.shape[1] * scale))
+        # 简单降采样：等间隔取样
+        row_idx = np.linspace(0, smoothed.shape[0] - 1, new_h).astype(int)
+        col_idx = np.linspace(0, smoothed.shape[1] - 1, new_w).astype(int)
+        smoothed = smoothed[np.ix_(row_idx, col_idx)]
+
+    return smoothed
+
+
+def _get_foot_masks(stand_3d):
+    """
+    分离左右脚区域
+    脚垫 64x64，旋转后：左脚在上半部分(行0-31)，右脚在下半部分(行32-63)
+    """
+    avg_frame = np.mean(stand_3d, axis=0)
+    # 简单二值化
+    threshold = np.max(avg_frame) * 0.05
+    binary = (avg_frame > threshold).astype(np.uint8)
+
+    h, w = binary.shape
+    mid = h // 2
+
+    # 上半部分为左脚，下半部分为右脚
+    left_mask = np.zeros_like(binary)
+    right_mask = np.zeros_like(binary)
+    left_mask[:mid, :] = binary[:mid, :]
+    right_mask[mid:, :] = binary[mid:, :]
+
+    # 计算 bounding box [y1, y2, x1, x2]
+    def get_bbox(mask):
+        ys, xs = np.where(mask > 0)
+        if len(ys) == 0:
+            return None
+        return [int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1]
+
+    l_bbox = get_bbox(left_mask)
+    r_bbox = get_bbox(right_mask)
+
+    return left_mask, right_mask, l_bbox, r_bbox
+
+
+def _generate_stand_evolution(stand_3d, peaks):
+    """
+    生成站立压力演变热力图数据
+    从第一个峰值到第二个峰值之间取11个均匀采样点，
+    分别提取左右脚的矩阵数据
+    """
+    if len(peaks) < 2 or stand_3d.shape[0] < 2:
+        return []
+
+    left_mask, right_mask, l_bbox, r_bbox = _get_foot_masks(stand_3d)
+    if l_bbox is None or r_bbox is None:
+        return []
+
+    # 取第一个完整周期
+    start_idx = peaks[0]
+    end_idx = peaks[1]
+    cycle_len = end_idx - start_idx
+
+    if cycle_len < 5:
+        return []
+
+    result = []
+    num_samples = 11  # 0%, 10%, ..., 100%
+
+    for foot_label, mask, bbox in [(0, left_mask, l_bbox), (1, right_mask, r_bbox)]:
+        for col_idx in range(num_samples):
+            # 采样帧索引
+            frame_idx = start_idx + int(col_idx * cycle_len / (num_samples - 1))
+            frame_idx = min(frame_idx, stand_3d.shape[0] - 1)
+
+            frame = stand_3d[frame_idx] * mask
+            # 裁剪到 bbox 区域
+            cropped = frame[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+
+            if cropped.size == 0 or np.max(cropped) == 0:
+                # 返回空矩阵
+                cropped = np.zeros((4, 4))
+
+            # 平滑处理
+            smoothed = _smooth_matrix(cropped, upscale=3, sigma=0.5)
+
+            result.append({
+                'label': foot_label,
+                'sublabel': col_idx,
+                'matrix': np.round(smoothed, 1).tolist(),
+            })
+
+    return result
+
+
+def _generate_sit_evolution(sit_3d):
+    """
+    生成坐姿压力演变热力图数据
+    从开始到结束取11个均匀采样点
+    """
+    n_frames = sit_3d.shape[0]
+    if n_frames < 2:
+        return []
+
+    result = []
+    num_samples = 11
+
+    for col_idx in range(num_samples):
+        frame_idx = int(col_idx * (n_frames - 1) / (num_samples - 1))
+        frame = sit_3d[frame_idx]
+
+        if np.max(frame) == 0:
+            smoothed = np.zeros((4, 4))
+        else:
+            smoothed = _smooth_matrix(frame, upscale=2, sigma=0.4)
+
+        result.append({
+            'label': col_idx,
+            'matrix': np.round(smoothed, 1).tolist(),
+        })
+
+    return result
+
+
+# ============================================================
+# COP 轨迹数据生成
+# ============================================================
+
+def _compute_cop(frame):
+    """计算单帧的压力中心 (COP)"""
+    total = np.sum(frame)
+    if total == 0:
+        return None
+    rows, cols = frame.shape
+    y_coords = np.arange(rows).reshape(-1, 1)
+    x_coords = np.arange(cols).reshape(1, -1)
+    cop_y = float(np.sum(frame * y_coords) / total)
+    cop_x = float(np.sum(frame * x_coords) / total)
+    return [round(cop_x, 2), round(cop_y, 2)]
+
+
+def _generate_stand_cop(stand_3d, peaks):
+    """
+    生成站立COP轨迹数据
+    对每个周期计算 COP 轨迹，分别输出左右脚
+    """
+    result = {'left': None, 'right': None}
+
+    if len(peaks) < 2 or stand_3d.shape[0] < 2:
+        return result
+
+    left_mask, right_mask, l_bbox, r_bbox = _get_foot_masks(stand_3d)
+
+    for foot_name, mask, bbox in [("left", left_mask, l_bbox), ("right", right_mask, r_bbox)]:
+        if bbox is None:
+            continue
+
+        # 背景矩阵：所有峰值帧的平均
+        peak_frames = stand_3d[peaks]
+        avg_peak = np.mean(peak_frames, axis=0)
+        bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+
+        if np.max(bg) == 0:
+            continue
+
+        # 平滑背景
+        bg_smooth = _smooth_matrix(bg, upscale=3, sigma=0.5)
+
+        # 计算各周期的 COP 轨迹
+        trajectories = []
+        for i in range(len(peaks) - 1):
+            start_idx = peaks[i]
+            end_idx = min(peaks[i + 1], stand_3d.shape[0])
+            pts = []
+            for fi in range(start_idx, end_idx):
+                cropped = (stand_3d[fi] * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+                cop = _compute_cop(cropped)
+                if cop is not None:
+                    # 缩放到平滑后矩阵的坐标系
+                    scale_x = bg_smooth.shape[1] / max(1, (bbox[3] - bbox[2]))
+                    scale_y = bg_smooth.shape[0] / max(1, (bbox[1] - bbox[0]))
+                    pts.append([round(cop[0] * scale_x, 2), round(cop[1] * scale_y, 2)])
+            if len(pts) > 1:
+                trajectories.append(pts)
+
+        if trajectories:
+            result[foot_name] = {
+                'bg_matrix': np.round(bg_smooth, 1).tolist(),
+                'trajectories': trajectories,
+                'bbox': [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
+            }
+
+    return result
+
+
+def _generate_sit_cop(sit_3d, peaks, sit_force):
+    """
+    生成坐姿COP轨迹数据
+    """
+    n_frames = sit_3d.shape[0]
+    if n_frames < 2 or len(peaks) < 2:
+        return None
+
+    # 背景矩阵：所有帧的平均
+    avg_frame = np.mean(sit_3d, axis=0)
+    if np.max(avg_frame) == 0:
+        return None
+
+    bg_smooth = _smooth_matrix(avg_frame, upscale=2, sigma=0.4)
+
+    # 计算各周期的 COP 轨迹
+    trajectories = []
+    for i in range(len(peaks) - 1):
+        start_idx = peaks[i]
+        end_idx = min(peaks[i + 1], n_frames)
+        pts = []
+        for fi in range(start_idx, end_idx):
+            cop = _compute_cop(sit_3d[fi])
+            if cop is not None:
+                # 缩放到平滑后矩阵的坐标系
+                scale_x = bg_smooth.shape[1] / 32.0
+                scale_y = bg_smooth.shape[0] / 32.0
+                pts.append([round(cop[0] * scale_x, 2), round(cop[1] * scale_y, 2)])
+        if len(pts) > 1:
+            trajectories.append(pts)
+
+    if not trajectories:
+        return None
+
+    return {
+        'bg_matrix': np.round(bg_smooth, 1).tolist(),
+        'trajectories': trajectories,
+    }
+
+
+# ============================================================
+# CSV 转换工具
+# ============================================================
+
 def _array_to_pressure_csv(data_array, fps=None):
     """
     将压力数组转换为CSV文本格式（内部适配函数）
-
-    Args:
-        data_array: [N, X] 压力数据（X=4096或1024）
-        fps: 采样率（用于生成时间戳），默认None则按帧间隔生成
-
-    Returns:
-        str: CSV文本内容（包含 data 和 time 列）
     """
     from datetime import datetime, timedelta
 
     lines = ['time,data']
     base_time = datetime(2024, 1, 1)
-    dt = 1.0 / fps if fps else 0.08  # 默认12.5Hz
+    dt = 1.0 / fps if fps else 0.08
 
     for i, row in enumerate(data_array):
         if hasattr(row, 'tolist'):
@@ -318,23 +554,9 @@ def _array_to_pressure_csv(data_array, fps=None):
 # 入参均为 generate_sit_stand_report 的返回值 result
 # ============================================================
 
-
 def get_duration_stats(result):
     """
     【渲染区域】基本信息卡片 - 周期统计
-    返回: {
-        'total_duration': float,  # 总测试时长(秒)
-        'num_cycles': int,        # 起坐周期数
-        'avg_duration': float,    # 平均周期时长(秒)
-        'cycle_durations': [float],  # 每个周期的时长
-        'min_cycle_duration': float, # 最快周期
-        'max_cycle_duration': float, # 最慢周期
-        'stand_frames': int,      # 站立帧数
-        'sit_frames': int,        # 坐姿帧数
-        'stand_peaks': int,       # 检测到的峰值数
-        'username': str,
-        'test_date': str,         # 测试日期
-    }
     """
     ds = result.get('duration_stats', {})
     return {
@@ -353,52 +575,24 @@ def get_duration_stats(result):
 
 
 def get_symmetry(result):
-    """
-    【渲染区域】左右脚对称性分析
-    返回: {
-        'left_right_ratio': float,  # 对称性比值 (%)
-        'left_total': float,        # 左脚总力
-        'right_total': float,       # 右脚总力
-    }
-    """
+    """【渲染区域】左右脚对称性分析"""
     return result.get('symmetry', {})
 
 
 def get_pressure_stats(result):
-    """
-    【渲染区域】压力统计
-    返回: {
-        'sit_max': float,              # 坐垫最大总压力
-        'sit_avg': float,              # 坐垫平均总压力
-        'foot_max': float,             # 脚垫最大总压力
-        'foot_avg': float,             # 脚垫平均总压力
-        'max_sit_change_rate': float,  # 坐垫最大变化率
-        'max_foot_change_rate': float, # 脚垫最大变化率
-    }
-    """
+    """【渲染区域】压力统计"""
     return result.get('pressure_stats', {})
 
 
 def get_cycle_peak_forces(result):
-    """
-    【渲染区域】各周期峰值力
-    返回: [float]  # 每个峰值的力值
-    """
+    """【渲染区域】各周期峰值力"""
     return result.get('cycle_peak_forces', [])
 
 
 def get_stand_evolution_data(result):
     """
     【渲染区域】站立演变热力图 (2×11 网格)
-    用于展示一个起坐周期中站立阶段的压力变化过程
-
-    返回: list[dict]
-        每个元素: {
-            'label': int,     # 行索引 (0=左脚, 1=右脚)
-            'sublabel': int,  # 列索引 (0~10, 对应0%~100%周期进度)
-            'matrix': [[float]],  # 平滑后的压力矩阵数据
-        }
-    前端渲染: 2行×11列的 Canvas 热力图网格
+    返回: list[dict] - 每个元素: {label, sublabel, matrix}
     """
     return result.get('heatmap_data', {}).get('stand_evolution', [])
 
@@ -406,14 +600,7 @@ def get_stand_evolution_data(result):
 def get_sit_evolution_data(result):
     """
     【渲染区域】坐姿演变热力图 (1×11 网格)
-    用于展示坐姿阶段的压力变化过程
-
-    返回: list[dict]
-        每个元素: {
-            'label': int,     # 列索引 (0~10)
-            'matrix': [[float]],  # 平滑后的压力矩阵数据
-        }
-    前端渲染: 1行×11列的 Canvas 热力图网格
+    返回: list[dict] - 每个元素: {label, matrix}
     """
     return result.get('heatmap_data', {}).get('sit_evolution', [])
 
@@ -421,17 +608,7 @@ def get_sit_evolution_data(result):
 def get_stand_cop_data(result):
     """
     【渲染区域】站立COP轨迹图 (左脚 + 右脚)
-    COP运动轨迹坐标 + 背景热力图矩阵，不同周期用不同颜色
-
-    返回: {
-        'stand_left': {
-            'bg_matrix': [[float]],      # 背景热力图矩阵
-            'trajectories': [[[x,y]]],   # 各周期COP轨迹坐标
-            'bbox': [int],               # 裁剪区域 [y1,y2,x1,x2]
-        } | None,
-        'stand_right': { ... } | None,
-    }
-    前端渲染: Canvas 绘制背景热力图 + COP轨迹线
+    返回: {left: {bg_matrix, trajectories, bbox}, right: ...}
     """
     cop = result.get('cop_data', {})
     return {
@@ -443,13 +620,7 @@ def get_stand_cop_data(result):
 def get_sit_cop_data(result):
     """
     【渲染区域】坐姿COP轨迹图
-    坐垫上的压力中心运动轨迹坐标 + 背景热力图矩阵
-
-    返回: {
-        'bg_matrix': [[float]],      # 背景热力图矩阵
-        'trajectories': [[[x,y]]],   # 各周期COP轨迹坐标
-    } | None
-    前端渲染: Canvas 绘制背景热力图 + COP轨迹线
+    返回: {bg_matrix, trajectories} | None
     """
     return result.get('cop_data', {}).get('sit')
 
@@ -457,27 +628,12 @@ def get_sit_cop_data(result):
 def get_force_curve_data(result):
     """
     【渲染区域】力-时间曲线 (ECharts 折线图)
-    站立和坐姿的总压力随时间变化曲线
-
-    返回: {
-        'stand_times': [float],      # 站立时间轴(秒)
-        'stand_force': [float],      # 站立总压力值
-        'sit_times': [float],        # 坐姿时间轴(秒)
-        'sit_force': [float],        # 坐姿总压力值
-        'stand_peaks_idx': [int],    # 峰值帧索引(用于标记周期分界)
-    }
-    前端渲染: ECharts line chart, 建议前端做 LTTB 降采样
     """
     return result.get('force_curves', {})
 
 
 def get_stand_force_echarts_option(result):
-    """
-    【渲染区域】站立力-时间曲线 - 直接生成 ECharts option
-    方便前端直接传入 ECharts 实例
-
-    返回: dict (ECharts option 配置)
-    """
+    """【渲染区域】站立力-时间曲线 - 直接生成 ECharts option"""
     fc = result.get('force_curves', {})
     times = fc.get('stand_times', [])
     force = fc.get('stand_force', [])
@@ -508,11 +664,7 @@ def get_stand_force_echarts_option(result):
 
 
 def get_sit_force_echarts_option(result):
-    """
-    【渲染区域】坐姿力-时间曲线 - 直接生成 ECharts option
-
-    返回: dict (ECharts option 配置)
-    """
+    """【渲染区域】坐姿力-时间曲线 - 直接生成 ECharts option"""
     fc = result.get('force_curves', {})
     times = fc.get('sit_times', [])
     force = fc.get('sit_force', [])
@@ -538,19 +690,8 @@ def get_sit_force_echarts_option(result):
 if __name__ == '__main__':
     from pprint import pprint
 
-    # ========== 在这里粘贴你的测试数据 ==========
-    # stand_data: [N, 4096] 脚垫压力数据
-    stand_data = [
-        # [v0, v1, ..., v4095],  # 第1帧
-        # [v0, v1, ..., v4095],  # 第2帧
-    ]
-
-    # sit_data: [M, 1024] 坐垫压力数据
-    sit_data = [
-        # [v0, v1, ..., v1023],  # 第1帧
-        # [v0, v1, ..., v1023],  # 第2帧
-    ]
-    # ============================================
+    stand_data = []
+    sit_data = []
 
     assert len(stand_data) > 0, "请先粘贴 stand_data 数据"
     assert len(sit_data) > 0, "请先粘贴 sit_data 数据"
@@ -561,13 +702,7 @@ if __name__ == '__main__':
     print(f"输入 sit_data: [{len(sit_data)}, {len(sit_data[0])}]")
     print("=" * 60)
 
-    try:
-        result = generate_sit_stand_report(stand_data, sit_data, username="测试用户")
-    except ValueError as e:
-        print(f"\n[错误] {e}")
-        print("提示: 起坐算法需要足够多帧且包含周期性压力变化（起立-坐下循环）的数据")
-        print("      少量帧或无明显周期的数据会导致峰值检测失败")
-        sys.exit(1)
+    result = generate_sit_stand_report(stand_data, sit_data, username="测试用户")
 
     print("\n--- get_duration_stats ---")
     pprint(get_duration_stats(result))
@@ -581,23 +716,23 @@ if __name__ == '__main__':
     print("\n--- get_cycle_peak_forces ---")
     pprint(get_cycle_peak_forces(result))
 
-    print("\n--- get_stand_evolution_images ---")
-    imgs = get_stand_evolution_images(result)
-    print(f"  图片数量: {len(imgs)}")
-    if imgs:
-        print(f"  第一张: label={imgs[0].get('label')}, image长度={len(imgs[0].get('image', ''))}")
+    print("\n--- get_stand_evolution_data ---")
+    evo = get_stand_evolution_data(result)
+    print(f"  数据数量: {len(evo)}")
+    if evo:
+        print(f"  第一个: label={evo[0].get('label')}, matrix shape={len(evo[0].get('matrix', []))}x{len(evo[0].get('matrix', [[]])[0])}")
 
-    print("\n--- get_sit_evolution_images ---")
-    sit_imgs = get_sit_evolution_images(result)
-    print(f"  图片数量: {len(sit_imgs)}")
+    print("\n--- get_sit_evolution_data ---")
+    sit_evo = get_sit_evolution_data(result)
+    print(f"  数据数量: {len(sit_evo)}")
 
-    print("\n--- get_stand_cop_images ---")
-    cop_imgs = get_stand_cop_images(result)
-    print(f"  left: {'有数据' if cop_imgs.get('left') else 'None'}")
-    print(f"  right: {'有数据' if cop_imgs.get('right') else 'None'}")
+    print("\n--- get_stand_cop_data ---")
+    cop = get_stand_cop_data(result)
+    print(f"  left: {'有数据' if cop.get('left') else 'None'}")
+    print(f"  right: {'有数据' if cop.get('right') else 'None'}")
 
-    print("\n--- get_sit_cop_image ---")
-    sit_cop = get_sit_cop_image(result)
+    print("\n--- get_sit_cop_data ---")
+    sit_cop = get_sit_cop_data(result)
     print(f"  sit_cop: {'有数据' if sit_cop else 'None'}")
 
     print("\n--- get_force_curve_data ---")
