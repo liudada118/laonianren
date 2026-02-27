@@ -182,6 +182,7 @@ export default function StandingAssessment() {
   // 后端模式
   const [isBackendMode, setIsBackendMode] = useState(false);
   const backendCleanupRef = useRef(null);
+  const assessmentIdRef = useRef(null);
 
   // 模拟定时器
   const simIntervalRef = useRef(null);
@@ -445,17 +446,35 @@ export default function StandingAssessment() {
   }, [filterThreshold]);
 
   // ─── 开始采集 ───
-  const startRecording = () => {
+  const startRecording = async () => {
     setPhase('recording');
     setTimer(0);
     setCopTrajectory([]);
     collectedFrames.current = [];
     isRecordingRef.current = true;
+
+    // 后端模式：开始数据采集
+    if (isBackendMode) {
+      const aid = `standing_${Date.now()}`;
+      assessmentIdRef.current = aid;
+      try {
+        await backendBridge.startCol({
+          assessmentId: aid,
+          sampleType: '4',
+          name: patientInfo?.name || 'test',
+          date: new Date().toISOString().split('T')[0],
+        });
+        console.log('[Standing] startCol 成功, assessmentId:', aid);
+      } catch (e) {
+        console.warn('[Standing] startCol 失败:', e.message);
+      }
+    }
+
     timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
   };
 
   // ─── 结束采集 ───
-  const stopRecording = () => {
+  const stopRecording = async () => {
     clearInterval(timerRef.current);
     timerRef.current = null;
     isRecordingRef.current = false;
@@ -467,13 +486,24 @@ export default function StandingAssessment() {
       simIntervalRef.current = null;
     }
 
-    // 生成报告：优先调用后端JS算法接口，失败时回退到前端算法
+    // 后端模式：结束数据采集
+    if (isBackendMode) {
+      try {
+        await backendBridge.endCol();
+        console.log('[Standing] endCol 成功');
+      } catch (e) {
+        console.warn('[Standing] endCol 失败:', e.message);
+      }
+    }
+
+    // 生成报告：优先调用后端Python算法接口，失败时回退到前端算法
     const generateReport = async () => {
       try {
         if (isBackendMode) {
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 500));
           const resp = await backendBridge.getStandingReport({
             timestamp: Date.now(),
+            assessmentId: assessmentIdRef.current,
           });
           if (resp?.code === 0 && resp?.data?.render_data) {
             console.log('[StandingAssessment] 后端报告数据已获取:', resp.data);

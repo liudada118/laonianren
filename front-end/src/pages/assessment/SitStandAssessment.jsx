@@ -387,6 +387,7 @@ export default function SitStandAssessment() {
 
   const [seatPressureHistory, setSeatPressureHistory] = useState([]);
   const [footpadPressureHistory, setFootpadPressureHistory] = useState([]);
+  const assessmentIdRef = useRef(null);
 
   const [sceneConfig, setSceneConfig] = useState({
     showHeatmap: true,
@@ -437,24 +438,54 @@ export default function SitStandAssessment() {
   const handleConnectFootpad = useCallback(async () => { await connectFootpad(); }, [connectFootpad]);
   const handleSimulate = useCallback(async () => { await startSimulation(); }, [startSimulation]);
 
-  const start = () => {
+  const start = async () => {
     if (!deviceConnected) return;
     setPhase('recording'); setTimer(0);
     setSeatPressureHistory([]); setFootpadPressureHistory([]);
+
+    // 后端模式：开始数据采集
+    if (isBackendMode) {
+      const aid = `sitstand_${Date.now()}`;
+      assessmentIdRef.current = aid;
+      try {
+        await backendBridge.startCol({
+          assessmentId: aid,
+          sampleType: '3',
+          name: patientInfo?.name || 'test',
+          date: new Date().toISOString().split('T')[0],
+        });
+        console.log('[SitStand] startCol 成功, assessmentId:', aid);
+      } catch (e) {
+        console.warn('[SitStand] startCol 失败:', e.message);
+      }
+    }
+
     timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
   };
 
-  const stop = () => {
+  const stop = async () => {
     clearInterval(timerRef.current);
     stopSimulation(); // 停止模拟数据更新
     setPhase('processing');
-    // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
+
+    // 后端模式：结束数据采集
+    if (isBackendMode) {
+      try {
+        await backendBridge.endCol();
+        console.log('[SitStand] endCol 成功');
+      } catch (e) {
+        console.warn('[SitStand] endCol 失败:', e.message);
+      }
+    }
+
+    // 生成报告数据：优先调用后端Python算法接口，失败时回退到前端算法
     const generateReport = async () => {
       try {
         if (isBackendMode) {
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 500));
           const resp = await backendBridge.getSitStandReport({
             timestamp: Date.now(),
+            assessmentId: assessmentIdRef.current,
             collectName: patientInfo?.name || 'test',
           });
           if (resp?.code === 0 && resp?.data?.render_data) {
