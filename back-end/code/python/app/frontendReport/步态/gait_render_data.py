@@ -1,344 +1,378 @@
 """
-步态评估前端渲染数据封装
-输入四路足底序列（每帧 4096），输出前端报告页可直接渲染的结构化结果。
+行走步态评估 - 渲染数据封装层
+=================================
+源算法: generate_gait_report.py → analyze_gait_from_content()
+
+入口:
+    generate_gait_report(board_data, board_times)
+    - board_data: list[list[list]], 4块传感器板数据, 每块 [N, 4096]
+    - board_times: list[list[str]], 4块传感器板时间戳, 每块 [N]
+
+返回 result dict 后，通过下面的 get_* 方法提取各渲染区域数据。
 """
 
-import math
-import numpy as np
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from generate_gait_report import analyze_gait_from_content
 
 
-def _to_flat_4096(frame):
-    if frame is None:
-        return np.zeros(4096, dtype=np.float32)
+# ============================================================
+# 总入口
+# ============================================================
 
-    arr = np.asarray(frame, dtype=np.float32).reshape(-1)
-    if arr.size >= 4096:
-        return arr[:4096]
-
-    out = np.zeros(4096, dtype=np.float32)
-    out[:arr.size] = arr
-    return out
-
-
-def _safe_mean(values):
-    if not values:
-        return 0.0
-    return float(np.mean(values))
-
-
-def _safe_std(values):
-    if not values:
-        return 0.0
-    return float(np.std(values))
-
-
-def _step_count(force_series, threshold):
-    if not force_series:
-        return 0
-    count = 0
-    prev = force_series[0] > threshold
-    for v in force_series[1:]:
-        cur = v > threshold
-        if cur and not prev:
-            count += 1
-        prev = cur
-    return max(1, count)
-
-
-def _cop_xy(mat_64):
-    total = float(np.sum(mat_64))
-    if total <= 0:
-        return 31.5, 31.5
-
-    yy, xx = np.indices(mat_64.shape)
-    cx = float(np.sum(xx * mat_64) / total)
-    cy = float(np.sum(yy * mat_64) / total)
-    return cx, cy
-
-
-def _downsample_indices(n, max_points=200):
-    if n <= max_points:
-        return np.arange(n, dtype=np.int32)
-    return np.linspace(0, n - 1, num=max_points, dtype=np.int32)
-
-
-def _build_partition_features(partition_matrix, fps, force_scale):
-    n_frames = partition_matrix.shape[0]
-    out = []
-    for z in range(partition_matrix.shape[1]):
-        vals = partition_matrix[:, z]
-        peak = float(np.max(vals)) * force_scale
-        impulse = float(np.sum(vals)) * force_scale / max(1.0, fps)
-        load_rate = peak / max(1e-6, n_frames / max(1.0, fps))
-        peak_idx = int(np.argmax(vals)) if vals.size else 0
-        peak_time_pct = (peak_idx / max(1, n_frames - 1)) * 100.0
-        contact_pct = float(np.count_nonzero(vals > np.max(vals) * 0.1)) / max(1, n_frames) * 100.0
-        out.append({
-            '压力峰值': round(peak, 2),
-            '冲量': round(impulse, 2),
-            '负载率': round(load_rate, 2),
-            '峰值时间_百分比': round(peak_time_pct, 2),
-            '接触时间_百分比': round(contact_pct, 2),
-        })
-    return out
-
-
-def _build_partition_curves(partition_matrix, indices, force_scale):
-    curves = []
-    for z in range(partition_matrix.shape[1]):
-        vals = partition_matrix[:, z]
-        data = [round(float(vals[i]) * force_scale, 2) for i in indices]
-        curves.append({'name': f'S{z + 1}', 'data': data})
-    return curves
-
-
-def _phase_metrics(step_time_s, base_cop_speed, base_area, base_force, phases):
-    out = {}
-    for name, ratio in phases:
-        out[name] = {
-            '时长ms': round(step_time_s * 1000.0 * ratio, 2),
-            '平均COP速度(mm/s)': round(base_cop_speed * (0.8 + ratio), 2),
-            '最大面积cm2': round(base_area * (0.9 + ratio * 0.6), 2),
-            '最大负荷': round(base_force * (0.9 + ratio * 0.6), 2),
-        }
-    return out
-
-
-def generate_gait_report(d1, d2, d3, d4, t1=None, t2=None, t3=None, t4=None, body_weight_kg=80):
+def generate_gait_report(board_data, board_times):
     """
-    Args:
-        d1,d2,d3,d4: list[list]，每帧 4096
-        t1..t4: 可选时间序列
-        body_weight_kg: 体重（用于速度/负荷尺度修正）
-    Returns:
-        dict: 与前端 GaitReportContent 兼容的数据结构
+    行走步态评估总入口
+
+    参数:
+        board_data: list[list], 4块传感器板数据
+            board_data[0] ~ board_data[3] 分别对应 1.csv ~ 4.csv 的 data 列
+            每块: list[str], 每个元素是 "[v0, v1, ..., v4095]" 格式的字符串
+        board_times: list[list[str]], 4块传感器板时间戳
+            board_times[0] ~ board_times[3] 分别对应 1.csv ~ 4.csv 的 time 列
+            每块: list[str], 每个元素是 "2025/12/06 17:07:33:840" 格式的时间字符串
+
+    返回: dict, 包含所有分析结果和 base64 图片
     """
-    n = min(len(d1 or []), len(d2 or []), len(d3 or []), len(d4 or []))
-    if n <= 0:
-        return {
-            'gaitParams': {},
-            'balance': {'left': {}, 'right': {}},
-            'timeSeries': {'left': {'time': []}, 'right': {'time': []}},
-            'partitionFeatures': {'left': [], 'right': []},
-            'fpaPerStep': {'left': [], 'right': []},
-            'partitionCurves': {'left': [], 'right': []},
-            'supportPhases': {'left': {}, 'right': {}},
-            'cyclePhases': {'left': {}, 'right': {}},
-            'images': {},
-        }
+    csv_contents = _arrays_to_gait_csvs(board_data, board_times)
+    return analyze_gait_from_content(csv_contents)
 
-    fps = 77.0
-    dt = 1.0 / fps
-    force_scale = 0.02
-    area_scale_cm2 = 0.49
 
-    left_force = []
-    right_force = []
-    left_area = []
-    right_area = []
-    left_forefoot = []
-    left_heel = []
-    right_forefoot = []
-    right_heel = []
-    left_cop = []
-    right_cop = []
-    left_frames = []
-    right_frames = []
+def _arrays_to_gait_csvs(board_data, board_times):
+    """将 4 块板的 data + time 列表组装成 4 个 CSV 字符串"""
+    csv_list = []
+    for data_list, time_list in zip(board_data, board_times):
+        lines = ['data,time']
+        for d, t in zip(data_list, time_list):
+            # d 已经是 "[v0,v1,...,v4095]" 格式的字符串
+            # 用引号包裹 data 列防止逗号干扰 CSV 解析
+            lines.append(f'"{d}",{t}')
+        csv_list.append('\n'.join(lines))
+    return csv_list
 
-    for i in range(n):
-        f1 = _to_flat_4096(d1[i])
-        f2 = _to_flat_4096(d2[i])
-        f3 = _to_flat_4096(d3[i])
-        f4 = _to_flat_4096(d4[i])
 
-        left_flat = f1 + f2
-        right_flat = f3 + f4
-        left_frames.append(left_flat)
-        right_frames.append(right_flat)
+# ============================================================
+# 渲染数据获取方法
+# ============================================================
 
-        lm = left_flat.reshape(64, 64)
-        rm = right_flat.reshape(64, 64)
+def get_gait_params(result):
+    """
+    【渲染区域】步态参数总览
 
-        lf_raw = float(np.sum(left_flat))
-        rf_raw = float(np.sum(right_flat))
-        la_raw = float(np.count_nonzero(left_flat > 0))
-        ra_raw = float(np.count_nonzero(right_flat > 0))
-
-        left_force.append(lf_raw * force_scale)
-        right_force.append(rf_raw * force_scale)
-        left_area.append(la_raw * area_scale_cm2)
-        right_area.append(ra_raw * area_scale_cm2)
-
-        left_forefoot.append(float(np.sum(lm[:32, :])) * force_scale)
-        left_heel.append(float(np.sum(lm[32:, :])) * force_scale)
-        right_forefoot.append(float(np.sum(rm[:32, :])) * force_scale)
-        right_heel.append(float(np.sum(rm[32:, :])) * force_scale)
-
-        left_cop.append(_cop_xy(lm))
-        right_cop.append(_cop_xy(rm))
-
-    threshold_left = max(5.0, _safe_mean(left_force) * 0.25)
-    threshold_right = max(5.0, _safe_mean(right_force) * 0.25)
-    left_steps = _step_count(left_force, threshold_left)
-    right_steps = _step_count(right_force, threshold_right)
-
-    duration_s = n * dt
-    left_step_time = duration_s / max(1, left_steps)
-    right_step_time = duration_s / max(1, right_steps)
-    cross_step_time = (left_step_time + right_step_time) / 2.0
-
-    cadence = (left_steps + right_steps) / 2.0 / max(1e-6, duration_s) * 60.0
-    symmetry = min(left_steps, right_steps) / max(1, max(left_steps, right_steps))
-
-    left_step_length = 58.0 + (symmetry - 0.8) * 20.0
-    right_step_length = 58.0 + (symmetry - 0.8) * 20.0
-    cross_step_length = (left_step_length + right_step_length) / 2.0
-    step_width = 10.0 + (1.0 - symmetry) * 6.0
-    walking_speed = (cross_step_length / 100.0) * (cadence / 120.0)
-    walking_speed *= max(0.85, min(1.15, 80.0 / max(40.0, float(body_weight_kg or 80.0))))
-
-    left_fpa_center = 6.0 + (_safe_mean(left_forefoot) - _safe_mean(left_heel)) / max(30.0, _safe_mean(left_force) + 1.0)
-    right_fpa_center = 6.0 + (_safe_mean(right_forefoot) - _safe_mean(right_heel)) / max(30.0, _safe_mean(right_force) + 1.0)
-    left_fpa_series = [round(left_fpa_center + 1.5 * math.sin(i * 0.7), 2) for i in range(max(1, left_steps))]
-    right_fpa_series = [round(right_fpa_center + 1.5 * math.sin(i * 0.7 + 0.4), 2) for i in range(max(1, right_steps))]
-
-    left_pressure = [lf / max(0.1, la) for lf, la in zip(left_force, left_area)]
-    right_pressure = [rf / max(0.1, ra) for rf, ra in zip(right_force, right_area)]
-
-    left_cop_speed = [0.0]
-    right_cop_speed = [0.0]
-    for i in range(1, n):
-        ldx = (left_cop[i][0] - left_cop[i - 1][0]) * 7.0
-        ldy = (left_cop[i][1] - left_cop[i - 1][1]) * 7.0
-        rdx = (right_cop[i][0] - right_cop[i - 1][0]) * 7.0
-        rdy = (right_cop[i][1] - right_cop[i - 1][1]) * 7.0
-        left_cop_speed.append(math.sqrt(ldx * ldx + ldy * ldy) / dt)
-        right_cop_speed.append(math.sqrt(rdx * rdx + rdy * rdy) / dt)
-
-    left_partition = np.zeros((n, 8), dtype=np.float32)
-    right_partition = np.zeros((n, 8), dtype=np.float32)
-    for i in range(n):
-        lm = left_frames[i].reshape(64, 64)
-        rm = right_frames[i].reshape(64, 64)
-        for z in range(8):
-            rs = z * 8
-            re = rs + 8
-            left_partition[i, z] = float(np.sum(lm[rs:re, :]))
-            right_partition[i, z] = float(np.sum(rm[rs:re, :]))
-
-    sample_idx = _downsample_indices(n, max_points=200)
-
-    def _balance_obj(full, fore, heel):
-        return {
-            '整足平衡': {
-                '峰值': round(float(np.max(full)), 2),
-                '均值': round(_safe_mean(full), 2),
-                '标准差': round(_safe_std(full), 2),
-            },
-            '前足平衡': {
-                '峰值': round(float(np.max(fore)), 2),
-                '均值': round(_safe_mean(fore), 2),
-                '标准差': round(_safe_std(fore), 2),
-            },
-            '足跟平衡': {
-                '峰值': round(float(np.max(heel)), 2),
-                '均值': round(_safe_mean(heel), 2),
-                '标准差': round(_safe_std(heel), 2),
-            },
-        }
-
-    support_phase_defs = [
-        ('支撑前期', 0.10),
-        ('支撑初期', 0.30),
-        ('支撑中期', 0.40),
-        ('支撑末期', 0.20),
-    ]
-    cycle_phase_defs = [
-        ('双脚加载期', 0.18),
-        ('左脚单支撑期', 0.32),
-        ('双脚摆荡期', 0.18),
-        ('右脚单支撑期', 0.32),
-    ]
-
-    result = {
-        'gaitParams': {
-            'leftStepTime': round(left_step_time, 3),
-            'rightStepTime': round(right_step_time, 3),
-            'crossStepTime': round(cross_step_time, 3),
-            'leftStepLength': round(left_step_length, 2),
-            'rightStepLength': round(right_step_length, 2),
-            'crossStepLength': round(cross_step_length, 2),
-            'stepWidth': round(step_width, 2),
-            'walkingSpeed': round(walking_speed, 3),
-            'leftFPA': round(_safe_mean(left_fpa_series), 2),
-            'rightFPA': round(_safe_mean(right_fpa_series), 2),
-            'doubleContactTime': round(cross_step_time * 0.22, 3),
-        },
-        'balance': {
-            'left': _balance_obj(left_force, left_forefoot, left_heel),
-            'right': _balance_obj(right_force, right_forefoot, right_heel),
-        },
-        'timeSeries': {
-            'left': {
-                'time': [round(i * dt, 3) for i in sample_idx],
-                'area': [round(left_area[i], 3) for i in sample_idx],
-                'force': [round(left_force[i], 3) for i in sample_idx],
-                'copSpeed': [round(left_cop_speed[i], 3) for i in sample_idx],
-                'pressure': [round(left_pressure[i], 3) for i in sample_idx],
-            },
-            'right': {
-                'time': [round(i * dt, 3) for i in sample_idx],
-                'area': [round(right_area[i], 3) for i in sample_idx],
-                'force': [round(right_force[i], 3) for i in sample_idx],
-                'copSpeed': [round(right_cop_speed[i], 3) for i in sample_idx],
-                'pressure': [round(right_pressure[i], 3) for i in sample_idx],
-            },
-        },
-        'partitionFeatures': {
-            'left': _build_partition_features(left_partition, fps, force_scale),
-            'right': _build_partition_features(right_partition, fps, force_scale),
-        },
-        'fpaPerStep': {
-            'left': left_fpa_series,
-            'right': right_fpa_series,
-        },
-        'partitionCurves': {
-            'left': _build_partition_curves(left_partition, sample_idx, force_scale),
-            'right': _build_partition_curves(right_partition, sample_idx, force_scale),
-        },
-        'supportPhases': {
-            'left': _phase_metrics(
-                left_step_time,
-                _safe_mean(left_cop_speed),
-                _safe_mean(left_area),
-                _safe_mean(left_force),
-                support_phase_defs,
-            ),
-            'right': _phase_metrics(
-                right_step_time,
-                _safe_mean(right_cop_speed),
-                _safe_mean(right_area),
-                _safe_mean(right_force),
-                support_phase_defs,
-            ),
-        },
-        'cyclePhases': {
-            'left': _phase_metrics(
-                left_step_time,
-                _safe_mean(left_cop_speed),
-                _safe_mean(left_area),
-                _safe_mean(left_force),
-                cycle_phase_defs,
-            ),
-            'right': _phase_metrics(
-                right_step_time,
-                _safe_mean(right_cop_speed),
-                _safe_mean(right_area),
-                _safe_mean(right_force),
-                cycle_phase_defs,
-            ),
-        },
-        'images': {},
+    返回: {
+        'leftStepTime': str,       # 左脚步时(s)
+        'rightStepTime': str,      # 右脚步时(s)
+        'crossStepTime': str,      # 交叉步时(s)
+        'leftStepLength': str,     # 左脚步长(cm)
+        'rightStepLength': str,    # 右脚步长(cm)
+        'crossStepLength': str,    # 交叉步长(cm)
+        'stepWidth': str,          # 步宽(cm)
+        'walkingSpeed': str,       # 步速(m/s)
+        'leftFPA': str,            # 左脚足偏角(°)
+        'rightFPA': str,           # 右脚足偏角(°)
+        'doubleContactTime': str,  # 双支撑时间(s)
     }
-    return result
+    前端渲染: 参数卡片/表格
+    """
+    return result.get('gaitParams', {})
 
+
+def get_fpa_per_step(result):
+    """
+    【渲染区域】每步足偏角(FPA)
+
+    返回: {
+        'left': list[float],   # 每步左脚FPA
+        'right': list[float],  # 每步右脚FPA
+    }
+    前端渲染: 柱状图/折线图
+    """
+    return result.get('fpaPerStep', {'left': [], 'right': []})
+
+
+def get_balance(result):
+    """
+    【渲染区域】平衡分析
+
+    返回: {
+        'left': {
+            '整足平衡': {'峰值': float, '均值': float, '标准差': float},
+            '前足平衡': {...},
+            '足跟平衡': {...},
+        },
+        'right': { ... }
+    }
+    前端渲染: 表格
+    """
+    return result.get('balance', {'left': {}, 'right': {}})
+
+
+def get_time_series(result):
+    """
+    【渲染区域】时序曲线数据 (面积/力/COP速度/压力)
+
+    返回: {
+        'left': {
+            'time': list[float],
+            'area': list[float],
+            'force': list[float],
+            'copSpeed': list[float],
+            'pressure': list[float],
+        },
+        'right': { ... }
+    }
+    前端渲染: 4组折线图 (ECharts), 左右脚各一条线
+    """
+    return result.get('timeSeries', {'left': {}, 'right': {}})
+
+
+def get_partition_features(result):
+    """
+    【渲染区域】6分区特征 (S1-S6)
+
+    返回: {
+        'left': [
+            {'压力峰值': float, '冲量': float, '负载率': float,
+             '峰值时间_百分比': float, '接触时间_百分比': float},
+            ... # 共6个分区
+        ],
+        'right': [ ... ]
+    }
+    前端渲染: 表格/雷达图
+    """
+    return result.get('partitionFeatures', {'left': [], 'right': []})
+
+
+def get_partition_curves(result):
+    """
+    【渲染区域】6分区压力曲线
+
+    返回: {
+        'left': [{'data': list[float]}, ...],  # 6条曲线
+        'right': [{'data': list[float]}, ...],
+    }
+    前端渲染: 多线折线图 (ECharts)
+    """
+    return result.get('partitionCurves', {'left': [], 'right': []})
+
+
+def get_region_coords(result):
+    """
+    【渲染区域】6分区坐标 (S1-S6)
+
+    返回: {
+        'left': {'S1': [[x,y],...], 'S2': [...], ..., 'S6': [...]},
+        'right': { ... }
+    }
+    前端渲染: 足部分区散点图/Canvas绘制
+    """
+    return result.get('regionCoords', {'left': {}, 'right': {}})
+
+
+def get_support_phases(result):
+    """
+    【渲染区域】支撑相分析 (4个阶段)
+
+    返回: {
+        'left': {
+            '支撑前期': {'时长ms': float, '平均COP速度(mm/s)': float,
+                        '最大面积cm2': float, '最大负荷': float},
+            '支撑初期': {...},
+            '支撑中期': {...},
+            '支撑末期': {...},
+        },
+        'right': { ... }
+    }
+    前端渲染: 表格/时间轴
+    """
+    return result.get('supportPhases', {'left': {}, 'right': {}})
+
+
+def get_cycle_phases(result):
+    """
+    【渲染区域】步态周期分析 (4个阶段)
+
+    返回: {
+        'left': {
+            '双脚加载期': {'时长ms': float, '平均COP速度(mm/s)': float,
+                          '最大面积cm2': float, '最大负荷': float},
+            '左脚单支撑期': {...},
+            '双脚摇摆期': {...},
+            '右脚单支撑期': {...},
+        },
+        'right': { ... }
+    }
+    前端渲染: 表格/时间轴
+    """
+    return result.get('cyclePhases', {'left': {}, 'right': {}})
+
+
+def get_images(result):
+    """
+    【渲染区域】所有 base64 图片
+
+    返回: {
+        'pressureEvolution': str,      # 动态压力演变 (2×10网格热力图)
+        'gaitAverage': str,            # 步态平均 (左右脚平均压力+COP轨迹)
+        'footprintHeatmap': str,       # 足迹热力图 (所有步的叠加+FPA线)
+        'timeSeries': str,             # 时序曲线图 (4组折线)
+        'leftPressureRegions': str,    # 左脚分区热力图
+        'rightPressureRegions': str,   # 右脚分区热力图
+        'leftPartitionCurves': str,    # 左脚分区曲线图
+        'rightPartitionCurves': str,   # 右脚分区曲线图
+    }
+    前端渲染: <img src={base64}> 直接展示
+    """
+    return result.get('images', {})
+
+
+def get_pressure_evolution_image(result):
+    """【渲染区域】动态压力演变图 (2×10网格, 左右脚各10个时间点快照)"""
+    return result.get('images', {}).get('pressureEvolution')
+
+
+def get_gait_average_image(result):
+    """【渲染区域】步态平均图 (左右脚平均压力热力图+COP轨迹)"""
+    return result.get('images', {}).get('gaitAverage')
+
+
+def get_footprint_heatmap_image(result):
+    """【渲染区域】足迹热力图 (所有步叠加+FPA角度线)"""
+    return result.get('images', {}).get('footprintHeatmap')
+
+
+def get_time_series_image(result):
+    """【渲染区域】时序曲线图 (面积/力/COP速度/压力 4组)"""
+    return result.get('images', {}).get('timeSeries')
+
+
+def get_pressure_region_images(result):
+    """
+    【渲染区域】左右脚分区热力图
+
+    返回: {
+        'left': str (base64),
+        'right': str (base64),
+    }
+    """
+    imgs = result.get('images', {})
+    return {
+        'left': imgs.get('leftPressureRegions'),
+        'right': imgs.get('rightPressureRegions'),
+    }
+
+
+def get_partition_curve_images(result):
+    """
+    【渲染区域】左右脚分区曲线图
+
+    返回: {
+        'left': str (base64),
+        'right': str (base64),
+    }
+    """
+    imgs = result.get('images', {})
+    return {
+        'left': imgs.get('leftPartitionCurves'),
+        'right': imgs.get('rightPartitionCurves'),
+    }
+
+
+# ============================================================
+# 测试入口
+# ============================================================
+
+if __name__ == '__main__':
+    import sys
+    from pprint import pprint
+
+    # ========== 在这里粘贴你的测试数据 ==========
+    # board_data: 4块传感器板数据
+    # 每块是 list[str], 每个元素是 "[v0,v1,...,v4095]" 格式字符串
+    board_data = [
+        # board_data[0] (1.csv 的 data 列):
+        [
+            # "[1,2,3,...,4096]",  # 第1帧
+            # "[1,2,3,...,4096]",  # 第2帧
+        ],
+        # board_data[1] (2.csv 的 data 列):
+        [],
+        # board_data[2] (3.csv 的 data 列):
+        [],
+        # board_data[3] (4.csv 的 data 列):
+        [],
+    ]
+
+    # board_times: 4块传感器板时间戳
+    # 每块是 list[str], 格式 "2025/12/06 17:07:33:840"
+    board_times = [
+        [
+            # "2025/12/06 17:07:33:840",  # 第1帧
+            # "2025/12/06 17:07:33:853",  # 第2帧
+        ],
+        [],
+        [],
+        [],
+    ]
+    # ============================================
+
+    assert all(len(b) > 0 for b in board_data), "请先粘贴 4 块板的 board_data 数据"
+    assert all(len(t) > 0 for t in board_times), "请先粘贴 4 块板的 board_times 数据"
+
+    print("=" * 60)
+    print("行走步态评估 - 测试")
+    for i in range(4):
+        print(f"  板{i+1}: {len(board_data[i])} 帧")
+    print("=" * 60)
+
+    try:
+        result = generate_gait_report(board_data, board_times)
+    except Exception as e:
+        print(f"\n[错误] {e}")
+        print("提示: 步态算法需要足够多帧且包含完整行走周期的数据")
+        sys.exit(1)
+
+    print("\n--- get_gait_params ---")
+    pprint(get_gait_params(result))
+
+    print("\n--- get_fpa_per_step ---")
+    fpa = get_fpa_per_step(result)
+    print(f"  left steps: {len(fpa['left'])}, right steps: {len(fpa['right'])}")
+
+    print("\n--- get_balance ---")
+    pprint(get_balance(result))
+
+    print("\n--- get_time_series ---")
+    ts = get_time_series(result)
+    for side in ['left', 'right']:
+        s = ts.get(side, {})
+        print(f"  {side}: time={len(s.get('time', []))}, area={len(s.get('area', []))}")
+
+    print("\n--- get_partition_features ---")
+    pf = get_partition_features(result)
+    print(f"  left partitions: {len(pf['left'])}, right partitions: {len(pf['right'])}")
+
+    print("\n--- get_partition_curves ---")
+    pc = get_partition_curves(result)
+    for side in ['left', 'right']:
+        lengths = [len(c.get('data', [])) for c in pc.get(side, [])]
+        print(f"  {side}: {lengths}")
+
+    print("\n--- get_region_coords ---")
+    rc = get_region_coords(result)
+    for side in ['left', 'right']:
+        keys = list(rc.get(side, {}).keys())
+        print(f"  {side}: {keys}")
+
+    print("\n--- get_support_phases ---")
+    pprint(get_support_phases(result))
+
+    print("\n--- get_cycle_phases ---")
+    pprint(get_cycle_phases(result))
+
+    print("\n--- get_images ---")
+    imgs = get_images(result)
+    for k, v in imgs.items():
+        print(f"  {k}: {'有数据' if v else 'None'} ({len(v) if v else 0} chars)")
