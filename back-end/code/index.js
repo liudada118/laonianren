@@ -12,7 +12,7 @@ const isPackaged = app.isPackaged
 const devWebRoot = path.join(__dirname, 'client', 'dist')
 const prodWebRoot = path.join(__dirname, '..', 'build')
 const webRoot = isPackaged ? prodWebRoot : devWebRoot
-const defaultDevPort = process.env.VITE_DEV_PORT || '5555'
+const defaultDevPort = process.env.VITE_DEV_PORT || '5173'
 let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaultDevPort}`
 let viteProcess = null
 
@@ -48,7 +48,9 @@ async function waitForDevServer(url, timeoutMs = 20000) {
 function startViteDevServer() {
   if (viteProcess) return Promise.resolve()
 
-  const clientDir = path.join(__dirname, 'client')
+  // 前端项目在 front-end 目录
+  const clientDir = path.join(__dirname, '..', '..', 'front-end')
+  console.log('[vite] frontend dir:', clientDir)
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const viteArgs = ['run', 'dev', '--', '--port', defaultDevPort]
   const viteBin = path.join(
