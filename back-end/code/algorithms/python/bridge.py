@@ -136,16 +136,40 @@ def _standing_report(params):
 # JSON 序列化辅助
 # ============================================================
 
+def _sanitize_value(v):
+    """将 float NaN / Infinity 替换为 JSON 安全值"""
+    import math
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return 0
+    return v
+
+
+def _sanitize_obj(obj):
+    """递归清理字典/列表中的 NaN/Infinity"""
+    if isinstance(obj, dict):
+        return {k: _sanitize_obj(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_obj(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [_sanitize_obj(v) for v in obj]
+    return _sanitize_value(obj)
+
+
 def _json_serializer(obj):
     """处理 numpy 等不可直接 JSON 序列化的类型"""
     try:
         import numpy as np
+        import math
         if isinstance(obj, (np.integer,)):
             return int(obj)
         if isinstance(obj, (np.floating,)):
-            return float(obj)
+            v = float(obj)
+            if math.isnan(v) or math.isinf(v):
+                return 0
+            return v
         if isinstance(obj, np.ndarray):
-            return obj.tolist()
+            return _sanitize_obj(obj.tolist())
         if isinstance(obj, (np.bool_,)):
             return bool(obj)
     except ImportError:
@@ -199,6 +223,9 @@ def main():
 
         # 调用对应算法
         result = FUNC_REGISTRY[func_name](func_params)
+
+        # 清理 NaN/Infinity 确保 JSON 合法
+        result = _sanitize_obj(result)
 
         # 输出结果
         _output_result(True, data=result)
