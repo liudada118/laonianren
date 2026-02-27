@@ -462,8 +462,8 @@ const DEFAULT_SEND_MS = 80
 const MIN_SEND_INTERVAL_MS = 5
 const HZ_CACHE_UPDATE_MS = 500
 const MODE_TYPE_MAP = {
-  1: ['HL'],
-  2: ['HR'],
+  1: ['HL', 'HR'],
+  2: ['HL', 'HR'],
   3: ['sit', 'foot1'],
   4: ['foot1'],
   5: ['foot1', 'foot2', 'foot3', 'foot4'],

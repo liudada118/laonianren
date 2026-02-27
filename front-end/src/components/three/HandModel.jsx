@@ -23,6 +23,8 @@ export function HandModel({
   // 用 ref 跟踪最新的 heatmapVersion，在 animate 循环中检查
   const heatmapVersionRef = useRef(0);
   const lastAppliedVersionRef = useRef(-1);
+  // 用 ref 跟踪 isLeftHand，确保模型加载完成后能读到最新值
+  const isLeftHandRef = useRef(isLeftHand);
 
   // 将纹理应用到模型的函数
   const applyTextureToModel = useCallback((group, texture) => {
@@ -50,6 +52,14 @@ export function HandModel({
     if (meshCount > 0) {
       console.log(`[HandModel] 纹理已应用到 ${meshCount} 个 mesh`);
     }
+  }, []);
+
+  // 应用左右手镜像 scale 的辅助函数
+  const applyHandScale = useCallback((model, baseScale, leftHand) => {
+    if (!model) return;
+    const sign = leftHand ? 1 : -1;
+    model.scale.set(baseScale * sign, baseScale, baseScale);
+    console.log(`[HandModel] scale 已更新: isLeftHand=${leftHand}, scaleX=${baseScale * sign}`);
   }, []);
 
   useEffect(() => {
@@ -130,9 +140,11 @@ export function HandModel({
         const maxDim = Math.max(size.x, size.y, size.z) || 1;
         const scale = 2.6 / maxDim;
         baseScaleRef.current = scale;
-        model.scale.setScalar(scale);
         modelRef.current = model;
         modelLoadedRef.current = true;
+
+        // 模型加载完成后，根据当前 isLeftHand ref 设置正确的 scale（包括镜像）
+        applyHandScale(model, scale, isLeftHandRef.current);
 
         handGroup.add(model);
 
@@ -233,7 +245,7 @@ export function HandModel({
         });
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update pressure indicator
   useEffect(() => {
@@ -283,12 +295,15 @@ export function HandModel({
 
   // Mirror model for left/right hand
   useEffect(() => {
+    // 始终更新 ref，确保模型加载回调能读到最新值
+    isLeftHandRef.current = isLeftHand;
+
+    // 如果模型已加载，立即应用 scale
     const model = modelRef.current;
     if (!model) return;
     const baseScale = baseScaleRef.current || 1;
-    const sign = isLeftHand ? 1 : -1;
-    model.scale.set(baseScale * sign, baseScale, baseScale);
-  }, [isLeftHand]);
+    applyHandScale(model, baseScale, isLeftHand);
+  }, [isLeftHand, applyHandScale]);
 
   return (
     <div
