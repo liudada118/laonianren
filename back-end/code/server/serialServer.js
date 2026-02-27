@@ -3170,7 +3170,7 @@ async function connectPort() {
               }
 
             } else if (dataItem.type === 'foot1' || dataItem.type === 'foot2' || dataItem.type === 'foot3' || dataItem.type === 'foot4') {
-              dataItem.arr = flipFoot64x64Horizontal(pointArr)
+              dataItem.arr = pointArr
             } else {
               dataItem.arr = pointArr
             }
