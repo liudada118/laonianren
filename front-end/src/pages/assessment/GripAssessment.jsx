@@ -493,7 +493,7 @@ export default function GripAssessment() {
   }, [addSimLog]);
 
   /* ─── 开始采集 ─── */
-  const startRecording = () => {
+  const startRecording = async () => {
     const isLeft = phase === 'left-idle';
     setPhase(isLeft ? 'left-recording' : 'right-recording');
     setTimer(0);
@@ -559,30 +559,32 @@ export default function GripAssessment() {
         rightRawFramesRef.current = [];
         setRightData([]);
       }
-      // 切换到单手模式：左手=11(仅HL)，右手=12(仅HR)
+      // 先切换到单手模式，等待完成后再开始采集
       const handMode = isLeft ? 11 : 12;
-      backendBridge.setActiveMode(handMode).then(() => {
+      try {
+        await backendBridge.setActiveMode(handMode);
         addSimLog(`已切换到${isLeft ? '左手' : '右手'}模式 (mode=${handMode})`, 'info');
-      }).catch(e => {
+      } catch (e) {
         addSimLog(`切换模式失败: ${e.message}`, 'error');
-      });
+      }
       const aid = `grip_${isLeft ? 'L' : 'R'}_${Date.now()}`;
       if (isLeft) {
         leftAssessmentIdRef.current = aid;
       } else {
         rightAssessmentIdRef.current = aid;
       }
-      backendBridge.startCol({
-        name: patientInfo?.name || 'test',
-        assessmentId: aid,
-        sampleType: '1',
-        date: new Date().toISOString(),
-        colName: isLeft ? '左手握力' : '右手握力',
-      }).then(() => {
+      try {
+        await backendBridge.startCol({
+          name: patientInfo?.name || 'test',
+          assessmentId: aid,
+          sampleType: '1',
+          date: new Date().toISOString(),
+          colName: isLeft ? '左手握力' : '右手握力',
+        });
         addSimLog(`后端采集已启动 (assessmentId=${aid})`, 'info');
-      }).catch(e => {
+      } catch (e) {
         addSimLog(`后端采集启动失败: ${e.message}`, 'error');
-      });
+      }
       timerRef.current = setInterval(() => {
         setTimer(p => p + 1);
       }, 100);
@@ -594,24 +596,26 @@ export default function GripAssessment() {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     clearInterval(timerRef.current);
     timerRef.current = null;
     isRecordingRef.current = false;
 
-    // 后端模式：调用后端API结束采集
+    // 后端模式：先结束采集，再恢复双手模式
     if (isBackendMode) {
-      backendBridge.endCol().then(() => {
+      try {
+        await backendBridge.endCol();
         addSimLog('后端采集已结束', 'info');
-      }).catch(e => {
+      } catch (e) {
         addSimLog(`后端采集结束失败: ${e.message}`, 'error');
-      });
+      }
       // 采集结束后恢复到双手模式，以便检测另一只手的连接状态
-      backendBridge.setActiveMode(1).then(() => {
+      try {
+        await backendBridge.setActiveMode(1);
         addSimLog('已恢复双手模式 (mode=1)', 'info');
-      }).catch(e => {
+      } catch (e) {
         console.error('[GripAssessment] 恢复双手模式失败:', e);
-      });
+      }
     }
 
     if (phase === 'left-recording') {
