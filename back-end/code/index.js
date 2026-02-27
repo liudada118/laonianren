@@ -60,10 +60,10 @@ function startViteDevServer() {
     process.platform === 'win32' ? 'vite.cmd' : 'vite'
   )
   const attempts = [
-    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'] }),
-    () => spawn(`${npmCmd} ${viteArgs.join(' ')}`, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true }),
+    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true }),
+    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true, windowsVerbatimArguments: true }),
     () => fs.existsSync(viteBin)
-      ? spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'] })
+      ? spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
       : null
   ]
 
