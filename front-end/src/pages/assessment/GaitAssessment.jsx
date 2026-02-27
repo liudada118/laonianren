@@ -597,6 +597,7 @@ export default function GaitAssessment() {
   /* 后端模式 */
   const [isBackendMode, setIsBackendMode] = useState(false);
   const backendCleanupRef = useRef(null);
+  const assessmentIdRef = useRef(null);
 
   /* 模拟数据相关 */
   const simRef = useRef(null);
@@ -876,19 +877,47 @@ export default function GaitAssessment() {
     if (deviceStatus !== 'connected') return;
     setPhase('recording'); setTimer(0);
     timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
+
+    // 后端模式：调用startCol开始采集，确保数据存储到数据库
+    if (isBackendMode) {
+      const aid = `gait_${Date.now()}`;
+      assessmentIdRef.current = aid;
+      backendBridge.startCol({
+        name: patientInfo?.name || 'test',
+        assessmentId: aid,
+        sampleType: '5',
+        date: new Date().toISOString(),
+        colName: '步态评估',
+      }).then(() => {
+        console.log('[GaitAssessment] 后端采集已启动 (assessmentId=' + aid + ')');
+      }).catch(e => {
+        console.error('[GaitAssessment] 后端采集启动失败:', e);
+      });
+    }
   };
 
   const stop = () => {
     clearInterval(timerRef.current);
     if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
+
+    // 后端模式：调用endCol停止采集
+    if (isBackendMode) {
+      backendBridge.endCol().then(() => {
+        console.log('[GaitAssessment] 后端采集已结束');
+      }).catch(e => {
+        console.error('[GaitAssessment] 后端采集结束失败:', e);
+      });
+    }
+
     setPhase('processing');
-    // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
+    // 生成报告数据：优先调用后端 Python 步道算法，失败时回退到前端算法
     const generateReport = async () => {
       try {
         if (isBackendMode) {
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 2000)); // 等待数据存储完成
           const resp = await backendBridge.getGaitReport({
             timestamp: Date.now(),
+            assessmentId: assessmentIdRef.current,
             collectName: patientInfo?.name || 'test',
           });
           if (resp?.code === 0 && resp?.data?.render_data) {

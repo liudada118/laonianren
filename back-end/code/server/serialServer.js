@@ -1331,21 +1331,52 @@ app.post('/getFootPdf', async (req, res) => {
       t3: t3.length,
       t4: t4.length
     })
+
     let renderData = null
+
+    // 优先调用 Python 步道算法（包含完整的去噪、对齐、分析和图片生成）
     try {
-      renderData = await callAlgorithm('generate_gait_render_report', {
-        d1: data1,
-        d2: data2,
-        d3: data3,
-        d4: data4,
-        t1,
-        t2,
-        t3,
-        t4,
-        body_weight_kg: bodyWeightKg,
+      // 将 4 路数据转换为 Python 算法需要的格式
+      // board_data: 每块板的数据是 "[v0,v1,...,v4095]" 格式的字符串数组
+      const boardData = [
+        data1.map(arr => JSON.stringify(arr)),
+        data2.map(arr => JSON.stringify(arr)),
+        data3.map(arr => JSON.stringify(arr)),
+        data4.map(arr => JSON.stringify(arr)),
+      ]
+      const boardTimes = [t1, t2, t3, t4]
+
+      console.log('[getFootPdf] 尝试调用 Python 步道算法...')
+      renderData = await callAlgorithm('generate_gait_python_report', {
+        board_data: boardData,
+        board_times: boardTimes,
       })
+
+      if (renderData) {
+        console.log('[getFootPdf] Python 步道算法成功')
+      }
     } catch (e) {
-      console.error('generate_gait_render_report failed:', e)
+      console.error('[getFootPdf] Python 步道算法失败，回退到 JS 算法:', e.message)
+    }
+
+    // 回退到 JS 算法
+    if (!renderData) {
+      try {
+        console.log('[getFootPdf] 使用 JS 步态算法...')
+        renderData = await callAlgorithm('generate_gait_render_report', {
+          d1: data1,
+          d2: data2,
+          d3: data3,
+          d4: data4,
+          t1,
+          t2,
+          t3,
+          t4,
+          body_weight_kg: bodyWeightKg,
+        })
+      } catch (e) {
+        console.error('generate_gait_render_report (JS fallback) failed:', e)
+      }
     }
 
     res.json(

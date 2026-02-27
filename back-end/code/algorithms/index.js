@@ -19,6 +19,7 @@ const { generateGaitReport } = require('./gait/gaitReportAlgorithm');
 const { generateSitStandReport } = require('./sitstand/sitstandReportAlgorithm');
 const { generateStandingReport } = require('./standing/standingReportAlgorithm');
 const { processFrameRealtime, processPlaybackBatch } = require('./realtime/realtimeCOP');
+const { callGaitPython } = require('./gait_python/gaitPythonBridge');
 
 // 实时COP状态（替代Python端的全局状态）
 let lastFootPointArr = null;
@@ -36,6 +37,9 @@ async function callAlgorithm(funcName, params = {}) {
 
     case 'generate_gait_render_report':
       return _generateGaitRenderReport(params);
+
+    case 'generate_gait_python_report':
+      return _generateGaitPythonReport(params);
 
     case 'generate_sit_stand_render_report':
       return _generateSitStandRenderReport(params);
@@ -97,6 +101,20 @@ function _generateGaitRenderReport({ d1, d2, d3, d4, t1, t2, t3, t4, body_weight
     return result;
   } catch (e) {
     console.error('[JS Algorithm] generate_gait_render_report error:', e.message);
+    return null;
+  }
+}
+
+// ============================================================
+// 步道报告 (Python算法)
+// ============================================================
+
+async function _generateGaitPythonReport({ board_data, board_times }) {
+  try {
+    const result = await callGaitPython(board_data || [], board_times || []);
+    return result;
+  } catch (e) {
+    console.error('[JS Algorithm] generate_gait_python_report error:', e.message);
     return null;
   }
 }
