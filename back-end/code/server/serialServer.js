@@ -2960,31 +2960,17 @@ function colAndSendData() {
  */
 function sendData() {
   let obj
-  // 统一解析所有设备数据（parseData 对 HL/HR 会自动用 last+next 拼接，对其他设备用 data.arr）
-  // 先用不带 type 的方式解析，确保 HL/HR 正确拼接
-  const dataSnapshot = JSON.parse(JSON.stringify({ ...dataMap }))
-  const allObj = parseData(parserArr, dataSnapshot)
-  // 再用 highHZ 方式解析非手套设备（脚垫、坐垫等用 data.arr）
-  const highHZObj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
+  // 统一解析所有设备数据：
+  // parseData 对 HL/HR 会自动用 last+next 拼接（不受 type 参数影响）
+  // 对其他设备在 highHZ 模式下用 data.arr
+  obj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
 
-  // 合并：HL/HR 用 allObj 的结果，其他设备用 highHZObj 的结果
-  obj = {}
-  Object.keys(highHZObj).forEach(key => {
-    obj[key] = highHZObj[key]
-  })
-  // HL/HR 覆盖用 allObj 的结果（确保 last+next 正确拼接）
-  if (allObj.HL) obj.HL = allObj.HL
-  if (allObj.HR) obj.HR = allObj.HR
+  // 根据 activeSendTypes 过滤（按评估模式只推送对应设备数据）
+  obj = filterDataByTypes(obj, activeSendTypes)
 
-  // 根据 activeSendTypes 过滤（如果设置了的话）
-  if (activeSendTypes && Array.isArray(activeSendTypes) && activeSendTypes.length) {
-    obj = filterDataByTypes(obj, activeSendTypes)
-  }
-
-  // 同时推送 data 和 sitData 两种格式，前端 BackendBridge 都能处理
+  // 根据数据类型分离推送：手套用 data，其他用 sitData
   if (obj && Object.keys(obj).length) {
     const payload = {}
-    // 手套数据通过 data 字段推送
     const gloveData = {}
     const otherData = {}
     Object.keys(obj).forEach(key => {
@@ -2996,7 +2982,6 @@ function sendData() {
     })
     if (Object.keys(gloveData).length) payload.data = gloveData
     if (Object.keys(otherData).length) payload.sitData = otherData
-    // 如果没有分类的数据，用 sitData 兜底
     if (!payload.data && !payload.sitData) payload.sitData = obj
     socketSendData(server, JSON.stringify(payload))
   }

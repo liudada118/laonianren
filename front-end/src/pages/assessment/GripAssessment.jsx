@@ -252,9 +252,11 @@ export default function GripAssessment() {
   useEffect(() => {
     if (!isGlobalConnected || backendCleanupRef.current) return;
 
-    // 不再调用 setActiveMode，一键连接后所有数据链路始终可用
-    console.log('[GripAssessment] 全局已连接，直接监听手套数据');
-    addSimLog('全局已连接，直接监听手套数据', 'info');
+    // 设置手套模式，后端只推送 HL/HR 数据
+    backendBridge.setActiveMode(1).then(() => {
+      console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
+      addSimLog('已设置为手套模式 (mode=1)', 'info');
+    }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
@@ -435,8 +437,9 @@ export default function GripAssessment() {
       const connResult = await backendBridge.connPort();
       addSimLog(`后端连接结果: ${JSON.stringify(connResult)}`, 'info');
 
-      // 不再调用 setActiveMode，后端始终推送所有数据
-      addSimLog('后端已连接，监听手套数据', 'info');
+      // 设置手套模式 (mode=1)
+      await backendBridge.setActiveMode(1);
+      addSimLog('已设置为手套模式 (mode=1)', 'info');
 
       // 连接WebSocket
       backendBridge.connect();

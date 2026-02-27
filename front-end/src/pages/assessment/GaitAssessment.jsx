@@ -760,8 +760,10 @@ export default function GaitAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 不再调用 setActiveMode，一键连接后所有数据链路始终可用
-    console.log('[GaitAssessment] 全局已连接，直接监听脚垫数据');
+    // 设置脚垫模式，后端只推送 foot1-4 数据
+    backendBridge.setActiveMode(5).then(() => {
+      console.log('[GaitAssessment] 已设置后端模式 mode=5');
+    }).catch(e => console.error('[GaitAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
