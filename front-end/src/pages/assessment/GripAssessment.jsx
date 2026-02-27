@@ -559,6 +559,13 @@ export default function GripAssessment() {
         rightRawFramesRef.current = [];
         setRightData([]);
       }
+      // 切换到单手模式：左手=11(仅HL)，右手=12(仅HR)
+      const handMode = isLeft ? 11 : 12;
+      backendBridge.setActiveMode(handMode).then(() => {
+        addSimLog(`已切换到${isLeft ? '左手' : '右手'}模式 (mode=${handMode})`, 'info');
+      }).catch(e => {
+        addSimLog(`切换模式失败: ${e.message}`, 'error');
+      });
       const aid = `grip_${isLeft ? 'L' : 'R'}_${Date.now()}`;
       if (isLeft) {
         leftAssessmentIdRef.current = aid;
@@ -598,6 +605,12 @@ export default function GripAssessment() {
         addSimLog('后端采集已结束', 'info');
       }).catch(e => {
         addSimLog(`后端采集结束失败: ${e.message}`, 'error');
+      });
+      // 采集结束后恢复到双手模式，以便检测另一只手的连接状态
+      backendBridge.setActiveMode(1).then(() => {
+        addSimLog('已恢复双手模式 (mode=1)', 'info');
+      }).catch(e => {
+        console.error('[GripAssessment] 恢复双手模式失败:', e);
       });
     }
 

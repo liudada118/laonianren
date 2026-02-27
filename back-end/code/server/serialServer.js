@@ -463,7 +463,9 @@ const DEFAULT_SEND_MS = 80
 const MIN_SEND_INTERVAL_MS = 5
 const HZ_CACHE_UPDATE_MS = 500
 const MODE_TYPE_MAP = {
-  1: ['HL', 'HR'],
+  1: ['HL', 'HR'],      // 握力评估页面进入时：推送双手数据（用于显示连接状态）
+  11: ['HL'],            // 握力评估-左手采集：只推送左手数据
+  12: ['HR'],            // 握力评估-右手采集：只推送右手数据
   2: ['HL', 'HR'],
   3: ['sit', 'foot1'],
   4: ['foot1'],
@@ -640,8 +642,10 @@ function applyActiveMode(mode) {
   const modeNum = parseInt(mode, 10)
   const types = MODE_TYPE_MAP[modeNum]
   if (!types) return null
-  setActiveSendTypes(types, String(modeNum))
-  return { activeTypes: types, sampleType: String(modeNum) }
+  // mode 11/12 是握力评估的左/右手子模式，sampleType 仍用 '1'
+  const sampleType = (modeNum === 11 || modeNum === 12) ? '1' : String(modeNum)
+  setActiveSendTypes(types, sampleType)
+  return { activeTypes: types, sampleType }
 }
 
 const BAUD_CANDIDATES = [921600, 1000000, 3000000]
