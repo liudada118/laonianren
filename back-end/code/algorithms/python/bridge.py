@@ -31,6 +31,15 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_REPORT_DIR = os.path.normpath(
     os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app', 'frontendReport')
 )
+# python/app 目录: 包含 heatmap_renderer.py 等共享模块
+PYTHON_APP_DIR = os.path.normpath(
+    os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app')
+)
+# 将共享模块目录加入 sys.path（确保 heatmap_renderer 等可被 import）
+if PYTHON_APP_DIR not in sys.path:
+    sys.path.insert(0, PYTHON_APP_DIR)
+if FRONTEND_REPORT_DIR not in sys.path:
+    sys.path.insert(0, FRONTEND_REPORT_DIR)
 
 # 尝试设置 matplotlib 后端（不在顶层 import，避免启动失败）
 try:
@@ -165,6 +174,8 @@ def main():
         print(f"[bridge.py] Python {sys.version}", file=sys.stderr)
         print(f"[bridge.py] FRONTEND_REPORT_DIR: {FRONTEND_REPORT_DIR}", file=sys.stderr)
         print(f"[bridge.py] FRONTEND_REPORT_DIR exists: {os.path.isdir(FRONTEND_REPORT_DIR)}", file=sys.stderr)
+        print(f"[bridge.py] PYTHON_APP_DIR: {PYTHON_APP_DIR}", file=sys.stderr)
+        print(f"[bridge.py] PYTHON_APP_DIR exists: {os.path.isdir(PYTHON_APP_DIR)}", file=sys.stderr)
 
         # 从 stdin 读取 JSON 输入
         raw_input = sys.stdin.read()
