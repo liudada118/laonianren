@@ -12,6 +12,24 @@ const ttStyle = {
   extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;',
 };
 
+/* ─── Jet Colormap (0~1 → [r,g,b]) ─── */
+function jetColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  let r, g, b;
+  if (t < 0.125) {
+    r = 0; g = 0; b = 0.5 + t * 4;
+  } else if (t < 0.375) {
+    r = 0; g = (t - 0.125) * 4; b = 1;
+  } else if (t < 0.625) {
+    r = (t - 0.375) * 4; g = 1; b = 1 - (t - 0.375) * 4;
+  } else if (t < 0.875) {
+    r = 1; g = 1 - (t - 0.625) * 4; b = 0;
+  } else {
+    r = 1 - (t - 0.875) * 4; g = 0; b = 0;
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
 /* ─── EChart 封装 ─── */
 function EChart({ option, height = 280 }) {
   const ref = useRef(null);
@@ -28,8 +46,226 @@ function EChart({ option, height = 280 }) {
   return <div ref={ref} style={{ width: '100%', height }} />;
 }
 
-/* ─── COP 轨迹 Canvas 渲染组件 ─── */
-function COPTrajectoryCanvas({ imageData, title, height = 360 }) {
+/* ─── Canvas 热力图组件 - 从矩阵数据渲染 ─── */
+function HeatmapCanvas({ matrix, width = 80, height = 80 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !matrix || !matrix.length) return;
+
+    const rows = matrix.length;
+    const cols = matrix[0].length;
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#0A0E17';
+    ctx.fillRect(0, 0, width, height);
+
+    // 找到全局最大值用于归一化
+    let maxVal = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (matrix[r][c] > maxVal) maxVal = matrix[r][c];
+      }
+    }
+    if (maxVal === 0) return;
+
+    const cellW = width / cols;
+    const cellH = height / rows;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const val = matrix[r][c] / maxVal;
+        if (val > 0.01) {
+          const [cr, cg, cb] = jetColor(val);
+          ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+          ctx.fillRect(c * cellW, r * cellH, cellW + 0.5, cellH + 0.5);
+        }
+      }
+    }
+  }, [matrix, width, height]);
+
+  if (!matrix || !matrix.length) {
+    return (
+      <div style={{ width, height, background: '#0A0E17', borderRadius: 4 }}
+        className="flex items-center justify-center">
+        <span className="text-[8px]" style={{ color: '#555' }}>无数据</span>
+      </div>
+    );
+  }
+
+  return <canvas ref={canvasRef} style={{ borderRadius: 4, display: 'block' }} />;
+}
+
+/* ─── Canvas COP 轨迹渲染组件 - 从坐标数据渲染 ─── */
+function COPTrajectoryCanvas({ copData, title, height = 360 }) {
+  const containerRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  // 周期颜色
+  const cycleColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container || !copData) return;
+
+    const bgMatrix = copData.bg_matrix;
+    const trajectories = copData.trajectories || [];
+    const bbox = copData.bbox; // [y1, y2, x1, x2]
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = container.getBoundingClientRect();
+    const cw = rect.width;
+    const ch = height;
+
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = `${cw}px`;
+    canvas.style.height = `${ch}px`;
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.fillStyle = '#0A0E17';
+    ctx.fillRect(0, 0, cw, ch);
+
+    // 1. 绘制背景热力图
+    if (bgMatrix && bgMatrix.length > 0) {
+      const rows = bgMatrix.length;
+      const cols = bgMatrix[0].length;
+      let maxVal = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (bgMatrix[r][c] > maxVal) maxVal = bgMatrix[r][c];
+        }
+      }
+
+      if (maxVal > 0) {
+        // 保持宽高比
+        const matAspect = cols / rows;
+        const canvasAspect = cw / ch;
+        let drawW, drawH, drawX, drawY;
+        if (matAspect > canvasAspect) {
+          drawW = cw * 0.85;
+          drawH = drawW / matAspect;
+        } else {
+          drawH = ch * 0.85;
+          drawW = drawH * matAspect;
+        }
+        drawX = (cw - drawW) / 2;
+        drawY = (ch - drawH) / 2;
+
+        const cellW = drawW / cols;
+        const cellH = drawH / rows;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const val = bgMatrix[r][c] / maxVal;
+            if (val > 0.01) {
+              const [cr, cg, cb] = jetColor(val);
+              ctx.fillStyle = `rgba(${cr},${cg},${cb},0.5)`;
+              ctx.fillRect(drawX + c * cellW, drawY + r * cellH, cellW + 0.5, cellH + 0.5);
+            }
+          }
+        }
+
+        // 2. 绘制 COP 轨迹
+        if (trajectories.length > 0) {
+          const matRows = bgMatrix.length;
+          const matCols = bgMatrix[0].length;
+
+          trajectories.forEach((traj, idx) => {
+            if (!traj || traj.length < 2) return;
+            const color = cycleColors[idx % cycleColors.length];
+
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+
+            let started = false;
+            traj.forEach(([x, y]) => {
+              // COP 坐标是相对于矩阵的行列索引
+              const px = drawX + (x / matCols) * drawW;
+              const py = drawY + (y / matRows) * drawH;
+              if (!started) {
+                ctx.moveTo(px, py);
+                started = true;
+              } else {
+                ctx.lineTo(px, py);
+              }
+            });
+            ctx.stroke();
+
+            // 起点标记
+            if (traj.length > 0) {
+              const [sx, sy] = traj[0];
+              const spx = drawX + (sx / matCols) * drawW;
+              const spy = drawY + (sy / matRows) * drawH;
+              ctx.beginPath();
+              ctx.arc(spx, spy, 4, 0, Math.PI * 2);
+              ctx.fillStyle = color;
+              ctx.fill();
+              ctx.strokeStyle = '#fff';
+              ctx.lineWidth = 1;
+              ctx.stroke();
+            }
+          });
+
+          // 图例
+          if (trajectories.length > 1) {
+            const legendX = 10;
+            let legendY = ch - 10 - trajectories.length * 16;
+            ctx.font = '10px sans-serif';
+            trajectories.forEach((_, idx) => {
+              const color = cycleColors[idx % cycleColors.length];
+              ctx.fillStyle = color;
+              ctx.fillRect(legendX, legendY, 12, 10);
+              ctx.fillStyle = '#ccc';
+              ctx.fillText(`周期${idx + 1}`, legendX + 16, legendY + 9);
+              legendY += 16;
+            });
+          }
+        }
+      }
+    }
+  }, [copData, height]);
+
+  return (
+    <div ref={containerRef} className="w-full">
+      {title && (
+        <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>
+          {title}
+        </div>
+      )}
+      {copData ? (
+        <canvas
+          ref={canvasRef}
+          className="w-full rounded-lg"
+          style={{ height, background: '#0A0E17' }}
+        />
+      ) : (
+        <div className="flex items-center justify-center rounded-lg"
+          style={{ height, background: '#0A0E17' }}>
+          <span className="text-sm" style={{ color: '#555' }}>暂无数据</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── 兼容旧格式的 base64 图片渲染 ─── */
+function Base64ImageCanvas({ imageData, title, height = 360 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -59,14 +295,12 @@ function COPTrajectoryCanvas({ imageData, title, height = 360 }) {
         if (imgAspect > canvasAspect) {
           drawW = rect.width * 0.9;
           drawH = drawW / imgAspect;
-          drawX = (rect.width - drawW) / 2;
-          drawY = (height - drawH) / 2;
         } else {
           drawH = height * 0.9;
           drawW = drawH * imgAspect;
-          drawX = (rect.width - drawW) / 2;
-          drawY = (height - drawH) / 2;
         }
+        drawX = (rect.width - drawW) / 2;
+        drawY = (height - drawH) / 2;
         ctx.drawImage(img, drawX, drawY, drawW, drawH);
       };
       img.src = imageData;
@@ -396,18 +630,27 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     </div>
   );
 
-  // ===== 数据解析 - 兼容后端API和前端生成两种格式 =====
-  const images = d.images || {};
+  // ===== 数据解析 - 兼容新格式(heatmap_data/cop_data)和旧格式(images) =====
+  const heatmapData = d.heatmap_data || {};
+  const copData = d.cop_data || {};
+  const images = d.images || {}; // 旧格式兼容
   const forceCurves = d.force_curves || {};
 
-  // 热力图和COP图
-  const standEvolution = images.stand_evolution || [];
-  const sitEvolution = images.sit_evolution || [];
-  const standCopLeft = images.stand_cop_left || null;
-  const standCopRight = images.stand_cop_right || null;
+  // 新格式：矩阵数据
+  const standEvolutionData = heatmapData.stand_evolution || [];
+  const sitEvolutionData = heatmapData.sit_evolution || [];
+  const standCopLeftData = copData.stand_left || null;
+  const standCopRightData = copData.stand_right || null;
+  const sitCopData = copData.sit || null;
+
+  // 旧格式兼容：base64图片
+  const standEvolutionImages = images.stand_evolution || [];
+  const sitEvolutionImages = images.sit_evolution || [];
+  const standCopLeftImage = images.stand_cop_left || null;
+  const standCopRightImage = images.stand_cop_right || null;
   const sitCopImage = images.sit_cop || null;
 
-  // 力-时间曲线数据 - 兼容两种格式
+  // 力-时间曲线数据
   const standTimes = forceCurves.stand_times || d.footpad_force_curve?.times || [];
   const standForce = forceCurves.stand_force || d.footpad_force_curve?.values || [];
   const sitTimes = forceCurves.sit_times || d.seat_force_curve?.times || [];
@@ -428,14 +671,12 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
   // 压力统计
   const pressureStats = d.pressure_stats || {};
-  const seatStats = d.seat_stats || {};
-  const footpadStats = d.footpad_stats || {};
 
   // 各周期峰值力
   const cyclePeakForces = d.cycle_peak_forces || [];
 
-  // 旧格式兼容
-  const hasOldFormat = !d.images && d.stand_evolution;
+  // 旧格式兼容（JSON文件路径格式）
+  const hasOldFileFormat = !d.heatmap_data && !d.images && d.stand_evolution;
   const BASE = '/sitstand_report_data/';
 
   // 演变标签
@@ -448,6 +689,13 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     : totalDur <= 15 ? { text: '正常', color: C.cyan }
     : totalDur <= 20 ? { text: '偏慢', color: C.amber }
     : { text: '异常', color: C.red };
+
+  // 判断热力图数据是否有效（新格式矩阵数据）
+  const hasStandEvoMatrix = standEvolutionData.length > 0 && standEvolutionData[0]?.matrix;
+  const hasSitEvoMatrix = sitEvolutionData.length > 0 && sitEvolutionData[0]?.matrix;
+  // 判断旧格式 base64 图片
+  const hasStandEvoImage = standEvolutionImages.length > 0 && standEvolutionImages[0]?.image;
+  const hasSitEvoImage = sitEvolutionImages.length > 0 && sitEvolutionImages[0]?.image;
 
   return (
     <div className="flex h-full">
@@ -495,7 +743,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
             <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.cyan} />
             <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.purple} />
           </div>
-          {/* 帧数信息 */}
           <div className="grid grid-cols-3 gap-4 mt-3">
             <div className="zeiss-card-inner p-3 text-center">
               <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{d.stand_frames || '--'}</div>
@@ -539,18 +786,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
                 <MetricCard label="周期数" value={`${durationStats.num_cycles || '--'}`} color={C.green} />
               </div>
-              {d.cycles && d.cycles.length > 0 && (
-                <div className="mt-3">
-                  <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>检测到的周期区间</div>
-                  <div className="flex flex-wrap gap-2">
-                    {d.cycles.map((c, i) => (
-                      <span key={i} className="text-[10px] px-2 py-1 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>
-                        周期{i + 1}: 帧{c.start}~{c.end}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -608,7 +843,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
             </div>
           ) : (
             <div className="zeiss-card p-6 flex items-center justify-center" style={{ minHeight: 120 }}>
-              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无对称性数据（需后端算法支持）</span>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无对称性数据</span>
             </div>
           )}
         </section>
@@ -621,7 +856,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               站立过程中左右脚足底压力分布随时间的变化（0%~100%）
             </p>
 
-            {standEvolution.length > 0 && standEvolution[0]?.image ? (
+            {/* 优先级1: 新格式矩阵数据 → Canvas 热力图渲染 */}
+            {hasStandEvoMatrix ? (
               <>
                 <div className="flex gap-1 mb-1 pl-12">
                   {evoLabels.map((label, i) => (
@@ -632,7 +868,43 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <div className="flex items-center gap-1 mb-1">
                   <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.blue }}>左脚</div>
                   <div className="flex gap-1 flex-1">
-                    {standEvolution
+                    {standEvolutionData
+                      .filter(h => h.label === 0)
+                      .sort((a, b) => a.sublabel - b.sublabel)
+                      .map((h, i) => (
+                        <div key={i} className="flex-1">
+                          <HeatmapCanvas matrix={h.matrix} width={80} height={80} />
+                        </div>
+                      ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.green }}>右脚</div>
+                  <div className="flex gap-1 flex-1">
+                    {standEvolutionData
+                      .filter(h => h.label === 1)
+                      .sort((a, b) => a.sublabel - b.sublabel)
+                      .map((h, i) => (
+                        <div key={i} className="flex-1">
+                          <HeatmapCanvas matrix={h.matrix} width={80} height={80} />
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </>
+            ) : hasStandEvoImage ? (
+              /* 优先级2: 旧格式 base64 图片 */
+              <>
+                <div className="flex gap-1 mb-1 pl-12">
+                  {evoLabels.map((label, i) => (
+                    <div key={i} className="flex-1 text-center text-[10px] font-medium"
+                      style={{ color: 'var(--text-tertiary)' }}>{label}</div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1 mb-1">
+                  <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.blue }}>左脚</div>
+                  <div className="flex gap-1 flex-1">
+                    {standEvolutionImages
                       .filter(h => h.label === 0)
                       .sort((a, b) => a.sublabel - b.sublabel)
                       .map((h, i) => (
@@ -646,7 +918,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <div className="flex items-center gap-1">
                   <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.green }}>右脚</div>
                   <div className="flex gap-1 flex-1">
-                    {standEvolution
+                    {standEvolutionImages
                       .filter(h => h.label === 1)
                       .sort((a, b) => a.sublabel - b.sublabel)
                       .map((h, i) => (
@@ -658,7 +930,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                   </div>
                 </div>
               </>
-            ) : hasOldFormat && d.stand_evolution?.heatmaps ? (
+            ) : hasOldFileFormat && d.stand_evolution?.heatmaps ? (
+              /* 优先级3: 最旧的JSON文件路径格式 */
               <>
                 <div className="flex gap-1 mb-1 pl-12">
                   {(d.stand_evolution?.labels || evoLabels).map((label, i) => (
@@ -674,7 +947,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                       .sort((a, b) => a.col - b.col)
                       .map((h, i) => (
                         <div key={i} className="flex-1">
-                          <img src={`${BASE}${h.file}`} alt={`左脚 ${d.stand_evolution.labels[h.col]}`}
+                          <img src={`${BASE}${h.file}`} alt={`左脚`}
                             className="w-full rounded" style={{ background: '#f8f9fa' }} />
                         </div>
                       ))}
@@ -688,7 +961,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                       .sort((a, b) => a.col - b.col)
                       .map((h, i) => (
                         <div key={i} className="flex-1">
-                          <img src={`${BASE}${h.file}`} alt={`右脚 ${d.stand_evolution.labels[h.col]}`}
+                          <img src={`${BASE}${h.file}`} alt={`右脚`}
                             className="w-full rounded" style={{ background: '#f8f9fa' }} />
                         </div>
                       ))}
@@ -707,11 +980,16 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
         <section id="sit-stand-cop">
           <div className="zeiss-section-title">站立COP轨迹</div>
           <div className="grid grid-cols-2 gap-4">
-            {standCopLeft ? (
+            {/* 左脚 COP */}
+            {standCopLeftData ? (
               <div className="zeiss-card p-4">
-                <COPTrajectoryCanvas imageData={standCopLeft} title="左脚 COP 轨迹" height={360} />
+                <COPTrajectoryCanvas copData={standCopLeftData} title="左脚 COP 轨迹" height={360} />
               </div>
-            ) : hasOldFormat && d.stand_cop?.left_image ? (
+            ) : standCopLeftImage ? (
+              <div className="zeiss-card p-4">
+                <Base64ImageCanvas imageData={standCopLeftImage} title="左脚 COP 轨迹" height={360} />
+              </div>
+            ) : hasOldFileFormat && d.stand_cop?.left_image ? (
               <div className="zeiss-card p-4 text-center">
                 <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>左脚 COP 轨迹</div>
                 <img src={`${BASE}${d.stand_cop.left_image}`} alt="左脚COP"
@@ -723,11 +1001,16 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               </div>
             )}
 
-            {standCopRight ? (
+            {/* 右脚 COP */}
+            {standCopRightData ? (
               <div className="zeiss-card p-4">
-                <COPTrajectoryCanvas imageData={standCopRight} title="右脚 COP 轨迹" height={360} />
+                <COPTrajectoryCanvas copData={standCopRightData} title="右脚 COP 轨迹" height={360} />
               </div>
-            ) : hasOldFormat && d.stand_cop?.right_image ? (
+            ) : standCopRightImage ? (
+              <div className="zeiss-card p-4">
+                <Base64ImageCanvas imageData={standCopRightImage} title="右脚 COP 轨迹" height={360} />
+              </div>
+            ) : hasOldFileFormat && d.stand_cop?.right_image ? (
               <div className="zeiss-card p-4 text-center">
                 <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>右脚 COP 轨迹</div>
                 <img src={`${BASE}${d.stand_cop.right_image}`} alt="右脚COP"
@@ -749,7 +1032,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               坐姿过程中坐垫压力分布随时间的变化（Start~End）
             </p>
 
-            {sitEvolution.length > 0 && sitEvolution[0]?.image ? (
+            {/* 优先级1: 新格式矩阵数据 */}
+            {hasSitEvoMatrix ? (
               <>
                 <div className="flex gap-1 mb-1">
                   {sitEvoLabels.map((label, i) => (
@@ -758,7 +1042,26 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                   ))}
                 </div>
                 <div className="flex gap-1">
-                  {sitEvolution
+                  {sitEvolutionData
+                    .sort((a, b) => a.label - b.label)
+                    .map((h, i) => (
+                      <div key={i} className="flex-1">
+                        <HeatmapCanvas matrix={h.matrix} width={80} height={80} />
+                      </div>
+                    ))}
+                </div>
+              </>
+            ) : hasSitEvoImage ? (
+              /* 优先级2: 旧格式 base64 图片 */
+              <>
+                <div className="flex gap-1 mb-1">
+                  {sitEvoLabels.map((label, i) => (
+                    <div key={i} className="flex-1 text-center text-[10px] font-medium"
+                      style={{ color: 'var(--text-tertiary)' }}>{label}</div>
+                  ))}
+                </div>
+                <div className="flex gap-1">
+                  {sitEvolutionImages
                     .sort((a, b) => a.label - b.label)
                     .map((h, i) => (
                       <div key={i} className="flex-1">
@@ -768,7 +1071,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                     ))}
                 </div>
               </>
-            ) : hasOldFormat && d.sit_evolution?.heatmaps ? (
+            ) : hasOldFileFormat && d.sit_evolution?.heatmaps ? (
+              /* 优先级3: JSON文件路径格式 */
               <>
                 <div className="flex gap-1 mb-1">
                   {(d.sit_evolution?.labels || sitEvoLabels).map((label, i) => (
@@ -781,7 +1085,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                     .sort((a, b) => a.col - b.col)
                     .map((h, i) => (
                       <div key={i} className="flex-1">
-                        <img src={`${BASE}${h.file}`} alt={`坐姿 ${d.sit_evolution.labels[h.col]}`}
+                        <img src={`${BASE}${h.file}`} alt={`坐姿`}
                           className="w-full rounded" style={{ background: '#f8f9fa' }} />
                       </div>
                     ))}
@@ -798,11 +1102,15 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
         {/* ══════ 8. 坐姿COP轨迹 ══════ */}
         <section id="sit-sit-cop">
           <div className="zeiss-section-title">坐姿COP轨迹</div>
-          {sitCopImage ? (
+          {sitCopData ? (
             <div className="zeiss-card p-4">
-              <COPTrajectoryCanvas imageData={sitCopImage} title="坐姿 COP 轨迹" height={400} />
+              <COPTrajectoryCanvas copData={sitCopData} title="坐姿 COP 轨迹" height={400} />
             </div>
-          ) : hasOldFormat && d.sit_cop?.image ? (
+          ) : sitCopImage ? (
+            <div className="zeiss-card p-4">
+              <Base64ImageCanvas imageData={sitCopImage} title="坐姿 COP 轨迹" height={400} />
+            </div>
+          ) : hasOldFileFormat && d.sit_cop?.image ? (
             <div className="zeiss-card p-4 text-center">
               <img src={`${BASE}${d.sit_cop.image}`} alt="坐姿COP"
                 className="mx-auto rounded-lg" style={{ maxHeight: 400, objectFit: 'contain' }} />
@@ -828,14 +1136,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                   color={C.green}
                   height={280}
                 />
-              ) : hasOldFormat && d.force_curves?.stand_curve ? (
-                <>
-                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>
-                    站立脚垫 - 总力随时间变化
-                  </div>
-                  <img src={`${BASE}${d.force_curves.stand_curve}`} alt="站立力曲线"
-                    className="w-full rounded-lg" />
-                </>
               ) : (
                 <div className="flex items-center justify-center py-8">
                   <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无站立力曲线数据</span>
@@ -852,14 +1152,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                   color={C.blue}
                   height={280}
                 />
-              ) : hasOldFormat && d.force_curves?.sit_curve ? (
-                <>
-                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>
-                    坐姿坐垫 - 总力随时间变化
-                  </div>
-                  <img src={`${BASE}${d.force_curves.sit_curve}`} alt="坐姿力曲线"
-                    className="w-full rounded-lg" />
-                </>
               ) : (
                 <div className="flex items-center justify-center py-8">
                   <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无坐姿力曲线数据</span>
@@ -872,19 +1164,17 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
         {/* ══════ 10. 压力统计 ══════ */}
         <section id="sit-pressure-stats">
           <div className="zeiss-section-title">压力统计</div>
-          {(pressureStats.foot_max || pressureStats.sit_max || seatStats.max_pressure || footpadStats.max_pressure) ? (
+          {(pressureStats.foot_max || pressureStats.sit_max) ? (
             <div className="grid grid-cols-2 gap-4">
               {/* 脚垫压力 */}
               <div className="zeiss-card p-4">
                 <div className="text-xs font-medium mb-3" style={{ color: 'var(--text-tertiary)' }}>脚垫压力统计</div>
                 <div className="space-y-2">
                   {[
-                    { l: '最大总压力', v: pressureStats.foot_max || footpadStats.max_pressure || '--', c: C.red },
-                    { l: '平均总压力', v: pressureStats.foot_avg || footpadStats.mean_pressure || '--', c: C.blue },
+                    { l: '最大总压力', v: pressureStats.foot_max, c: C.red },
+                    { l: '平均总压力', v: pressureStats.foot_avg, c: C.blue },
                     ...(pressureStats.max_foot_change_rate ? [{ l: '最大变化率', v: pressureStats.max_foot_change_rate, c: C.amber }] : []),
-                    ...(footpadStats.total_pressure ? [{ l: '累计总压力', v: footpadStats.total_pressure, c: C.cyan }] : []),
-                    ...(footpadStats.contact_area ? [{ l: '接触面积', v: footpadStats.contact_area, c: C.green }] : []),
-                  ].map((item, i) => (
+                  ].filter(item => item.v != null).map((item, i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
                       <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.l}</span>
                       <span className="text-sm font-bold tabular-nums" style={{ color: item.c }}>
@@ -900,12 +1190,10 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <div className="text-xs font-medium mb-3" style={{ color: 'var(--text-tertiary)' }}>坐垫压力统计</div>
                 <div className="space-y-2">
                   {[
-                    { l: '最大总压力', v: pressureStats.sit_max || seatStats.max_pressure || '--', c: C.red },
-                    { l: '平均总压力', v: pressureStats.sit_avg || seatStats.mean_pressure || '--', c: C.blue },
+                    { l: '最大总压力', v: pressureStats.sit_max, c: C.red },
+                    { l: '平均总压力', v: pressureStats.sit_avg, c: C.blue },
                     ...(pressureStats.max_sit_change_rate ? [{ l: '最大变化率', v: pressureStats.max_sit_change_rate, c: C.amber }] : []),
-                    ...(seatStats.total_pressure ? [{ l: '累计总压力', v: seatStats.total_pressure, c: C.cyan }] : []),
-                    ...(seatStats.contact_area ? [{ l: '接触面积', v: seatStats.contact_area, c: C.green }] : []),
-                  ].map((item, i) => (
+                  ].filter(item => item.v != null).map((item, i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
                       <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.l}</span>
                       <span className="text-sm font-bold tabular-nums" style={{ color: item.c }}>

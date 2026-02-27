@@ -38,7 +38,7 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
         username (str): 用户名
 
     Returns:
-        dict: 包含所有分析指标和base64图片的完整结果，结构如下:
+        dict: 包含所有分析指标和前端渲染数据的完整结果，结构如下:
             {
                 'duration_stats': {
                     'total_duration': float,
@@ -67,12 +67,14 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
                     'max_foot_change_rate': float,    # 脚垫最大变化率
                 },
                 'cycle_peak_forces': [float],         # 各峰值力
-                'images': {
-                    'stand_evolution': [{'label', 'sublabel', 'image'}],
-                    'stand_cop_left': base64_png,
-                    'stand_cop_right': base64_png,
-                    'sit_evolution': [{'label', 'image'}],
-                    'sit_cop': base64_png,
+                'heatmap_data': {
+                    'stand_evolution': [{'label', 'sublabel', 'matrix': [[float]]}],
+                    'sit_evolution': [{'label', 'matrix': [[float]]}],
+                },
+                'cop_data': {
+                    'stand_left': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]], 'bbox': [int]},
+                    'stand_right': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]], 'bbox': [int]},
+                    'sit': {'bg_matrix': [[float]], 'trajectories': [[[x,y]]]},
                 },
                 'force_curves': {
                     'stand_times': [float],
@@ -196,12 +198,14 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
             'max_foot_change_rate': round(max_foot_rate, 1),
         },
         'cycle_peak_forces': cycle_peak_forces,
-        'images': {
+        'heatmap_data': {
             'stand_evolution': [],
-            'stand_cop_left': None,
-            'stand_cop_right': None,
             'sit_evolution': [],
-            'sit_cop': None,
+        },
+        'cop_data': {
+            'stand_left': None,
+            'stand_right': None,
+            'sit': None,
         },
         'force_curves': {
             'stand_times': stand_times,
@@ -315,7 +319,7 @@ def get_cycle_peak_forces(result):
     return result.get('cycle_peak_forces', [])
 
 
-def get_stand_evolution_images(result):
+def get_stand_evolution_data(result):
     """
     【渲染区域】站立演变热力图 (2×11 网格)
     用于展示一个起坐周期中站立阶段的压力变化过程
@@ -324,55 +328,62 @@ def get_stand_evolution_images(result):
         每个元素: {
             'label': int,     # 行索引 (0=左脚, 1=右脚)
             'sublabel': int,  # 列索引 (0~10, 对应0%~100%周期进度)
-            'image': str,     # base64 PNG 图片 (data:image/png;base64,...)
+            'matrix': [[float]],  # 平滑后的压力矩阵数据
         }
-    前端渲染: 2行×11列的图片网格, 直接用 <img src={item.image} />
+    前端渲染: 2行×11列的 Canvas 热力图网格
     """
-    return result.get('images', {}).get('stand_evolution', [])
+    return result.get('heatmap_data', {}).get('stand_evolution', [])
 
 
-def get_sit_evolution_images(result):
+def get_sit_evolution_data(result):
     """
     【渲染区域】坐姿演变热力图 (1×11 网格)
     用于展示坐姿阶段的压力变化过程
 
     返回: list[dict]
         每个元素: {
-            'label': int,  # 列索引 (0~10)
-            'image': str,  # base64 PNG 图片
+            'label': int,     # 列索引 (0~10)
+            'matrix': [[float]],  # 平滑后的压力矩阵数据
         }
-    前端渲染: 1行×11列的图片网格
+    前端渲染: 1行×11列的 Canvas 热力图网格
     """
-    return result.get('images', {}).get('sit_evolution', [])
+    return result.get('heatmap_data', {}).get('sit_evolution', [])
 
 
-def get_stand_cop_images(result):
+def get_stand_cop_data(result):
     """
     【渲染区域】站立COP轨迹图 (左脚 + 右脚)
-    叠加在热力图背景上的COP运动轨迹，不同周期用不同颜色
+    COP运动轨迹坐标 + 背景热力图矩阵，不同周期用不同颜色
 
     返回: {
-        'left': str | None,   # 左脚COP base64 PNG
-        'right': str | None,  # 右脚COP base64 PNG
+        'stand_left': {
+            'bg_matrix': [[float]],      # 背景热力图矩阵
+            'trajectories': [[[x,y]]],   # 各周期COP轨迹坐标
+            'bbox': [int],               # 裁剪区域 [y1,y2,x1,x2]
+        } | None,
+        'stand_right': { ... } | None,
     }
-    前端渲染: 两张并排的 <img> 图片
+    前端渲染: Canvas 绘制背景热力图 + COP轨迹线
     """
-    images = result.get('images', {})
+    cop = result.get('cop_data', {})
     return {
-        'left': images.get('stand_cop_left'),
-        'right': images.get('stand_cop_right'),
+        'left': cop.get('stand_left'),
+        'right': cop.get('stand_right'),
     }
 
 
-def get_sit_cop_image(result):
+def get_sit_cop_data(result):
     """
     【渲染区域】坐姿COP轨迹图
-    坐垫上的压力中心运动轨迹
+    坐垫上的压力中心运动轨迹坐标 + 背景热力图矩阵
 
-    返回: str | None  # base64 PNG 图片
-    前端渲染: 单张 <img> 图片
+    返回: {
+        'bg_matrix': [[float]],      # 背景热力图矩阵
+        'trajectories': [[[x,y]]],   # 各周期COP轨迹坐标
+    } | None
+    前端渲染: Canvas 绘制背景热力图 + COP轨迹线
     """
-    return result.get('images', {}).get('sit_cop')
+    return result.get('cop_data', {}).get('sit')
 
 
 def get_force_curve_data(result):
