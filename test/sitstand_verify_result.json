@@ -1,0 +1,115 @@
+{
+  "summary": {
+    "total": 15,
+    "pass": 15,
+    "fail": 0
+  },
+  "details": [
+    {
+      "label": "duration_stats.total_duration",
+      "value": 180.8,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "duration_stats.num_cycles",
+      "value": 59,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "duration_stats.avg_duration",
+      "value": 3.06,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "stand_frames",
+      "value": 2261,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "sit_frames",
+      "value": 2519,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cop.stand_full",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cop.stand_left",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cop.stand_right",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cop.sit",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "force_curves.stand_times",
+      "value": "array(300)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "force_curves.stand_force",
+      "value": "array(300)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "force_curves.sit_times",
+      "value": "array(300)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "force_curves.sit_force",
+      "value": "array(300)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "evolution.stand",
+      "value": "array(11)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "evolution.sit",
+      "value": "array(11)",
+      "pass": true,
+      "note": "OK"
+    }
+  ],
+  "js_result": {
+    "duration_stats": {
+      "total_duration": 180.8,
+      "num_cycles": 59,
+      "avg_duration": 3.06
+    },
+    "stand_frames": 2261,
+    "sit_frames": 2519,
+    "stand_peaks": 59,
+    "cop_lengths": {
+      "stand_full": 200,
+      "stand_left": 200,
+      "stand_right": 200,
+      "sit": 200
+    }
+  }
+}

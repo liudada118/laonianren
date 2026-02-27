@@ -1,0 +1,169 @@
+{
+  "summary": {
+    "total": 23,
+    "pass": 20,
+    "fail": 3
+  },
+  "details": [
+    {
+      "label": "gaitParams.leftStepTime",
+      "value": 1.771,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "gaitParams.rightStepTime",
+      "value": 8.857,
+      "pass": false,
+      "note": "value 8.857 > max 5"
+    },
+    {
+      "label": "gaitParams.crossStepTime",
+      "value": 5.314,
+      "pass": false,
+      "note": "value 5.314 > max 5"
+    },
+    {
+      "label": "gaitParams.leftStepLength",
+      "value": 46,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "gaitParams.rightStepLength",
+      "value": 46,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "gaitParams.stepWidth",
+      "value": 14.8,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "gaitParams.walkingSpeed",
+      "value": 0.089,
+      "pass": false,
+      "note": "value 0.089 < min 0.1"
+    },
+    {
+      "label": "gaitParams.leftFPA",
+      "value": 6.89,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "gaitParams.rightFPA",
+      "value": 6.56,
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "balance.left",
+      "value": "object(3)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "balance.right",
+      "value": "object(3)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "timeSeries.left.time",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "timeSeries.left.force",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "timeSeries.right.time",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "timeSeries.right.force",
+      "value": "array(200)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "partitionFeatures.left",
+      "value": "array(8)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "partitionFeatures.right",
+      "value": "array(8)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "supportPhases.left",
+      "value": "object(4)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "supportPhases.right",
+      "value": "object(4)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cyclePhases.left",
+      "value": "object(4)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "cyclePhases.right",
+      "value": "object(4)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "fpaPerStep.left",
+      "value": "array(5)",
+      "pass": true,
+      "note": "OK"
+    },
+    {
+      "label": "fpaPerStep.right",
+      "value": "array(1)",
+      "pass": true,
+      "note": "OK"
+    }
+  ],
+  "js_result": {
+    "gaitParams": {
+      "leftStepTime": 1.771,
+      "rightStepTime": 8.857,
+      "crossStepTime": 5.314,
+      "leftStepLength": 46,
+      "rightStepLength": 46,
+      "crossStepLength": 46,
+      "stepWidth": 14.8,
+      "walkingSpeed": 0.089,
+      "leftFPA": 6.89,
+      "rightFPA": 6.56,
+      "doubleContactTime": 1.169
+    },
+    "balance_left_keys": [
+      "整足平衡",
+      "前足平衡",
+      "足跟平衡"
+    ],
+    "timeSeries_left_length": 200,
+    "partitionFeatures_left_length": 8
+  }
+}

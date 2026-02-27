@@ -1,0 +1,39 @@
+{
+  "timestamp": "2026-02-27T06:29:52.881Z",
+  "summary": [
+    {
+      "name": "站立算法 (Standing)",
+      "total": 44,
+      "pass": 3,
+      "fail": 41,
+      "rate": "6.8%"
+    },
+    {
+      "name": "握力算法 (Grip)",
+      "total": 24,
+      "pass": 2,
+      "fail": 22,
+      "rate": "8.3%"
+    },
+    {
+      "name": "起坐算法 (Sit-Stand)",
+      "total": 15,
+      "pass": 15,
+      "fail": 0,
+      "rate": "100.0%"
+    },
+    {
+      "name": "步态算法 (Gait)",
+      "total": 23,
+      "pass": 20,
+      "fail": 3,
+      "rate": "87.0%"
+    }
+  ],
+  "totals": {
+    "total": 106,
+    "pass": 40,
+    "fail": 66,
+    "rate": "37.7%"
+  }
+}

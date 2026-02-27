@@ -1,0 +1,305 @@
+{
+  "summary": {
+    "total": 24,
+    "pass": 2,
+    "fail": 22
+  },
+  "details": [
+    {
+      "label": "totalFrames",
+      "jsVal": 1860,
+      "pyVal": 1860,
+      "diff": "0.00%",
+      "pass": true
+    },
+    {
+      "label": "handType",
+      "jsVal": "左手",
+      "pyVal": "左手",
+      "diff": "0%",
+      "pass": true
+    },
+    {
+      "label": "peakForce",
+      "jsVal": 1727,
+      "pyVal": 111.5,
+      "diff": "1448.88%",
+      "pass": false
+    },
+    {
+      "label": "totalForce",
+      "jsVal": 1727,
+      "pyVal": 111.5,
+      "diff": "1448.88%",
+      "pass": false
+    },
+    {
+      "label": "totalArea",
+      "jsVal": 1896,
+      "pyVal": 1632,
+      "diff": "16.18%",
+      "pass": false
+    },
+    {
+      "label": "finger.Thumb.force",
+      "jsVal": 660,
+      "pyVal": 43,
+      "diff": "1434.88%",
+      "pass": false
+    },
+    {
+      "label": "finger.Thumb.area",
+      "jsVal": 600,
+      "pyVal": 216,
+      "diff": "177.78%",
+      "pass": false
+    },
+    {
+      "label": "finger.Thumb.points",
+      "jsVal": "25/42",
+      "pyVal": "9/12",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "finger.Index.force",
+      "jsVal": 0,
+      "pyVal": 18.34,
+      "diff": "100.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Index.area",
+      "jsVal": 0,
+      "pyVal": 288,
+      "diff": "100.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Index.points",
+      "jsVal": "0/42",
+      "pyVal": "12/12",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "finger.Middle.force",
+      "jsVal": 0,
+      "pyVal": 15.99,
+      "diff": "100.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Middle.area",
+      "jsVal": 0,
+      "pyVal": 264,
+      "diff": "100.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Middle.points",
+      "jsVal": "0/42",
+      "pyVal": "11/12",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "finger.Ring.force",
+      "jsVal": 86,
+      "pyVal": 11.7,
+      "diff": "635.04%",
+      "pass": false
+    },
+    {
+      "label": "finger.Ring.area",
+      "jsVal": 168,
+      "pyVal": 240,
+      "diff": "30.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Ring.points",
+      "jsVal": "7/42",
+      "pyVal": "10/12",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "finger.Little.force",
+      "jsVal": 63,
+      "pyVal": 15,
+      "diff": "320.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Little.area",
+      "jsVal": 216,
+      "pyVal": 288,
+      "diff": "25.00%",
+      "pass": false
+    },
+    {
+      "label": "finger.Little.points",
+      "jsVal": "9/42",
+      "pyVal": "12/12",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "finger.Palm.force",
+      "jsVal": 918,
+      "pyVal": 7.47,
+      "diff": "12189.16%",
+      "pass": false
+    },
+    {
+      "label": "finger.Palm.area",
+      "jsVal": 912,
+      "pyVal": 336,
+      "diff": "171.43%",
+      "pass": false
+    },
+    {
+      "label": "finger.Palm.points",
+      "jsVal": "38/46",
+      "pyVal": "14/72",
+      "diff": "mismatch",
+      "pass": false
+    },
+    {
+      "label": "shakeCount",
+      "jsVal": 44,
+      "pyVal": 6,
+      "diff": "633.33%",
+      "pass": false
+    }
+  ],
+  "analysis": {
+    "issue_1": "forceTimeSeries 直接累加 ADC 值，未调用 adcToForceSinglePoint 转换",
+    "issue_2": "PART_SLICES 分区 (42/42/42/42/42/46) 与 Python (12/12/12/12/12/72) 不一致",
+    "issue_3": "峰值帧力值计算未经 ADC 转换",
+    "cal_peak_sum": 1727,
+    "raw_peak_sum": 3862,
+    "js_peak_force_cal": 1727,
+    "js_peak_force_raw": 3862,
+    "py_peak_force": 111.5
+  },
+  "js_result_cal": {
+    "totalFrames": 1860,
+    "peakInfo": {
+      "peak_force": 1727,
+      "peak_time": 6.224812
+    },
+    "totalForce": 1727,
+    "totalArea": 1896,
+    "fingers": [
+      {
+        "name": "Thumb",
+        "key": "thumb",
+        "force": 660,
+        "area": 600,
+        "adc": 26,
+        "points": "25/42"
+      },
+      {
+        "name": "Index",
+        "key": "index_finger",
+        "force": 0,
+        "area": 0,
+        "adc": 0,
+        "points": "0/42"
+      },
+      {
+        "name": "Middle",
+        "key": "middle_finger",
+        "force": 0,
+        "area": 0,
+        "adc": 0,
+        "points": "0/42"
+      },
+      {
+        "name": "Ring",
+        "key": "ring_finger",
+        "force": 86,
+        "area": 168,
+        "adc": 12,
+        "points": "7/42"
+      },
+      {
+        "name": "Little",
+        "key": "little_finger",
+        "force": 63,
+        "area": 216,
+        "adc": 7,
+        "points": "9/42"
+      },
+      {
+        "name": "Palm",
+        "key": "palm",
+        "force": 918,
+        "area": 912,
+        "adc": 24,
+        "points": "38/46"
+      }
+    ]
+  },
+  "js_result_raw": {
+    "totalFrames": 1860,
+    "peakInfo": {
+      "peak_force": 3862,
+      "peak_time": 6.224812
+    },
+    "totalForce": 3862,
+    "totalArea": 2208,
+    "fingers": [
+      {
+        "name": "Thumb",
+        "key": "thumb",
+        "force": 1366,
+        "area": 648,
+        "adc": 51,
+        "points": "27/42"
+      },
+      {
+        "name": "Index",
+        "key": "index_finger",
+        "force": 0,
+        "area": 0,
+        "adc": 0,
+        "points": "0/42"
+      },
+      {
+        "name": "Middle",
+        "key": "middle_finger",
+        "force": 0,
+        "area": 0,
+        "adc": 0,
+        "points": "0/42"
+      },
+      {
+        "name": "Ring",
+        "key": "ring_finger",
+        "force": 89,
+        "area": 192,
+        "adc": 11,
+        "points": "8/42"
+      },
+      {
+        "name": "Little",
+        "key": "little_finger",
+        "force": 252,
+        "area": 336,
+        "adc": 18,
+        "points": "14/42"
+      },
+      {
+        "name": "Palm",
+        "key": "palm",
+        "force": 2155,
+        "area": 1032,
+        "adc": 50,
+        "points": "43/46"
+      }
+    ]
+  }
+}
