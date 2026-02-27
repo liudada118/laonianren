@@ -288,6 +288,7 @@ function startApiChild() {
     const child = fork(path.join(__dirname, './server/serialServer.js'), {
       silent: false,
       env: {
+        ...process.env,
         isPackaged: isPackaged,
         appPath: app.getAppPath(),
         userData: app.getPath('userData'),
@@ -359,16 +360,20 @@ const createWindow = async () => {
   }
 
   if (!isPackaged) {
-    console.log('[window] starting vite dev server...')
-    await startViteDevServer()
-    console.log('[window] vite started, devServerUrl =', devServerUrl)
-    const ok = await waitForDevServer(devServerUrl, 20000)
+    console.log('[window] checking dev server first:', devServerUrl)
+    let ok = await waitForDevServer(devServerUrl, 3000)
+    if (!ok) {
+      console.log('[window] starting vite dev server...')
+      await startViteDevServer()
+      console.log('[window] vite started, devServerUrl =', devServerUrl)
+      ok = await waitForDevServer(devServerUrl, 20000)
+    }
     console.log('[window] waitForDevServer result:', ok, 'url:', devServerUrl)
     if (!ok) {
       const safeUrl = devServerUrl
       const msg = encodeURIComponent(
         `Vite dev server not reachable: ${safeUrl}\n\n` +
-        `Please run: npm run dev -- --port ${defaultDevPort} (in ./client) and keep it running.`
+        `Please run: npm run start (in ../front-end) and keep it running.`
       )
       win.loadURL(`data:text/plain;charset=utf-8,${msg}`)
 
