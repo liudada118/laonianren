@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { searchHistory, deleteRecord, clearHistory } from '../lib/historyService';
@@ -48,30 +48,51 @@ export default function AssessmentHistory() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [expandedRow, setExpandedRow] = useState(null);
+  const [loading, setLoading] = useState(false);
   const pageSize = 10;
 
-  const result = useMemo(() => {
-    return searchHistory({
+  // 异步数据状态
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  // 异步加载数据
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    searchHistory({
       keyword: searchTerm,
       date: dateFilter,
       page: currentPage,
       pageSize,
+    }).then(result => {
+      if (!cancelled) {
+        setItems(result.items || []);
+        setTotal(result.total || 0);
+        setTotalPages(result.totalPages || 0);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setItems([]);
+        setTotal(0);
+        setTotalPages(0);
+        setLoading(false);
+      }
     });
-    // eslint-disable-next-line
+    return () => { cancelled = true; };
   }, [searchTerm, dateFilter, currentPage, refreshKey]);
-
-  const { items, total, totalPages } = result;
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, dateFilter]);
 
-  const handleDelete = useCallback((id) => {
-    deleteRecord(id);
+  const handleDelete = useCallback(async (id) => {
+    await deleteRecord(id);
     setShowDeleteConfirm(null);
     setRefreshKey(k => k + 1);
   }, []);
 
-  const handleClear = useCallback(() => {
-    clearHistory();
+  const handleClear = useCallback(async () => {
+    await clearHistory();
     setShowClearConfirm(false);
     setRefreshKey(k => k + 1);
   }, []);
@@ -155,7 +176,13 @@ export default function AssessmentHistory() {
 
           {/* Table Body */}
           <div className="flex-1 overflow-y-auto">
-            {items.length === 0 ? (
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="w-8 h-8 border-2 rounded-full animate-spin mb-4"
+                  style={{ borderColor: 'var(--border-light)', borderTopColor: 'var(--zeiss-blue)' }} />
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载中...</p>
+              </div>
+            ) : items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <svg className="w-16 h-16 mb-4" style={{ color: 'var(--border-light)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

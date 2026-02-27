@@ -269,6 +269,71 @@ class BackendBridge {
     return `${this.httpUrl}/downloadCsvFile/${encodeURIComponent(fileName)}`;
   }
 
+  /* ─── 历史记录 API ─── */
+
+  /**
+   * 保存评估历史记录到后端数据库
+   * @param {object} params - { patientInfo, institution, assessments }
+   */
+  async saveHistory(params = {}) {
+    const res = await fetch(`${this.httpUrl}/api/history/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 搜索历史记录（分页）
+   * @param {object} params - { keyword, date, page, pageSize }
+   */
+  async listHistory(params = {}) {
+    const res = await fetch(`${this.httpUrl}/api/history/list`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取单条历史记录
+   * @param {string} id - 记录ID
+   */
+  async getHistory(id) {
+    const res = await fetch(`${this.httpUrl}/api/history/get`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    return res.json();
+  }
+
+  /**
+   * 删除单条历史记录
+   * @param {string} id - 记录ID
+   */
+  async deleteHistory(id) {
+    const res = await fetch(`${this.httpUrl}/api/history/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    return res.json();
+  }
+
+  /**
+   * 清空所有历史记录
+   */
+  async clearHistory() {
+    const res = await fetch(`${this.httpUrl}/api/history/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.json();
+  }
+
   async bindKey(key) {
     const res = await fetch(`${this.httpUrl}/bindKey`, {
       method: 'POST',

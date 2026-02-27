@@ -35,13 +35,31 @@ async function checkDevServerOnce(url, timeoutMs = 1000) {
 
 async function waitForDevServer(url, timeoutMs = 20000) {
   const start = Date.now()
+  console.log('[vite] waiting for dev server at:', url)
   while (Date.now() - start < timeoutMs) {
     // eslint-disable-next-line no-await-in-loop
     const ok = await checkDevServerOnce(url, 1000)
-    if (ok) return true
+    if (ok) {
+      console.log('[vite] dev server is reachable at:', url)
+      return true
+    }
     // eslint-disable-next-line no-await-in-loop
     await wait(500)
   }
+  // 如果默认端口不可达，扫描附近端口
+  const basePort = parseInt(new URL(url).port, 10) || 5173
+  console.log('[vite] default port not reachable, scanning ports', basePort, '-', basePort + 20)
+  for (let p = basePort + 1; p <= basePort + 20; p++) {
+    const tryUrl = url.replace(':' + basePort, ':' + p)
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await checkDevServerOnce(tryUrl, 500)
+    if (ok) {
+      console.log('[vite] found dev server at port:', p)
+      devServerUrl = tryUrl
+      return true
+    }
+  }
+  console.log('[vite] dev server not found on any port')
   return false
 }
 
@@ -59,12 +77,24 @@ function startViteDevServer() {
     '.bin',
     process.platform === 'win32' ? 'vite.cmd' : 'vite'
   )
+
+  // 所有 spawn 策略统一使用 shell: true 以兼容 Windows
   const attempts = [
-    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true }),
-    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true, windowsVerbatimArguments: true }),
-    () => fs.existsSync(viteBin)
-      ? spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
-      : null
+    () => {
+      console.log('[vite] attempt 1: npm run dev (shell)')
+      return spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    },
+    () => {
+      if (!fs.existsSync(viteBin)) return null
+      console.log('[vite] attempt 2: direct vite bin')
+      return spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    },
+    () => {
+      // 最后兜底：用 npx vite
+      console.log('[vite] attempt 3: npx vite')
+      const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+      return spawn(npxCmd, ['vite', '--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    }
   ]
 
   return new Promise((resolve) => {
@@ -106,6 +136,7 @@ function startViteDevServer() {
 
       const ready = () => {
         cleanup()
+        console.log('[vite] ready, devServerUrl =', devServerUrl)
         finish()
       }
 
@@ -115,9 +146,9 @@ function startViteDevServer() {
           process.stdout.write(`[vite] ${text}`)
         }
         const localMatch =
-          text.match(/https?:\/\/localhost:\d+/i) ||
-          text.match(/https?:\/\/127\.0\.0\.1:\d+/i) ||
-          text.match(/https?:\/\/\[::1\]:\d+/i)
+          text.match(/https?:\/\/localhost:(\d+)/i) ||
+          text.match(/https?:\/\/127\.0\.0\.1:(\d+)/i) ||
+          text.match(/https?:\/\/\[::1\]:(\d+)/i)
         const anyMatch = text.match(/https?:\/\/[^\s]+/i)
         if (localMatch) {
           devServerUrl = localMatch[0]
@@ -257,6 +288,7 @@ function startApiChild() {
     const child = fork(path.join(__dirname, './server/serialServer.js'), {
       silent: false,
       env: {
+        ...process.env,
         isPackaged: isPackaged,
         appPath: app.getAppPath(),
         userData: app.getPath('userData'),
@@ -328,13 +360,20 @@ const createWindow = async () => {
   }
 
   if (!isPackaged) {
-    await startViteDevServer()
-    const ok = await waitForDevServer(devServerUrl, 20000)
+    console.log('[window] checking dev server first:', devServerUrl)
+    let ok = await waitForDevServer(devServerUrl, 3000)
+    if (!ok) {
+      console.log('[window] starting vite dev server...')
+      await startViteDevServer()
+      console.log('[window] vite started, devServerUrl =', devServerUrl)
+      ok = await waitForDevServer(devServerUrl, 20000)
+    }
+    console.log('[window] waitForDevServer result:', ok, 'url:', devServerUrl)
     if (!ok) {
       const safeUrl = devServerUrl
       const msg = encodeURIComponent(
         `Vite dev server not reachable: ${safeUrl}\n\n` +
-        `Please run: npm run dev -- --port ${defaultDevPort} (in ./client) and keep it running.`
+        `Please run: npm run start (in ../front-end) and keep it running.`
       )
       win.loadURL(`data:text/plain;charset=utf-8,${msg}`)
 

@@ -119,13 +119,10 @@ export function AssessmentProvider({ children }) {
       const assessments = { ...prev.assessments };
       assessments[type] = { completed: true, report, data };
 
-      // 自动保存到 localStorage 历史记录
+      // 自动保存到后端数据库历史记录
       if (prev.patientInfo) {
-        try {
-          saveAssessmentSession(prev.patientInfo, prev.institution, assessments);
-        } catch (e) {
-          console.error('自动保存历史记录失败:', e);
-        }
+        saveAssessmentSession(prev.patientInfo, prev.institution, assessments)
+          .catch(e => console.error('自动保存历史记录失败:', e));
       }
 
       return { ...prev, assessments };

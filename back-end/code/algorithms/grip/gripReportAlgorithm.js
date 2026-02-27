@@ -34,15 +34,39 @@ const GRIP_START_THRESHOLD_RATIO = 0.1;
 const SHAKE_ANGULAR_VELOCITY_THRESHOLD = 30.0;
 const SHAKE_MIN_INTERVAL = 0.15;
 
-// 手指区域映射 (传感器索引范围)
-const PART_SLICES = {
-  thumb:         [0, 42],
-  index_finger:  [42, 84],
-  middle_finger: [84, 126],
-  ring_finger:   [126, 168],
-  little_finger: [168, 210],
-  palm:          [210, 256],
+// 手指区域映射 - 离散传感器索引 (1-based，与 LeftHand/RightHand 类一致)
+// 注意：传感器并非连续排列，每个手指对应分散在不同位置的传感器
+const PART_INDICES_LEFT = {
+  thumb:         [19, 18, 17, 3, 2, 1, 243, 242, 241, 227, 226, 225],
+  index_finger:  [22, 21, 20, 6, 5, 4, 246, 245, 244, 230, 229, 228],
+  middle_finger: [25, 24, 23, 9, 8, 7, 249, 248, 247, 233, 232, 231],
+  ring_finger:   [28, 27, 26, 12, 11, 10, 252, 251, 250, 236, 235, 234],
+  little_finger: [31, 30, 29, 15, 14, 13, 255, 254, 253, 239, 238, 237],
+  palm:          [
+    207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196,
+    191, 190, 189, 188, 187, 186, 185, 184, 183, 182, 181, 180, 179, 178, 177,
+    175, 174, 173, 172, 171, 170, 169, 168, 167, 166, 165, 164, 163, 162, 161,
+    159, 158, 157, 156, 155, 154, 153, 152, 151, 150, 149, 148, 147, 146, 145,
+    143, 142, 141, 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
+  ],
 };
+
+const PART_INDICES_RIGHT = {
+  thumb:         [240, 239, 238, 256, 255, 254, 16, 15, 14, 32, 31, 30],
+  index_finger:  [237, 236, 235, 253, 252, 251, 13, 12, 11, 29, 28, 27],
+  middle_finger: [234, 233, 232, 250, 249, 248, 10, 9, 8, 26, 25, 24],
+  ring_finger:   [231, 230, 229, 247, 246, 245, 7, 6, 5, 23, 22, 21],
+  little_finger: [228, 227, 226, 244, 243, 242, 4, 3, 2, 20, 19, 18],
+  palm:          [
+    61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50,
+    80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66,
+    96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82,
+    112, 111, 110, 109, 108, 107, 106, 105, 104, 103, 102, 101, 100, 99, 98,
+    128, 127, 126, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114,
+  ],
+};
+
+const PART_KEYS = ['thumb', 'index_finger', 'middle_finger', 'ring_finger', 'little_finger', 'palm'];
 
 const PART_NAMES = {
   thumb: 'Thumb',
@@ -198,20 +222,25 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
     for (let i = 0; i < n; i++) t[i] = i * 0.01;
   }
 
-  // ---- 1. 计算各区域力-时间序列 ----
+  // ---- 1. 计算各区域力-时间序列 (使用离散索引映射) ----
+  const partIndices = handType === '左手' ? PART_INDICES_LEFT : PART_INDICES_RIGHT;
   const forceTimeSeries = {};
-  for (const [key, [a, b]] of Object.entries(PART_SLICES)) {
+  for (const key of PART_KEYS) {
+    const indices = partIndices[key];
     forceTimeSeries[key] = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       let s = 0;
-      for (let j = a; j < b; j++) s += arr[i][j];
+      for (const idx of indices) {
+        const arrayIdx = idx - 1; // 1-based 转 0-based
+        if (arrayIdx >= 0 && arrayIdx < 256) s += arr[i][arrayIdx];
+      }
       forceTimeSeries[key][i] = s;
     }
   }
 
   // 总力序列
   const totalForceSeries = new Float64Array(n);
-  for (const key of Object.keys(PART_SLICES)) {
+  for (const key of PART_KEYS) {
     for (let i = 0; i < n; i++) {
       totalForceSeries[i] += forceTimeSeries[key][i];
     }
@@ -273,21 +302,26 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
     SHAKE_MIN_INTERVAL
   );
 
-  // ---- 6. 峰值帧分析 (手指区域) ----
+  // ---- 6. 峰值帧分析 (手指区域，使用离散索引) ----
   const peakFrame = arr[peakIdx];
   const fingers = [];
   let totalForce = 0;
   let totalArea = 0;
 
-  for (const [key, [a, b]] of Object.entries(PART_SLICES)) {
-    const section = peakFrame.slice(a, b);
-    const force = sum(section);
+  for (const key of PART_KEYS) {
+    const indices = partIndices[key];
+    let force = 0;
     let nonzero = 0;
     let adcSum = 0;
-    for (let i = 0; i < section.length; i++) {
-      if (section[i] > 0) {
-        nonzero++;
-        adcSum += section[i];
+    for (const idx of indices) {
+      const arrayIdx = idx - 1; // 1-based 转 0-based
+      if (arrayIdx >= 0 && arrayIdx < 256) {
+        const val = peakFrame[arrayIdx];
+        force += val;
+        if (val > 0) {
+          nonzero++;
+          adcSum += val;
+        }
       }
     }
     const area = nonzero * SENSOR_AREA_MM2;
@@ -302,7 +336,7 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
       force: Math.round(force * 100) / 100,
       area: Math.round(area),
       adc: adc,
-      points: `${nonzero}/${b - a}`,
+      points: `${nonzero}/${indices.length}`,
     });
   }
 
@@ -310,13 +344,13 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
   const step = Math.max(1, Math.floor(n / 500));
   const sampledT = [];
   const sampledForce = {};
-  for (const key of [...Object.keys(PART_SLICES), 'total']) {
+  for (const key of [...PART_KEYS, 'total']) {
     sampledForce[key] = [];
   }
 
   for (let i = 0; i < n; i += step) {
     sampledT.push(t[i]);
-    for (const key of Object.keys(PART_SLICES)) {
+    for (const key of PART_KEYS) {
       sampledForce[key].push(forceTimeSeries[key][i]);
     }
     sampledForce.total.push(totalForceSeries[i]);
