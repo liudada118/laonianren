@@ -129,7 +129,7 @@ function CapsuleTag({ label, color = '#0066CC' }) {
 }
 
 /* ─── 步态报告组件（使用真实数据） ─── */
-function GaitReportContent({ patientInfo, reportData: propsReportData }) {
+export function GaitReportContent({ patientInfo, reportData: propsReportData }) {
   const [realData, setRealData] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
 
@@ -967,7 +967,7 @@ export default function GaitAssessment() {
 
   const viewReport = () => {
     setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('gait', { completed: true }, { sensorData });
+    completeAssessment('gait', { completed: true, reportData: gaitReportData }, { sensorData });
   };
 
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
@@ -1071,7 +1071,7 @@ export default function GaitAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true }, { sensorData }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true, reportData: gaitReportData }, { sensorData }); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
             </div>

@@ -1403,6 +1403,7 @@ app.post('/selectSystem', (req, res) => {
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
+  ensureHistoryTable(currentDb)
   if (blue.includes(file)) {
     baudRate = 921600
   } else {
@@ -1426,8 +1427,9 @@ app.get('/getSystem', async (req, res) => {
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
+  ensureHistoryTable(currentDb)
 
-  res.json(new HttpResult(0, result, '鑾峰彇璁惧鍒楄〃鎴愬姛'));
+  res.json(new HttpResult(0, result, '获取设备列表成功'));
 })
 
 // 鏌ヨ涓插彛
@@ -2061,6 +2063,7 @@ app.post('/changeSystemType', async (req, res) => {
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
+  ensureHistoryTable(currentDb)
   console.log(baudRate)
   // stopPort()
   socketSendData(server, JSON.stringify({ sitData: {} }))
@@ -2244,6 +2247,296 @@ app.post('/changePy', async (req, res) => {
 //   res.json(new HttpResult(0, data, 'success'));
 // })
 
+
+
+// ==================== 历史记录模块 ====================
+
+/**
+ * 确保 assessment_history 表存在
+ */
+function ensureHistoryTable(db) {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS assessment_history (
+      id TEXT PRIMARY KEY,
+      patient_name TEXT,
+      patient_gender TEXT,
+      patient_age INTEGER,
+      patient_weight REAL,
+      institution TEXT,
+      assessments TEXT,
+      date TEXT,
+      date_str TEXT,
+      updated_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `, (err) => {
+    if (err) console.error('[History] 创建 assessment_history 表失败:', err)
+    else console.log('[History] assessment_history 表已就绪')
+  })
+}
+
+// 初始化历史记录表
+ensureHistoryTable(currentDb)
+
+/**
+ * POST /api/history/save
+ * 保存或更新一条评估记录
+ * Body: { patientInfo: { name, gender, age, weight }, institution, assessments: { grip: {...}, ... } }
+ */
+app.post('/api/history/save', (req, res) => {
+  try {
+    const { patientInfo, institution, assessments } = req.body || {}
+    if (!patientInfo || !patientInfo.name) {
+      return res.json(new HttpResult(1, {}, 'missing patientInfo.name'))
+    }
+
+    const now = new Date()
+    const dateStr = formatDateStr(now)
+
+    // 查找今天同一患者的记录
+    currentDb.get(
+      'SELECT * FROM assessment_history WHERE patient_name = ? AND date_str = ?',
+      [patientInfo.name, dateStr],
+      (err, existingRow) => {
+        if (err) {
+          console.error('[History] 查询失败:', err)
+          return res.json(new HttpResult(1, {}, 'database error'))
+        }
+
+        if (existingRow) {
+          // 更新已有记录：合并 assessments
+          let existingAssessments = {}
+          try { existingAssessments = JSON.parse(existingRow.assessments || '{}') } catch {}
+
+          for (const [type, data] of Object.entries(assessments || {})) {
+            if (data && data.completed) {
+              existingAssessments[type] = {
+                completed: true,
+                report: data.report || null,
+                completedAt: now.toISOString(),
+              }
+            }
+          }
+
+          currentDb.run(
+            'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ? WHERE id = ?',
+            [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, existingRow.id],
+            function (err2) {
+              if (err2) {
+                console.error('[History] 更新失败:', err2)
+                return res.json(new HttpResult(1, {}, 'update failed'))
+              }
+              res.json(new HttpResult(0, { id: existingRow.id, updated: true }, 'success'))
+            }
+          )
+        } else {
+          // 创建新记录
+          const id = generateHistoryId()
+          const assessmentData = {}
+          for (const [type, data] of Object.entries(assessments || {})) {
+            assessmentData[type] = {
+              completed: data?.completed || false,
+              report: data?.completed ? (data.report || null) : null,
+              completedAt: data?.completed ? now.toISOString() : null,
+            }
+          }
+
+          currentDb.run(
+            `INSERT INTO assessment_history (id, patient_name, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, patientInfo.name, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
+            function (err2) {
+              if (err2) {
+                console.error('[History] 插入失败:', err2)
+                return res.json(new HttpResult(1, {}, 'insert failed'))
+              }
+              res.json(new HttpResult(0, { id, updated: false }, 'success'))
+            }
+          )
+        }
+      }
+    )
+  } catch (e) {
+    console.error('[History] save error:', e)
+    res.json(new HttpResult(1, {}, 'save failed'))
+  }
+})
+
+/**
+ * POST /api/history/list
+ * 搜索+分页查询历史记录
+ * Body: { keyword, date, page, pageSize }
+ */
+app.post('/api/history/list', (req, res) => {
+  try {
+    const { keyword, date, page = 1, pageSize = 10 } = req.body || {}
+
+    let countSql = 'SELECT COUNT(*) as total FROM assessment_history WHERE 1=1'
+    let dataSql = 'SELECT * FROM assessment_history WHERE 1=1'
+    const params = []
+
+    if (keyword) {
+      const likeClause = ' AND (patient_name LIKE ? OR institution LIKE ?)'
+      countSql += likeClause
+      dataSql += likeClause
+      params.push(`%${keyword}%`, `%${keyword}%`)
+    }
+
+    if (date) {
+      const dateClause = ' AND date_str LIKE ?'
+      countSql += dateClause
+      dataSql += dateClause
+      // 支持 YYYY-MM-DD 或 YYYY/MM/DD 格式
+      const normalizedDate = date.replace(/-/g, '/')
+      params.push(`%${normalizedDate}%`)
+    }
+
+    dataSql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+
+    // 先查总数
+    currentDb.get(countSql, params, (err, countRow) => {
+      if (err) {
+        console.error('[History] count error:', err)
+        return res.json(new HttpResult(1, {}, 'query failed'))
+      }
+
+      const total = countRow?.total || 0
+      const totalPages = Math.ceil(total / pageSize)
+      const offset = (page - 1) * pageSize
+
+      // 再查数据
+      currentDb.all(dataSql, [...params, pageSize, offset], (err2, rows) => {
+        if (err2) {
+          console.error('[History] list error:', err2)
+          return res.json(new HttpResult(1, {}, 'query failed'))
+        }
+
+        const items = (rows || []).map(row => ({
+          id: row.id,
+          patientName: row.patient_name,
+          patientGender: row.patient_gender,
+          patientAge: row.patient_age,
+          patientWeight: row.patient_weight,
+          institution: row.institution,
+          assessments: safeParseJSON(row.assessments),
+          date: row.date,
+          dateStr: row.date_str,
+          updatedAt: row.updated_at,
+        }))
+
+        res.json(new HttpResult(0, { items, total, totalPages, page }, 'success'))
+      })
+    })
+  } catch (e) {
+    console.error('[History] list error:', e)
+    res.json(new HttpResult(1, {}, 'list failed'))
+  }
+})
+
+/**
+ * POST /api/history/get
+ * 获取单条历史记录
+ * Body: { id }
+ */
+app.post('/api/history/get', (req, res) => {
+  try {
+    const { id } = req.body || {}
+    if (!id) {
+      return res.json(new HttpResult(1, {}, 'missing id'))
+    }
+
+    currentDb.get('SELECT * FROM assessment_history WHERE id = ?', [id], (err, row) => {
+      if (err) {
+        console.error('[History] get error:', err)
+        return res.json(new HttpResult(1, {}, 'query failed'))
+      }
+
+      if (!row) {
+        return res.json(new HttpResult(1, {}, 'record not found'))
+      }
+
+      const record = {
+        id: row.id,
+        patientName: row.patient_name,
+        patientGender: row.patient_gender,
+        patientAge: row.patient_age,
+        patientWeight: row.patient_weight,
+        institution: row.institution,
+        assessments: safeParseJSON(row.assessments),
+        date: row.date,
+        dateStr: row.date_str,
+        updatedAt: row.updated_at,
+      }
+
+      res.json(new HttpResult(0, record, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] get error:', e)
+    res.json(new HttpResult(1, {}, 'get failed'))
+  }
+})
+
+/**
+ * POST /api/history/delete
+ * 删除单条历史记录
+ * Body: { id }
+ */
+app.post('/api/history/delete', (req, res) => {
+  try {
+    const { id } = req.body || {}
+    if (!id) {
+      return res.json(new HttpResult(1, {}, 'missing id'))
+    }
+
+    currentDb.run('DELETE FROM assessment_history WHERE id = ?', [id], function (err) {
+      if (err) {
+        console.error('[History] delete error:', err)
+        return res.json(new HttpResult(1, {}, 'delete failed'))
+      }
+      res.json(new HttpResult(0, { deleted: this.changes }, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] delete error:', e)
+    res.json(new HttpResult(1, {}, 'delete failed'))
+  }
+})
+
+/**
+ * POST /api/history/clear
+ * 清空所有历史记录
+ */
+app.post('/api/history/clear', (req, res) => {
+  try {
+    currentDb.run('DELETE FROM assessment_history', function (err) {
+      if (err) {
+        console.error('[History] clear error:', err)
+        return res.json(new HttpResult(1, {}, 'clear failed'))
+      }
+      res.json(new HttpResult(0, { deleted: this.changes }, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] clear error:', e)
+    res.json(new HttpResult(1, {}, 'clear failed'))
+  }
+})
+
+// 工具函数
+function generateHistoryId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
+}
+
+function formatDateStr(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}/${m}/${d}`
+}
+
+function safeParseJSON(str) {
+  try { return JSON.parse(str || '{}') } catch { return {} }
+}
+
+// ==================== 历史记录模块结束 ====================
 
 
 app.listen(port, () => {

@@ -102,12 +102,85 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     stand_times = (np.arange(len(stand_force), dtype=float) * 0.08).tolist()
     sit_times = (np.arange(len(sit_force), dtype=float) * 0.08).tolist()
 
+    # ── 起坐次数检测 ──
+    # 策略：优先用坐垫(sit)数据的谷值检测（站起来时坐垫压力骤降，信号特征最明显）
+    # 回退：用脚垫(stand)数据的峰值检测（站起来时脚垫压力增大）
     peaks = []
-    if len(stand_force) >= 3:
-        threshold = float(np.mean(stand_force) + 0.5 * np.std(stand_force))
-        for i in range(1, len(stand_force) - 1):
-            if stand_force[i] >= threshold and stand_force[i] >= stand_force[i - 1] and stand_force[i] >= stand_force[i + 1]:
-                peaks.append(i)
+    sit_std = float(np.std(sit_force)) if len(sit_force) > 1 else 0
+    sit_range = float(np.max(sit_force) - np.min(sit_force)) if len(sit_force) > 1 else 0
+    use_sit = sit_std > 100 and sit_range > 1000  # 坐垫数据有足够的变化幅度
+
+    try:
+        from scipy.signal import find_peaks as _find_peaks
+        _has_scipy = True
+    except ImportError:
+        _has_scipy = False
+
+    if use_sit and len(sit_force) >= 3:
+        # 方案A：坐垫谷值检测 —— 站起来时坐垫压力降到接近0
+        min_dist = max(38, len(sit_force) // 25)  # 起坐周期通常 >= 3秒，38帧 ≈ 3s @12.5Hz
+        sit_mean = float(np.mean(sit_force))
+        # 站起来时坐垫压力应明显低于均值，用均值的一半作为过滤阈值
+        valley_threshold = sit_mean * 0.5
+        if _has_scipy:
+            # 对 -sit_force 找峰值 = 找 sit_force 的谷值
+            prom = max(sit_std * 0.5, sit_range * 0.15)
+            valleys, _ = _find_peaks(-sit_force, distance=min_dist, prominence=prom)
+            # 过滤：只保留坐垫压力明显低于均值的谷值（真正站起来了）
+            peaks = [int(v) for v in valleys if sit_force[v] < valley_threshold]
+        else:
+            # 简单谷值检测
+            for i in range(1, len(sit_force) - 1):
+                if sit_force[i] < sit_force[i - 1] and sit_force[i] < sit_force[i + 1]:
+                    if sit_force[i] < valley_threshold:
+                        if not peaks or (i - peaks[-1]) >= min_dist:
+                            peaks.append(i)
+        # 末尾检测：如果最后一次站起来后信号结束（没有再坐下），补充最后一个谷值
+        if peaks:
+            last_peak = peaks[-1]
+            tail = sit_force[last_peak:]
+            # 在最后一个谷值之后，是否有一次“坐下→站起”的完整周期
+            # 即：压力先升高（坐下）再降低（站起）并保持低值直到结束
+            if len(tail) > min_dist:
+                # 检查是否有一次坐下（压力超过均值）
+                had_sit_down = any(float(x) > sit_mean for x in tail)
+                if had_sit_down:
+                    # 检查末尾是否保持低值（最后站起来了）
+                    tail_end = sit_force[-min(20, len(sit_force) // 10):]
+                    if float(np.mean(tail_end)) < valley_threshold:
+                        # 找到末尾低值区间的起始位置作为最后一个谷值
+                        tail_idx = len(sit_force) - 1
+                        for i in range(len(sit_force) - 1, last_peak, -1):
+                            if sit_force[i] < valley_threshold:
+                                tail_idx = i
+                            else:
+                                break
+                        if (tail_idx - last_peak) >= min_dist:
+                            peaks.append(tail_idx)
+    elif len(stand_force) >= 3:
+        # 方案B：脚垫峰值检测 —— 站起来时脚垫压力增大
+        min_dist = max(75, len(stand_force) // 15)  # 较大间距避免噪声
+        if _has_scipy:
+            stand_std = float(np.std(stand_force))
+            prom = max(stand_std * 1.5, (float(np.max(stand_force)) - float(np.min(stand_force))) * 0.2)
+            _peaks, _ = _find_peaks(stand_force, distance=min_dist, prominence=prom)
+            peaks = _peaks.tolist()
+        else:
+            # 平滑后简单峰值检测
+            window = min(15, max(3, len(stand_force) // 30))
+            if window % 2 == 0:
+                window += 1
+            smoothed = np.convolve(stand_force, np.ones(window) / window, mode='same')
+            signal_range = float(np.max(smoothed) - np.min(smoothed))
+            min_prominence = signal_range * 0.2
+            for i in range(1, len(smoothed) - 1):
+                if smoothed[i] > smoothed[i - 1] and smoothed[i] > smoothed[i + 1]:
+                    left_min = float(np.min(smoothed[max(0, i - min_dist):i])) if i > 0 else smoothed[i]
+                    right_min = float(np.min(smoothed[i + 1:min(len(smoothed), i + min_dist + 1)])) if i < len(smoothed) - 1 else smoothed[i]
+                    prom = float(smoothed[i]) - max(left_min, right_min)
+                    if prom >= min_prominence:
+                        if not peaks or (i - peaks[-1]) >= min_dist:
+                            peaks.append(i)
 
     total_duration = float(stand_times[-1] - stand_times[0]) if len(stand_times) >= 2 else 0.0
     num_cycles = len(peaks)
