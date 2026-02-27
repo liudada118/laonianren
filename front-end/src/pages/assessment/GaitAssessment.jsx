@@ -2,6 +2,11 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
+import HeatmapCanvas from '../../components/ui/HeatmapCanvas';
+import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
+import GaitAverageChart from '../../components/ui/GaitAverageChart';
+import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
+import RegionScatterChart from '../../components/ui/RegionScatterChart';
 import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
 import { footpadServices, SENSOR_KEYS } from '../../lib/footpad-sdk/services/FootpadSerialService';
 import { backendBridge } from '../../lib/BackendBridge';
@@ -232,6 +237,8 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
   }));
 
   const images = realData?.images || {};
+  const renderData = realData?.renderData || {};
+  const regionCoords = realData?.regionCoords || {};
 
   /* EChart options */
   const fpaOption = useMemo(() => ({
@@ -360,15 +367,23 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
           <div className="zeiss-section-title">3. 完整足印与平均步态</div>
           <div className="zeiss-card p-4 mb-4">
             <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Foot Pressure Evolution (Start → End)</h4>
-            <div className="overflow-x-auto">
-              <img src={images.pressureEvolution || '/gait_report_data/pressure_evolution.png'} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
-            </div>
+            {renderData.evolutionFrames ? (
+              <PressureEvolutionChart evolutionData={renderData.evolutionFrames} />
+            ) : images.pressureEvolution ? (
+              <div className="overflow-x-auto">
+                <img src={images.pressureEvolution} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
+              </div>
+            ) : null}
           </div>
           <div className="zeiss-card p-4">
             <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Gait Average Summary (Smoothed)</h4>
-            <div className="flex justify-center">
-              <img src={images.gaitAverage || '/gait_report_data/gait_average.png'} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
-            </div>
+            {renderData.gaitAverage ? (
+              <GaitAverageChart gaitAvgData={renderData.gaitAverage} />
+            ) : images.gaitAverage ? (
+              <div className="flex justify-center">
+                <img src={images.gaitAverage} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -376,7 +391,11 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
         <section id="gait-heatmap">
           <div className="zeiss-section-title">4. 足印热力图 (FPA Analysis)</div>
           <div className="zeiss-card p-4 flex justify-center">
-            <img src={images.footprintHeatmap || '/gait_report_data/footprint_heatmap.png'} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '800px', imageRendering: 'auto' }} />
+            {renderData.footprintHeatmap ? (
+              <FootprintHeatmapChart heatmapData={renderData.footprintHeatmap} width={500} height={600} />
+            ) : images.footprintHeatmap ? (
+              <img src={images.footprintHeatmap} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '800px', imageRendering: 'auto' }} />
+            ) : null}
           </div>
         </section>
 
@@ -387,14 +406,7 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
             <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>足偏角 (FPA) 分析</h4>
             <EChart option={fpaOption} height={220} />
           </div>
-          {images.timeSeries ? (
-            <div className="zeiss-card p-4 mb-4">
-              <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>面积 / 负荷 / COP速度 / 压强 时序曲线</h4>
-              <div className="overflow-x-auto">
-                <img src={images.timeSeries} alt="Time Series Curves" className="w-full min-w-[600px]" style={{ imageRendering: 'auto' }} />
-              </div>
-            </div>
-          ) : null}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>面积 (cm²)</h4><EChart option={areaOption} height={200} /></div>
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>负荷 (N)</h4><EChart option={forceOption} height={200} /></div>
@@ -442,13 +454,13 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
               <h4 className="text-xs font-semibold mb-2 flex items-center gap-2" style={{ color: C.blue }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: C.blue }} /> 左足分区点
               </h4>
-              <img src={images.leftPressureRegions || '/gait_report_data/left_pressure_regions.png'} alt="Left Pressure Regions" className="w-full" />
+              <RegionScatterChart regionCoords={regionCoords.left} title="左足分区" color="#0066CC" height={300} />
             </div>
             <div className="zeiss-card p-4">
               <h4 className="text-xs font-semibold mb-2 flex items-center gap-2" style={{ color: C.amber }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: C.amber }} /> 右足分区点
               </h4>
-              <img src={images.rightPressureRegions || '/gait_report_data/right_pressure_regions.png'} alt="Right Pressure Regions" className="w-full" />
+              <RegionScatterChart regionCoords={regionCoords.right} title="右足分区" color="#D97706" height={300} />
             </div>
           </div>
         </section>
@@ -456,12 +468,7 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
         {/* 8. 分区曲线 */}
         <section id="gait-partcurves">
           <div className="zeiss-section-title">8. 分区曲线</div>
-          {(images.leftPartitionCurves || images.rightPartitionCurves) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-              {images.leftPartitionCurves && <div className="zeiss-card p-4"><img src={images.leftPartitionCurves} alt="Left Partition Curves" className="w-full" /></div>}
-              {images.rightPartitionCurves && <div className="zeiss-card p-4"><img src={images.rightPartitionCurves} alt="Right Partition Curves" className="w-full" /></div>}
-            </div>
-          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.blue }}>左足分区曲线</h4><EChart option={leftPartOpt} height={200} /></div>
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.amber }}>右足分区曲线</h4><EChart option={rightPartOpt} height={200} /></div>

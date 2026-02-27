@@ -2988,6 +2988,27 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     img_evolution = os.path.join(working_dir, "pressure_evolution.png")
     plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_path=img_evolution)
 
+    # 10.5 提取前端渲染数据 (替代 base64 图片)
+    from extract_render_data import extract_evolution_frames, extract_gait_average, extract_footprint_heatmap
+
+    evolution_data = extract_evolution_frames(
+        total_matrix, left_on, left_off, right_on, right_off,
+        center_l, center_r, get_foot_mask_by_centers, frame_ms=FRAME_MS
+    )
+
+    gait_avg_data = extract_gait_average(
+        total_matrix, left_on, left_off, right_on, right_off,
+        center_l, center_r, get_foot_mask_by_centers,
+        calculate_cop_single_side, unite_broken_arch_components
+    )
+
+    footprint_heatmap_data = extract_footprint_heatmap(
+        raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r,
+        total_matrix, lx, rx, center_l, center_r,
+        get_foot_mask_by_centers, get_largest_connected_region_cv,
+        adc_to_force, analyze_fpa_geometry
+    )
+
     # 11. 构建步态参数
     l_diff = np.diff(lx) if len(lx) >= 2 else []
     r_diff = np.diff(rx) if len(rx) >= 2 else []
@@ -3175,6 +3196,11 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
             "rightPressureRegions": img_to_base64(img_right_heatmap),
             "leftPartitionCurves": img_to_base64(img_left_part),
             "rightPartitionCurves": img_to_base64(img_right_part),
+        },
+        "renderData": {
+            "evolutionFrames": evolution_data,
+            "gaitAverage": gait_avg_data,
+            "footprintHeatmap": footprint_heatmap_data,
         },
     }
 
