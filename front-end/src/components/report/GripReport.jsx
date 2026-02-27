@@ -31,6 +31,16 @@ const SECTIONS = [
   { id: 'pie', label: '力占比分析' },
 ];
 
+/* ─── 默认空 fingers 数据（防止 undefined 崩溃）─── */
+const DEFAULT_FINGERS = [
+  { name: '拇指', force: 0, area: 0, points: 0, adc: 0 },
+  { name: '食指', force: 0, area: 0, points: 0, adc: 0 },
+  { name: '中指', force: 0, area: 0, points: 0, adc: 0 },
+  { name: '无名指', force: 0, area: 0, points: 0, adc: 0 },
+  { name: '小指', force: 0, area: 0, points: 0, adc: 0 },
+  { name: '手掌', force: 0, area: 0, points: 0, adc: 0 },
+];
+
 /* ─── 主报告组件 ─── */
 export default function GripReport({ patientName, onClose, onSwitchDynamic, reportData: propsReportData }) {
   const [activeHand, setActiveHand] = useState('left');
@@ -59,15 +69,33 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
       .catch(() => { setRawReport(null); setLoading(false); });
   }, [propsReportData]);
 
-  // 解析当前手的数据
+  // 解析当前手的数据，并确保关键字段有默认值
   const data = useMemo(() => {
     if (!rawReport) return null;
+    let handData;
     // 新格式: { left: {...}, right: {...}, activeHand }
     if (rawReport.left || rawReport.right) {
-      return activeHand === 'left' ? rawReport.left : rawReport.right;
+      handData = activeHand === 'left' ? rawReport.left : rawReport.right;
+    } else {
+      // 旧格式: 直接就是单手数据
+      handData = rawReport;
     }
-    // 旧格式: 直接就是单手数据
-    return rawReport;
+    // 如果选中的手没有数据，返回 null（会显示"数据加载失败"页面）
+    if (!handData) return null;
+    // 确保关键字段有默认值，防止 undefined 崩溃
+    return {
+      ...handData,
+      fingers: handData.fingers || DEFAULT_FINGERS,
+      totalForce: handData.totalForce ?? 0,
+      totalArea: handData.totalArea ?? 0,
+      totalFrames: handData.totalFrames ?? '-',
+      timeRange: handData.timeRange ?? '-',
+      times: handData.times || [],
+      forceTimeSeries: handData.forceTimeSeries || {},
+      eulerData: handData.eulerData || {},
+      angularVelocity: handData.angularVelocity || [],
+      timeAnalysis: handData.timeAnalysis || [],
+    };
   }, [rawReport, activeHand]);
 
   // 是否有两只手的数据
@@ -105,14 +133,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
 
   // ─── ECharts 配置 ───
   const forceTimeOption = useMemo(() => {
-    if (!data?.times) return {};
+    if (!data?.times?.length) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: [...fingerNames, '总力'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         ...fingerKeys.map((key, i) => ({
@@ -126,14 +154,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const stackOption = useMemo(() => {
-    if (!data?.times) return {};
+    if (!data?.times?.length) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: fingerNames, top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: fingerKeys.map((key, i) => ({
         name: fingerNames[i], type: 'line', stack: 'total', areaStyle: { opacity: 0.35 },
@@ -144,7 +172,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const barOption = useMemo(() => {
-    if (!data?.fingers) return {};
+    if (!data?.fingers?.length) return {};
     return {
       tooltip: tooltipStyle,
       grid: { top: 30, bottom: 35, left: 55, right: 20 },
@@ -159,14 +187,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const eulerOption = useMemo(() => {
-    if (!data?.times) return {};
+    if (!data?.times?.length) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: ['横滚(Roll)', '俯仰(Pitch)', '偏航(Yaw)'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '角度(°)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
@@ -177,14 +205,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const angVelOption = useMemo(() => {
-    if (!data?.times) return {};
+    if (!data?.times?.length) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: ['角速度', '检测阈值'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '角速度(°/s)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         { name: '角速度', type: 'line', smooth: true, symbol: 'none', data: (data.angularVelocity || []).filter((_, i) => i % step === 0), itemStyle: { color: '#9333EA' }, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2 } },
@@ -194,7 +222,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const pieOption = useMemo(() => {
-    if (!data?.fingers) return {};
+    if (!data?.fingers?.length) return {};
     return {
       tooltip: { formatter: '{b}: {c}N ({d}%)', ...tooltipStyle },
       legend: { orient: 'vertical', right: 15, top: 'center', textStyle: { fontSize: 11, color: chartTextColor } },
@@ -318,7 +346,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     { l: '测试手类型', v: data.handType || handLabel },
                     { l: '总帧数', v: data.totalFrames },
                     { l: '时间范围', v: data.timeRange },
-                    { l: '峰值力', v: data.peakInfo ? `${data.peakInfo.peak_force.toFixed(1)}N` : '-' }
+                    { l: '峰值力', v: data.peakInfo ? `${(data.peakInfo.peak_force ?? 0).toFixed(1)}N` : '-' }
                   ].map((item, i) => (
                     <div key={i} className="zeiss-card-inner p-3 text-center">
                       <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
@@ -337,21 +365,21 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                   <HandPressureMap fingers={data.fingers} totalForce={data.totalForce} hand={data.hand || handLabel} sensorMatrix={data.peakSensorMatrix || data.avgSensorMatrix} />
                 </div>
                 <div className="w-[360px] space-y-2">
-                  {data.fingers.map((f, i) => (
+                  {(data.fingers || []).map((f, i) => (
                     <div key={i} className="zeiss-card p-3 flex items-center gap-3 transition-colors hover:shadow-md">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs"
                         style={{ backgroundColor: colors[i] + '15', color: colors[i], border: `1px solid ${colors[i]}30` }}>
-                        {f.name[0]}
+                        {f.name?.[0] || '-'}
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name}</div>
+                        <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</div>
                         <div className="flex gap-3 text-[11px]">
-                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : f.force}N</span></span>
-                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area}mm²</span></span>
-                          <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points}</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? 0)}N</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area ?? 0}mm²</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points ?? 0}</span></span>
                         </div>
                       </div>
-                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? (f.force / data.totalForce * 100).toFixed(1) : 0}%</div>
+                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? ((f.force ?? 0) / data.totalForce * 100).toFixed(1) : 0}%</div>
                     </div>
                   ))}
                   <div className="zeiss-card p-3 flex justify-between items-center" style={{ background: 'var(--zeiss-blue-light)', borderColor: 'rgba(0,102,204,0.15)' }}>
@@ -395,18 +423,18 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     </tr>
                   </thead>
                   <tbody>
-                    {data.fingers.map((f, i) => (
+                    {(data.fingers || []).map((f, i) => (
                       <tr key={i} className="transition-colors" style={{ borderTop: '1px solid var(--border-light)' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                         <td className="px-4 py-2.5 flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[i] }}/>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name}</span>
+                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</span>
                         </td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc}</td>
-                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : f.force}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? '-')}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points ?? '-'}</td>
                       </tr>
                     ))}
                     <tr style={{ borderTop: '2px solid var(--border-medium)', background: 'var(--bg-tertiary)' }}>
