@@ -225,6 +225,15 @@ export default function GripAssessment() {
   const isRecordingRef = useRef(false);
   const currentHandRef = useRef('left'); // 'left' | 'right'
 
+  // 让 currentHandRef 跟随 phase 自动同步，确保热力图始终显示当前阶段对应的手的数据
+  useEffect(() => {
+    if (phase.startsWith('left')) {
+      currentHandRef.current = 'left';
+    } else if (phase.startsWith('right')) {
+      currentHandRef.current = 'right';
+    }
+  }, [phase]);
+
   // 调试面板
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [simLogs, setSimLogs] = useState([]);
@@ -293,8 +302,8 @@ export default function GripAssessment() {
     const handleLeftData = (sensorArray) => {
       if (!leftGloveConnected) setLeftGloveConnected(true);
 
-      // 始终更新热力图（不管是否在采集状态，只要有数据就显示）
-      if (bodyCanvasRef.current) {
+      // 只有当前阶段是左手时才更新热力图（避免右手数据覆盖）
+      if (bodyCanvasRef.current && currentHandRef.current === 'left') {
         try {
           const mapped = mapLeftHand(sensorArray);
           bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
@@ -323,8 +332,8 @@ export default function GripAssessment() {
     const handleRightData = (sensorArray) => {
       if (!rightGloveConnected) setRightGloveConnected(true);
 
-      // 始终更新热力图（不管是否在采集状态，只要有数据就显示）
-      if (bodyCanvasRef.current) {
+      // 只有当前阶段是右手时才更新热力图（避免左手数据覆盖）
+      if (bodyCanvasRef.current && currentHandRef.current === 'right') {
         try {
           const mapped = mapRightHand(sensorArray);
           bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
