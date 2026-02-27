@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getHistory } from '../lib/historyService';
 import GripReport from '../components/report/GripReport';
 import StandingReport from '../components/report/StandingReport';
+import SitStandReport from '../components/report/SitStandReport';
 
 const TYPE_LABELS = {
   grip: '握力评估',
@@ -11,56 +12,10 @@ const TYPE_LABELS = {
   gait: '行走步态评估',
 };
 
-/* ─── 起坐能力评估简易报告 ─── */
+/* ─── 起坐能力评估报告（使用前端渲染组件） ─── */
 function SitStandReportView({ patientName }) {
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="zeiss-section-title">起坐能力评估报告</div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>基本信息</h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { l: '评估对象', v: patientName },
-              { l: '评估类型', v: '5次起坐测试' },
-              { l: '评估时间', v: new Date().toLocaleString('zh-CN') },
-              { l: '总耗时', v: '12.5s' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>起坐分析结果</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { l: '平均单次耗时', v: '2.50s', color: 'var(--zeiss-blue)' },
-              { l: '最快单次耗时', v: '2.10s', color: 'var(--success)' },
-              { l: '最慢单次耗时', v: '3.05s', color: 'var(--warning)' },
-              { l: '左右对称性', v: '92.3%', color: 'var(--zeiss-blue)' },
-              { l: '稳定性评分', v: '85.6', color: 'var(--success)' },
-              { l: '综合评级', v: '良好', color: 'var(--success)' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-xl font-bold" style={{ color: item.color }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>评估结论</h3>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            受试者完成5次起坐测试，总耗时12.5秒，平均单次耗时2.50秒。起坐过程中左右对称性良好（92.3%），
-            稳定性评分85.6分。根据国际肌少症工作组(EWGSOP2)标准，5次起坐测试时间小于15秒为正常范围，
-            该受试者表现良好，起坐能力正常。
-          </p>
-        </div>
-      </div>
-    </div>
+    <SitStandReport patientInfo={{ name: patientName }} />
   );
 }
 
