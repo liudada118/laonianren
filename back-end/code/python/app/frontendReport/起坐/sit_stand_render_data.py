@@ -40,11 +40,33 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
     Returns:
         dict: 包含所有分析指标和base64图片的完整结果，结构如下:
             {
-                'duration_stats': { 'total_duration', 'num_cycles', 'avg_duration' },
+                'duration_stats': {
+                    'total_duration': float,
+                    'num_cycles': int,
+                    'avg_duration': float,
+                    'cycle_durations': [float],       # 每个周期的时长
+                    'min_cycle_duration': float,      # 最快周期
+                    'max_cycle_duration': float,      # 最慢周期
+                },
                 'stand_frames': int,
                 'sit_frames': int,
                 'stand_peaks': int,
                 'username': str,
+                'test_date': str,                     # 测试日期
+                'symmetry': {
+                    'left_right_ratio': float,        # 左右脚对称性 (%)
+                    'left_total': float,              # 左脚总力
+                    'right_total': float,             # 右脚总力
+                },
+                'pressure_stats': {
+                    'sit_max': float,                 # 坐垫最大总压力
+                    'sit_avg': float,                 # 坐垫平均总压力
+                    'foot_max': float,                # 脚垫最大总压力
+                    'foot_avg': float,                # 脚垫平均总压力
+                    'max_sit_change_rate': float,     # 坐垫最大变化率
+                    'max_foot_change_rate': float,    # 脚垫最大变化率
+                },
+                'cycle_peak_forces': [float],         # 各峰值力
                 'images': {
                     'stand_evolution': [{'label', 'sublabel', 'image'}],
                     'stand_cop_left': base64_png,
@@ -78,6 +100,8 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
 
 
 def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
+    from datetime import datetime
+
     stand = np.asarray(stand_data, dtype=float)
     sit = np.asarray(sit_data, dtype=float)
     if stand.ndim == 1:
@@ -102,27 +126,76 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
     stand_times = (np.arange(len(stand_force), dtype=float) * 0.08).tolist()
     sit_times = (np.arange(len(sit_force), dtype=float) * 0.08).tolist()
 
+    # 峰值检测（增加最小间距过滤）
     peaks = []
+    min_distance = 20
     if len(stand_force) >= 3:
         threshold = float(np.mean(stand_force) + 0.5 * np.std(stand_force))
         for i in range(1, len(stand_force) - 1):
-            if stand_force[i] >= threshold and stand_force[i] >= stand_force[i - 1] and stand_force[i] >= stand_force[i + 1]:
-                peaks.append(i)
+            if (stand_force[i] >= threshold
+                    and stand_force[i] >= stand_force[i - 1]
+                    and stand_force[i] >= stand_force[i + 1]):
+                if not peaks or (i - peaks[-1]) >= min_distance:
+                    peaks.append(i)
 
     total_duration = float(stand_times[-1] - stand_times[0]) if len(stand_times) >= 2 else 0.0
-    num_cycles = len(peaks)
+    num_cycles = max(len(peaks) - 1, 0)
     avg_duration = float(total_duration / num_cycles) if num_cycles > 0 else 0.0
+
+    # 周期时长明细
+    cycle_durations = []
+    for i in range(len(peaks) - 1):
+        d_val = stand_times[peaks[i + 1]] - stand_times[peaks[i]]
+        cycle_durations.append(round(d_val, 2))
+
+    # 各周期峰值力
+    cycle_peak_forces = [round(float(stand_force[p]), 1) for p in peaks]
+
+    # 左右脚对称性 (脚垫 64x64, 左半:列0-31, 右半:列32-63)
+    stand_3d = stand.reshape(-1, 64, 64)
+    left_total = float(stand_3d[:, :, :32].sum())
+    right_total = float(stand_3d[:, :, 32:].sum())
+    symmetry_ratio = (min(left_total, right_total) / max(left_total, right_total) * 100
+                      if max(left_total, right_total) > 0 else 0.0)
+
+    # 压力统计
+    sit_max_pressure = float(sit_force.max()) if len(sit_force) > 0 else 0
+    sit_avg_pressure = float(sit_force.mean()) if len(sit_force) > 0 else 0
+    foot_max_pressure = float(stand_force.max()) if len(stand_force) > 0 else 0
+    foot_avg_pressure = float(stand_force.mean()) if len(stand_force) > 0 else 0
+    sit_force_diff = np.diff(sit_force)
+    foot_force_diff = np.diff(stand_force)
+    max_sit_rate = float(np.max(np.abs(sit_force_diff))) if len(sit_force_diff) > 0 else 0
+    max_foot_rate = float(np.max(np.abs(foot_force_diff))) if len(foot_force_diff) > 0 else 0
 
     return {
         'duration_stats': {
             'total_duration': round(total_duration, 2),
             'num_cycles': int(num_cycles),
             'avg_duration': round(avg_duration, 2),
+            'cycle_durations': cycle_durations,
+            'min_cycle_duration': round(min(cycle_durations), 2) if cycle_durations else 0,
+            'max_cycle_duration': round(max(cycle_durations), 2) if cycle_durations else 0,
         },
         'stand_frames': int(stand.shape[0]),
         'sit_frames': int(sit.shape[0]),
-        'stand_peaks': int(num_cycles),
+        'stand_peaks': int(len(peaks)),
         'username': username,
+        'test_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'symmetry': {
+            'left_right_ratio': round(symmetry_ratio, 1),
+            'left_total': round(left_total, 0),
+            'right_total': round(right_total, 0),
+        },
+        'pressure_stats': {
+            'sit_max': round(sit_max_pressure, 0),
+            'sit_avg': round(sit_avg_pressure, 0),
+            'foot_max': round(foot_max_pressure, 0),
+            'foot_avg': round(foot_avg_pressure, 0),
+            'max_sit_change_rate': round(max_sit_rate, 1),
+            'max_foot_change_rate': round(max_foot_rate, 1),
+        },
+        'cycle_peak_forces': cycle_peak_forces,
         'images': {
             'stand_evolution': [],
             'stand_cop_left': None,
@@ -181,21 +254,65 @@ def get_duration_stats(result):
         'total_duration': float,  # 总测试时长(秒)
         'num_cycles': int,        # 起坐周期数
         'avg_duration': float,    # 平均周期时长(秒)
+        'cycle_durations': [float],  # 每个周期的时长
+        'min_cycle_duration': float, # 最快周期
+        'max_cycle_duration': float, # 最慢周期
         'stand_frames': int,      # 站立帧数
         'sit_frames': int,        # 坐姿帧数
         'stand_peaks': int,       # 检测到的峰值数
         'username': str,
+        'test_date': str,         # 测试日期
     }
     """
+    ds = result.get('duration_stats', {})
     return {
-        'total_duration': result['duration_stats']['total_duration'],
-        'num_cycles': result['duration_stats']['num_cycles'],
-        'avg_duration': result['duration_stats']['avg_duration'],
-        'stand_frames': result['stand_frames'],
-        'sit_frames': result['sit_frames'],
-        'stand_peaks': result['stand_peaks'],
-        'username': result['username'],
+        'total_duration': ds.get('total_duration', 0),
+        'num_cycles': ds.get('num_cycles', 0),
+        'avg_duration': ds.get('avg_duration', 0),
+        'cycle_durations': ds.get('cycle_durations', []),
+        'min_cycle_duration': ds.get('min_cycle_duration', 0),
+        'max_cycle_duration': ds.get('max_cycle_duration', 0),
+        'stand_frames': result.get('stand_frames', 0),
+        'sit_frames': result.get('sit_frames', 0),
+        'stand_peaks': result.get('stand_peaks', 0),
+        'username': result.get('username', ''),
+        'test_date': result.get('test_date', ''),
     }
+
+
+def get_symmetry(result):
+    """
+    【渲染区域】左右脚对称性分析
+    返回: {
+        'left_right_ratio': float,  # 对称性比值 (%)
+        'left_total': float,        # 左脚总力
+        'right_total': float,       # 右脚总力
+    }
+    """
+    return result.get('symmetry', {})
+
+
+def get_pressure_stats(result):
+    """
+    【渲染区域】压力统计
+    返回: {
+        'sit_max': float,              # 坐垫最大总压力
+        'sit_avg': float,              # 坐垫平均总压力
+        'foot_max': float,             # 脚垫最大总压力
+        'foot_avg': float,             # 脚垫平均总压力
+        'max_sit_change_rate': float,  # 坐垫最大变化率
+        'max_foot_change_rate': float, # 脚垫最大变化率
+    }
+    """
+    return result.get('pressure_stats', {})
+
+
+def get_cycle_peak_forces(result):
+    """
+    【渲染区域】各周期峰值力
+    返回: [float]  # 每个峰值的力值
+    """
+    return result.get('cycle_peak_forces', [])
 
 
 def get_stand_evolution_images(result):

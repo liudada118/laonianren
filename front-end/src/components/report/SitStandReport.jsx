@@ -28,54 +28,6 @@ function EChart({ option, height = 280 }) {
   return <div ref={ref} style={{ width: '100%', height }} />;
 }
 
-/* ─── Jet 色图 ─── */
-function jetColor(t) {
-  if (t <= 0) return [0, 0, 0, 0];
-  const r = t < 0.89 ? Math.min(Math.max(4 * t - 1.5, 0), 1) : Math.max(-4 * t + 4.5, 0);
-  const g = t < 0.64 ? Math.min(Math.max(4 * t - 0.5, 0), 1) : Math.max(-4 * t + 3.5, 0);
-  const b = t < 0.36 ? Math.min(Math.max(4 * t + 0.5, 0), 1) : Math.max(-4 * t + 2.5, 0);
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), 255];
-}
-
-/* ─── 热力图 Canvas 渲染组件 ─── */
-function HeatmapCanvas({ imageData, width = 120, height = 200, label }) {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !imageData) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // imageData 可以是 base64 字符串或矩阵数据
-    if (typeof imageData === 'string' && imageData.startsWith('data:image')) {
-      // base64 图片 - 直接绘制
-      const img = new Image();
-      img.onload = () => {
-        canvas.width = width * 2;
-        canvas.height = height * 2;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      };
-      img.src = imageData;
-    }
-  }, [imageData, width, height]);
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <canvas
-        ref={canvasRef}
-        style={{ width, height, borderRadius: 4, background: '#000' }}
-      />
-      {label && (
-        <span className="text-[10px] font-medium" style={{ color: 'var(--text-tertiary)' }}>
-          {label}
-        </span>
-      )}
-    </div>
-  );
-}
-
 /* ─── COP 轨迹 Canvas 渲染组件 ─── */
 function COPTrajectoryCanvas({ imageData, title, height = 360 }) {
   const containerRef = useRef(null);
@@ -98,10 +50,9 @@ function COPTrajectoryCanvas({ imageData, title, height = 360 }) {
         const ctx = canvas.getContext('2d');
         ctx.scale(dpr, dpr);
         ctx.clearRect(0, 0, rect.width, height);
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = '#0A0E17';
         ctx.fillRect(0, 0, rect.width, height);
 
-        // 保持宽高比居中绘制
         const imgAspect = img.width / img.height;
         const canvasAspect = rect.width / height;
         let drawW, drawH, drawX, drawY;
@@ -132,7 +83,7 @@ function COPTrajectoryCanvas({ imageData, title, height = 360 }) {
       <canvas
         ref={canvasRef}
         className="w-full rounded-lg"
-        style={{ height, background: '#000' }}
+        style={{ height, background: '#0A0E17' }}
       />
     </div>
   );
@@ -143,7 +94,6 @@ function ForceTimeChart({ times, forces, peaksIdx, title, color = C.blue, height
   const option = useMemo(() => {
     if (!times || !forces || times.length === 0) return null;
 
-    // LTTB 降采样到最多 1000 个点
     let data;
     if (times.length > 1000) {
       data = lttbDownsample(times, forces, 1000);
@@ -225,6 +175,125 @@ function ForceTimeChart({ times, forces, peaksIdx, title, color = C.blue, height
   );
 }
 
+/* ─── 周期时长柱状图 ─── */
+function CycleDurationChart({ durations, height = 220 }) {
+  const option = useMemo(() => {
+    if (!durations || durations.length === 0) return null;
+    const labels = durations.map((_, i) => `第${i + 1}周期`);
+    const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
+    return {
+      animation: false,
+      grid: { top: 30, bottom: 36, left: 50, right: 20 },
+      tooltip: { ...ttStyle, trigger: 'axis', formatter: (p) => `${p[0].name}: ${p[0].value.toFixed(2)}s` },
+      xAxis: { type: 'category', data: labels, axisLabel: { color: C.text, fontSize: 10, rotate: durations.length > 6 ? 30 : 0 } },
+      yAxis: { type: 'value', name: '时长 (s)', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      series: [{
+        type: 'bar',
+        data: durations.map(v => ({
+          value: v,
+          itemStyle: { color: v <= avg ? C.green : C.amber, borderRadius: [4, 4, 0, 0] },
+        })),
+        barWidth: '50%',
+        markLine: {
+          data: [{ yAxis: avg, label: { formatter: `均值 ${avg.toFixed(2)}s`, fontSize: 10, color: C.red } }],
+          lineStyle: { type: 'dashed', color: C.red, width: 1 },
+          symbol: 'none',
+        },
+      }],
+    };
+  }, [durations]);
+
+  if (!option) return null;
+  return <EChart option={option} height={height} />;
+}
+
+/* ─── 各周期峰值力柱状图 ─── */
+function CyclePeakForceChart({ peakForces, height = 220 }) {
+  const option = useMemo(() => {
+    if (!peakForces || peakForces.length === 0) return null;
+    const labels = peakForces.map((_, i) => `峰值${i + 1}`);
+    const avg = peakForces.reduce((a, b) => a + b, 0) / peakForces.length;
+    return {
+      animation: false,
+      grid: { top: 30, bottom: 36, left: 60, right: 20 },
+      tooltip: { ...ttStyle, trigger: 'axis', formatter: (p) => `${p[0].name}: ${p[0].value.toFixed(0)}` },
+      xAxis: { type: 'category', data: labels, axisLabel: { color: C.text, fontSize: 10, rotate: peakForces.length > 6 ? 30 : 0 } },
+      yAxis: { type: 'value', name: '峰值力', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      series: [{
+        type: 'bar',
+        data: peakForces.map(v => ({
+          value: v,
+          itemStyle: { color: C.cyan, borderRadius: [4, 4, 0, 0] },
+        })),
+        barWidth: '50%',
+        markLine: {
+          data: [{ yAxis: avg, label: { formatter: `均值 ${avg.toFixed(0)}`, fontSize: 10, color: C.purple } }],
+          lineStyle: { type: 'dashed', color: C.purple, width: 1 },
+          symbol: 'none',
+        },
+      }],
+    };
+  }, [peakForces]);
+
+  if (!option) return null;
+  return <EChart option={option} height={height} />;
+}
+
+/* ─── 左右脚对称性环形图 ─── */
+function SymmetryGauge({ ratio, leftTotal, rightTotal, height = 180 }) {
+  const option = useMemo(() => {
+    const r = ratio || 0;
+    const gaugeColor = r >= 80 ? C.green : r >= 60 ? C.amber : C.red;
+    const label = r >= 80 ? '良好' : r >= 60 ? '一般' : '较差';
+    return {
+      animation: false,
+      series: [{
+        type: 'gauge',
+        startAngle: 200,
+        endAngle: -20,
+        min: 0,
+        max: 100,
+        radius: '90%',
+        center: ['50%', '55%'],
+        pointer: { show: false },
+        progress: { show: true, width: 14, roundCap: true, itemStyle: { color: gaugeColor } },
+        axisLine: { lineStyle: { width: 14, color: [[1, '#EDF0F4']] } },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        detail: {
+          valueAnimation: false,
+          formatter: `${r.toFixed(1)}%\n${label}`,
+          fontSize: 16,
+          fontWeight: 'bold',
+          color: gaugeColor,
+          offsetCenter: [0, '10%'],
+          lineHeight: 22,
+        },
+        data: [{ value: r }],
+      }],
+    };
+  }, [ratio]);
+
+  return (
+    <div>
+      <EChart option={option} height={height} />
+      {(leftTotal != null && rightTotal != null) && (
+        <div className="flex justify-center gap-6 -mt-2">
+          <div className="text-center">
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>左脚总力</div>
+            <div className="text-xs font-bold" style={{ color: C.blue }}>{Number(leftTotal).toLocaleString()}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>右脚总力</div>
+            <div className="text-xs font-bold" style={{ color: C.green }}>{Number(rightTotal).toLocaleString()}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── LTTB 降采样算法 ─── */
 function lttbDownsample(times, values, targetCount) {
   const n = times.length;
@@ -233,23 +302,18 @@ function lttbDownsample(times, values, targetCount) {
   const sampled = [[times[0], values[0]]];
   const bucketSize = (n - 2) / (targetCount - 2);
 
-  let lastIdx = 0;
   for (let i = 1; i < targetCount - 1; i++) {
     const start = Math.floor((i - 1) * bucketSize) + 1;
     const end = Math.min(Math.floor(i * bucketSize) + 1, n);
     const nextStart = Math.min(Math.floor((i + 1) * bucketSize) + 1, n - 1);
     const nextEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, n);
 
-    // 下一个桶的平均值
     let avgX = 0, avgY = 0, count = 0;
     for (let j = nextStart; j < nextEnd && j < n; j++) {
-      avgX += times[j];
-      avgY += values[j];
-      count++;
+      avgX += times[j]; avgY += values[j]; count++;
     }
     if (count > 0) { avgX /= count; avgY /= count; }
 
-    // 当前桶中找最大三角形面积的点
     let maxArea = -1, maxIdx = start;
     const [ax, ay] = sampled[sampled.length - 1];
     for (let j = start; j < end && j < n; j++) {
@@ -257,21 +321,35 @@ function lttbDownsample(times, values, targetCount) {
       if (area > maxArea) { maxArea = area; maxIdx = j; }
     }
     sampled.push([times[maxIdx], values[maxIdx]]);
-    lastIdx = maxIdx;
   }
   sampled.push([times[n - 1], values[n - 1]]);
   return sampled;
+}
+
+/* ─── 指标卡片 ─── */
+function MetricCard({ label, value, sub, color, icon }) {
+  return (
+    <div className="zeiss-card-inner p-4 text-center">
+      {icon && <div className="text-lg mb-1">{icon}</div>}
+      <div className="text-2xl font-bold" style={{ color: color || 'var(--text-primary)' }}>{value}</div>
+      <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      {sub && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{sub}</div>}
+    </div>
+  );
 }
 
 /* ─── 报告目录 ─── */
 const SECTIONS = [
   { id: 'overview', title: '基本信息' },
   { id: 'summary', title: '总体指标' },
+  { id: 'cycle-detail', title: '周期分析' },
+  { id: 'symmetry', title: '对称性分析' },
   { id: 'stand-evo', title: '站立压力演变' },
   { id: 'stand-cop', title: '站立COP轨迹' },
   { id: 'sit-evo', title: '坐姿压力演变' },
   { id: 'sit-cop', title: '坐姿COP轨迹' },
   { id: 'force-curve', title: '力-时间曲线' },
+  { id: 'pressure-stats', title: '压力统计' },
   { id: 'conclusion', title: '综合评估' },
 ];
 
@@ -283,7 +361,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
 
-  // 优先使用 props 传入的报告数据，否则从 JSON 文件加载
   useEffect(() => {
     if (propsReportData) {
       setReportData(propsReportData);
@@ -319,23 +396,45 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     </div>
   );
 
-  // 解析数据 - 兼容后端返回的新格式和旧 JSON 格式
+  // ===== 数据解析 - 兼容后端API和前端生成两种格式 =====
   const images = d.images || {};
   const forceCurves = d.force_curves || {};
-  const standEvolution = images.stand_evolution || d.stand_evolution?.heatmaps || [];
-  const sitEvolution = images.sit_evolution || d.sit_evolution?.heatmaps || [];
+
+  // 热力图和COP图
+  const standEvolution = images.stand_evolution || [];
+  const sitEvolution = images.sit_evolution || [];
   const standCopLeft = images.stand_cop_left || null;
   const standCopRight = images.stand_cop_right || null;
   const sitCopImage = images.sit_cop || null;
 
-  // 力-时间曲线数据
-  const standTimes = forceCurves.stand_times || [];
-  const standForce = forceCurves.stand_force || [];
-  const sitTimes = forceCurves.sit_times || [];
-  const sitForce = forceCurves.sit_force || [];
-  const standPeaksIdx = forceCurves.stand_peaks_idx || d.stand_peaks || [];
+  // 力-时间曲线数据 - 兼容两种格式
+  const standTimes = forceCurves.stand_times || d.footpad_force_curve?.times || [];
+  const standForce = forceCurves.stand_force || d.footpad_force_curve?.values || [];
+  const sitTimes = forceCurves.sit_times || d.seat_force_curve?.times || [];
+  const sitForce = forceCurves.sit_force || d.seat_force_curve?.values || [];
+  const standPeaksIdx = forceCurves.stand_peaks_idx || [];
 
-  // 旧格式兼容：如果有 stand_evolution.heatmaps 但没有 images
+  // 周期分析数据
+  const durationStats = d.duration_stats || {};
+  const cycleDurations = durationStats.cycle_durations || [];
+  const minCycleDuration = durationStats.min_cycle_duration || (cycleDurations.length > 0 ? Math.min(...cycleDurations) : null);
+  const maxCycleDuration = durationStats.max_cycle_duration || (cycleDurations.length > 0 ? Math.max(...cycleDurations) : null);
+
+  // 对称性数据
+  const symmetry = d.symmetry || {};
+  const symmetryRatio = symmetry.left_right_ratio || null;
+  const leftTotal = symmetry.left_total || null;
+  const rightTotal = symmetry.right_total || null;
+
+  // 压力统计
+  const pressureStats = d.pressure_stats || {};
+  const seatStats = d.seat_stats || {};
+  const footpadStats = d.footpad_stats || {};
+
+  // 各周期峰值力
+  const cyclePeakForces = d.cycle_peak_forces || [];
+
+  // 旧格式兼容
   const hasOldFormat = !d.images && d.stand_evolution;
   const BASE = '/sitstand_report_data/';
 
@@ -343,10 +442,17 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const evoLabels = ['0%', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%'];
   const sitEvoLabels = ['Start', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', 'End'];
 
+  // 评估等级
+  const totalDur = durationStats.total_duration || 0;
+  const evalLevel = totalDur > 0 && totalDur < 12 ? { text: '优秀', color: C.green }
+    : totalDur <= 15 ? { text: '正常', color: C.cyan }
+    : totalDur <= 20 ? { text: '偏慢', color: C.amber }
+    : { text: '异常', color: C.red };
+
   return (
     <div className="flex h-full">
       {/* 左侧导航 */}
-      <nav className="w-48 shrink-0 p-4 sticky top-0" style={{ borderRight: '1px solid var(--border-light)' }}>
+      <nav className="w-48 shrink-0 p-4 sticky top-0 overflow-y-auto" style={{ borderRight: '1px solid var(--border-light)' }}>
         <h3 className="text-xs font-semibold mb-4 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
           报告目录
         </h3>
@@ -360,7 +466,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
       {/* 右侧内容 */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* ── 基本信息 ── */}
+
+        {/* ══════ 1. 基本信息 ══════ */}
         <section id="sit-overview">
           <div className="zeiss-section-title">基本信息</div>
           <div className="grid grid-cols-4 gap-4">
@@ -368,49 +475,145 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               { l: '姓名', v: patientInfo?.name || d.username || '---' },
               { l: '测试类型', v: '五次起坐测试' },
               { l: '测试时间', v: d.test_date || new Date().toLocaleString('zh-CN') },
-              { l: '完成周期', v: `${d.duration_stats?.num_cycles || '--'}次` },
+              { l: '评估等级', v: evalLevel.text, c: evalLevel.color },
             ].map((item, i) => (
               <div key={i} className="zeiss-card-inner p-4">
                 <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
+                <div className="text-sm font-semibold" style={{ color: item.c || 'var(--text-primary)' }}>{item.v}</div>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ── 总体指标 ── */}
+        {/* ══════ 2. 总体指标 ══════ */}
         <section id="sit-summary">
           <div className="zeiss-section-title">总体指标</div>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { l: '总时长', v: `${d.duration_stats?.total_duration?.toFixed(1) || '--'}s`, c: C.blue },
-              { l: '起坐周期数', v: `${d.duration_stats?.num_cycles || '--'}次`, c: C.green },
-              { l: '平均周期时长', v: `${d.duration_stats?.avg_duration?.toFixed(2) || '--'}s`, c: C.cyan },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-5 text-center">
-                <div className="text-3xl font-bold" style={{ color: item.c }}>{item.v}</div>
-                <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-4 gap-4">
+            <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue}
+              sub={totalDur <= 15 ? '正常范围 (<15s)' : '偏慢 (>15s)'} />
+            <MetricCard label="完成周期数" value={`${durationStats.num_cycles || '--'}次`} color={C.green} />
+            <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.cyan} />
+            <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.purple} />
           </div>
-          {/* 额外统计 */}
-          {(d.stand_frames || d.sit_frames) && (
-            <div className="grid grid-cols-3 gap-4 mt-4">
-              {[
-                { l: '站立帧数', v: d.stand_frames || '--' },
-                { l: '坐姿帧数', v: d.sit_frames || '--' },
-                { l: '检测峰值数', v: d.stand_peaks || standPeaksIdx.length || '--' },
-              ].map((item, i) => (
-                <div key={i} className="zeiss-card-inner p-3 text-center">
-                  <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
-                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
+          {/* 帧数信息 */}
+          <div className="grid grid-cols-3 gap-4 mt-3">
+            <div className="zeiss-card-inner p-3 text-center">
+              <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{d.stand_frames || '--'}</div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>站立帧数</div>
+            </div>
+            <div className="zeiss-card-inner p-3 text-center">
+              <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{d.sit_frames || '--'}</div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>坐姿帧数</div>
+            </div>
+            <div className="zeiss-card-inner p-3 text-center">
+              <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                {standTimes.length >= 2 ? `${(1000 / ((standTimes[standTimes.length - 1] - standTimes[0]) / standTimes.length * 1000)).toFixed(0)} Hz` : '--'}
+              </div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>采样率</div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════ 3. 周期分析 ══════ */}
+        <section id="sit-cycle-detail">
+          <div className="zeiss-section-title">周期分析</div>
+          {cycleDurations.length > 0 ? (
+            <>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <MetricCard label="最快周期" value={`${minCycleDuration?.toFixed(2) || '--'}s`} color={C.green} />
+                <MetricCard label="最慢周期" value={`${maxCycleDuration?.toFixed(2) || '--'}s`} color={C.amber} />
+                <MetricCard label="周期时长标准差"
+                  value={`${(Math.sqrt(cycleDurations.reduce((s, v) => s + (v - durationStats.avg_duration) ** 2, 0) / cycleDurations.length)).toFixed(2)}s`}
+                  color={C.purple}
+                  sub="越小越稳定" />
+              </div>
+              <div className="zeiss-card p-4">
+                <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>各周期时长分布</div>
+                <CycleDurationChart durations={cycleDurations} height={220} />
+              </div>
+            </>
+          ) : (
+            <div className="zeiss-card p-4">
+              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>周期信息</div>
+              <div className="grid grid-cols-2 gap-4">
+                <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
+                <MetricCard label="周期数" value={`${durationStats.num_cycles || '--'}`} color={C.green} />
+              </div>
+              {d.cycles && d.cycles.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>检测到的周期区间</div>
+                  <div className="flex flex-wrap gap-2">
+                    {d.cycles.map((c, i) => (
+                      <span key={i} className="text-[10px] px-2 py-1 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>
+                        周期{i + 1}: 帧{c.start}~{c.end}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
+            </div>
+          )}
+
+          {/* 各周期峰值力 */}
+          {cyclePeakForces.length > 0 && (
+            <div className="zeiss-card p-4 mt-4">
+              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>各峰值力分布</div>
+              <CyclePeakForceChart peakForces={cyclePeakForces} height={220} />
             </div>
           )}
         </section>
 
-        {/* ── 站立足底压力演变 ── */}
+        {/* ══════ 4. 对称性分析 ══════ */}
+        <section id="sit-symmetry">
+          <div className="zeiss-section-title">对称性分析</div>
+          {symmetryRatio != null ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="zeiss-card p-4">
+                <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>左右脚对称性指数</div>
+                <SymmetryGauge ratio={symmetryRatio} leftTotal={leftTotal} rightTotal={rightTotal} height={180} />
+                <div className="text-[10px] text-center mt-1" style={{ color: 'var(--text-muted)' }}>
+                  对称性 = min(左,右) / max(左,右) × 100%
+                </div>
+              </div>
+              <div className="zeiss-card p-4">
+                <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>对称性评估</div>
+                <div className="space-y-3 mt-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>对称性比值</span>
+                    <span className="text-sm font-bold" style={{ color: symmetryRatio >= 80 ? C.green : symmetryRatio >= 60 ? C.amber : C.red }}>
+                      {symmetryRatio.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>左脚占比</span>
+                    <span className="text-sm font-bold" style={{ color: C.blue }}>
+                      {leftTotal && rightTotal ? ((leftTotal / (leftTotal + rightTotal)) * 100).toFixed(1) : '--'}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>右脚占比</span>
+                    <span className="text-sm font-bold" style={{ color: C.green }}>
+                      {leftTotal && rightTotal ? ((rightTotal / (leftTotal + rightTotal)) * 100).toFixed(1) : '--'}%
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-lg text-xs leading-relaxed" style={{ background: symmetryRatio >= 80 ? '#05966910' : symmetryRatio >= 60 ? '#D9770610' : '#DC262610', color: 'var(--text-secondary)' }}>
+                    {symmetryRatio >= 80
+                      ? '左右脚受力分布较为均衡，对称性良好，表明站立时重心控制稳定。'
+                      : symmetryRatio >= 60
+                      ? '左右脚受力存在一定差异，建议关注站立时的重心偏移情况。'
+                      : '左右脚受力明显不对称，可能存在单侧肌力不足或代偿性站姿，建议进一步评估。'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="zeiss-card p-6 flex items-center justify-center" style={{ minHeight: 120 }}>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无对称性数据（需后端算法支持）</span>
+            </div>
+          )}
+        </section>
+
+        {/* ══════ 5. 站立足底压力演变 ══════ */}
         <section id="sit-stand-evo">
           <div className="zeiss-section-title">站立足底压力演变</div>
           <div className="zeiss-card p-4">
@@ -418,17 +621,14 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               站立过程中左右脚足底压力分布随时间的变化（0%~100%）
             </p>
 
-            {/* 新格式：base64 图片数据 */}
             {standEvolution.length > 0 && standEvolution[0]?.image ? (
               <>
-                {/* 标签行 */}
                 <div className="flex gap-1 mb-1 pl-12">
                   {evoLabels.map((label, i) => (
                     <div key={i} className="flex-1 text-center text-[10px] font-medium"
                       style={{ color: 'var(--text-tertiary)' }}>{label}</div>
                   ))}
                 </div>
-                {/* 左脚行 */}
                 <div className="flex items-center gap-1 mb-1">
                   <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.blue }}>左脚</div>
                   <div className="flex gap-1 flex-1">
@@ -438,12 +638,11 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                       .map((h, i) => (
                         <div key={i} className="flex-1">
                           <img src={h.image} alt={`左脚 ${evoLabels[h.sublabel]}`}
-                            className="w-full rounded" style={{ background: '#000' }} />
+                            className="w-full rounded" style={{ background: '#0A0E17' }} />
                         </div>
                       ))}
                   </div>
                 </div>
-                {/* 右脚行 */}
                 <div className="flex items-center gap-1">
                   <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: C.green }}>右脚</div>
                   <div className="flex gap-1 flex-1">
@@ -453,14 +652,13 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                       .map((h, i) => (
                         <div key={i} className="flex-1">
                           <img src={h.image} alt={`右脚 ${evoLabels[h.sublabel]}`}
-                            className="w-full rounded" style={{ background: '#000' }} />
+                            className="w-full rounded" style={{ background: '#0A0E17' }} />
                         </div>
                       ))}
                   </div>
                 </div>
               </>
             ) : hasOldFormat && d.stand_evolution?.heatmaps ? (
-              /* 旧格式兼容：文件路径 */
               <>
                 <div className="flex gap-1 mb-1 pl-12">
                   {(d.stand_evolution?.labels || evoLabels).map((label, i) => (
@@ -505,7 +703,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
           </div>
         </section>
 
-        {/* ── 站立COP轨迹 ── */}
+        {/* ══════ 6. 站立COP轨迹 ══════ */}
         <section id="sit-stand-cop">
           <div className="zeiss-section-title">站立COP轨迹</div>
           <div className="grid grid-cols-2 gap-4">
@@ -543,7 +741,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
           </div>
         </section>
 
-        {/* ── 坐姿压力演变 ── */}
+        {/* ══════ 7. 坐姿压力演变 ══════ */}
         <section id="sit-sit-evo">
           <div className="zeiss-section-title">坐姿压力演变</div>
           <div className="zeiss-card p-4">
@@ -565,7 +763,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                     .map((h, i) => (
                       <div key={i} className="flex-1">
                         <img src={h.image} alt={`坐姿 ${sitEvoLabels[h.label]}`}
-                          className="w-full rounded" style={{ background: '#000' }} />
+                          className="w-full rounded" style={{ background: '#0A0E17' }} />
                       </div>
                     ))}
                 </div>
@@ -597,7 +795,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
           </div>
         </section>
 
-        {/* ── 坐姿COP轨迹 ── */}
+        {/* ══════ 8. 坐姿COP轨迹 ══════ */}
         <section id="sit-sit-cop">
           <div className="zeiss-section-title">坐姿COP轨迹</div>
           {sitCopImage ? (
@@ -616,11 +814,10 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
           )}
         </section>
 
-        {/* ── 力-时间曲线 ── */}
+        {/* ══════ 9. 力-时间曲线 ══════ */}
         <section id="sit-force-curve">
           <div className="zeiss-section-title">力-时间曲线</div>
           <div className="grid grid-cols-1 gap-4">
-            {/* 站立力曲线 - 优先使用前端 ECharts 渲染 */}
             <div className="zeiss-card p-4">
               {standTimes.length > 0 && standForce.length > 0 ? (
                 <ForceTimeChart
@@ -646,7 +843,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               )}
             </div>
 
-            {/* 坐姿力曲线 */}
             <div className="zeiss-card p-4">
               {sitTimes.length > 0 && sitForce.length > 0 ? (
                 <ForceTimeChart
@@ -673,22 +869,126 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
           </div>
         </section>
 
-        {/* ── 综合评估 ── */}
+        {/* ══════ 10. 压力统计 ══════ */}
+        <section id="sit-pressure-stats">
+          <div className="zeiss-section-title">压力统计</div>
+          {(pressureStats.foot_max || pressureStats.sit_max || seatStats.max_pressure || footpadStats.max_pressure) ? (
+            <div className="grid grid-cols-2 gap-4">
+              {/* 脚垫压力 */}
+              <div className="zeiss-card p-4">
+                <div className="text-xs font-medium mb-3" style={{ color: 'var(--text-tertiary)' }}>脚垫压力统计</div>
+                <div className="space-y-2">
+                  {[
+                    { l: '最大总压力', v: pressureStats.foot_max || footpadStats.max_pressure || '--', c: C.red },
+                    { l: '平均总压力', v: pressureStats.foot_avg || footpadStats.mean_pressure || '--', c: C.blue },
+                    ...(pressureStats.max_foot_change_rate ? [{ l: '最大变化率', v: pressureStats.max_foot_change_rate, c: C.amber }] : []),
+                    ...(footpadStats.total_pressure ? [{ l: '累计总压力', v: footpadStats.total_pressure, c: C.cyan }] : []),
+                    ...(footpadStats.contact_area ? [{ l: '接触面积', v: footpadStats.contact_area, c: C.green }] : []),
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.l}</span>
+                      <span className="text-sm font-bold tabular-nums" style={{ color: item.c }}>
+                        {typeof item.v === 'number' ? item.v.toLocaleString() : item.v}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 坐垫压力 */}
+              <div className="zeiss-card p-4">
+                <div className="text-xs font-medium mb-3" style={{ color: 'var(--text-tertiary)' }}>坐垫压力统计</div>
+                <div className="space-y-2">
+                  {[
+                    { l: '最大总压力', v: pressureStats.sit_max || seatStats.max_pressure || '--', c: C.red },
+                    { l: '平均总压力', v: pressureStats.sit_avg || seatStats.mean_pressure || '--', c: C.blue },
+                    ...(pressureStats.max_sit_change_rate ? [{ l: '最大变化率', v: pressureStats.max_sit_change_rate, c: C.amber }] : []),
+                    ...(seatStats.total_pressure ? [{ l: '累计总压力', v: seatStats.total_pressure, c: C.cyan }] : []),
+                    ...(seatStats.contact_area ? [{ l: '接触面积', v: seatStats.contact_area, c: C.green }] : []),
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.l}</span>
+                      <span className="text-sm font-bold tabular-nums" style={{ color: item.c }}>
+                        {typeof item.v === 'number' ? item.v.toLocaleString() : item.v}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="zeiss-card p-6 flex items-center justify-center" style={{ minHeight: 120 }}>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无压力统计数据</span>
+            </div>
+          )}
+        </section>
+
+        {/* ══════ 11. 综合评估 ══════ */}
         <section id="sit-conclusion">
           <div className="zeiss-section-title">综合评估</div>
-          <div className="zeiss-card-inner p-5">
-            <h5 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>评估结论</h5>
-            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              受试者完成五次起坐测试，总时长 {d.duration_stats?.total_duration?.toFixed(1) || '--'} 秒，
-              共 {d.duration_stats?.num_cycles || '--'} 个完整周期，
-              平均周期时长 {d.duration_stats?.avg_duration?.toFixed(2) || '--'} 秒。
-              站立过程中足底压力分布显示左右脚受力基本对称，COP轨迹集中在足部中心区域，表明站立稳定性良好。
-              坐姿压力分布均匀，重心控制稳定。根据国际肌少症工作组(EWGSOP2)标准，
-              五次起坐测试时间{(d.duration_stats?.total_duration || 0) < 15 ? '小于' : '大于'}15秒，
-              {(d.duration_stats?.total_duration || 0) < 15 ? '该受试者下肢肌力正常' : '建议进一步评估下肢肌力'}。
-            </p>
+          <div className="zeiss-card p-5">
+            {/* 评估等级标签 */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="px-4 py-2 rounded-lg text-sm font-bold"
+                style={{ background: evalLevel.color + '15', color: evalLevel.color }}>
+                评估等级: {evalLevel.text}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                依据 EWGSOP2 标准 (五次起坐测试 &lt;15s 为正常)
+              </div>
+            </div>
+
+            {/* 评估结论 */}
+            <div className="space-y-3">
+              <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                <h5 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>测试概况</h5>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  受试者完成五次起坐测试，总时长 <b>{totalDur.toFixed(1)}</b> 秒，
+                  共检测到 <b>{d.stand_peaks || standPeaksIdx.length || '--'}</b> 个力峰值，
+                  <b>{durationStats.num_cycles || '--'}</b> 个完整周期，
+                  平均周期时长 <b>{durationStats.avg_duration?.toFixed(2) || '--'}</b> 秒。
+                  {cycleDurations.length > 0 && (
+                    <>最快周期 <b>{minCycleDuration?.toFixed(2)}s</b>，最慢周期 <b>{maxCycleDuration?.toFixed(2)}s</b>。</>
+                  )}
+                </p>
+              </div>
+
+              {symmetryRatio != null && (
+                <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                  <h5 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>对称性评估</h5>
+                  <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                    左右脚对称性指数为 <b style={{ color: symmetryRatio >= 80 ? C.green : symmetryRatio >= 60 ? C.amber : C.red }}>
+                      {symmetryRatio.toFixed(1)}%
+                    </b>
+                    {leftTotal && rightTotal && (
+                      <>（左脚总力 {Number(leftTotal).toLocaleString()}，右脚总力 {Number(rightTotal).toLocaleString()}）</>
+                    )}。
+                    {symmetryRatio >= 80
+                      ? '左右脚受力分布均衡，对称性良好。'
+                      : symmetryRatio >= 60
+                      ? '左右脚受力存在一定差异，建议关注重心偏移。'
+                      : '左右脚受力明显不对称，建议进一步评估是否存在单侧肌力不足。'}
+                  </p>
+                </div>
+              )}
+
+              <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover)' }}>
+                <h5 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>临床建议</h5>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  根据国际肌少症工作组 (EWGSOP2) 标准，五次起坐测试时间
+                  {totalDur <= 15 ? (
+                    <><b style={{ color: C.green }}>小于15秒</b>，该受试者下肢肌力处于正常范围。建议定期复查以监测变化趋势。</>
+                  ) : totalDur <= 20 ? (
+                    <><b style={{ color: C.amber }}>在15~20秒之间</b>，提示下肢肌力可能存在轻度下降。建议加强下肢力量训练，并在3个月后复查。</>
+                  ) : (
+                    <><b style={{ color: C.red }}>大于20秒</b>，提示下肢肌力明显下降，存在肌少症风险。建议进行详细的肌肉质量评估（如DXA或BIA），并制定个性化的运动康复方案。</>
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
         </section>
+
       </div>
     </div>
   );
