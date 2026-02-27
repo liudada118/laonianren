@@ -142,7 +142,7 @@ function PatientDialog({ open, onClose, onConfirm }) {
 }
 
 /* ─── 一键连接按钮组件 ─── */
-function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap }) {
+function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap, macInfo }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
   const isError = status === 'error';
@@ -150,6 +150,9 @@ function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap }) {
   // 统计在线设备数
   const allDevices = ['HL', 'HR', 'sit', 'foot1', 'foot2', 'foot3', 'foot4'];
   const onlineCount = allDevices.filter(d => deviceOnlineMap[d] === 'online').length;
+
+  // 解析 MAC 信息：将端口路径映射的 macInfo 转为简洁显示
+  const macEntries = macInfo ? Object.entries(macInfo) : [];
 
   const handleClick = () => {
     if (isConnected || isError) {
@@ -174,6 +177,19 @@ function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap }) {
           <span className="text-[10px] ml-1 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
             {onlineCount}/{allDevices.length}
           </span>
+        </div>
+      )}
+
+      {/* MAC 地址信息显示 */}
+      {isConnected && macEntries.length > 0 && (
+        <div className="hidden lg:flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[9px] max-w-[280px]"
+          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', color: 'var(--text-tertiary)' }}>
+          {macEntries.map(([port, info]) => (
+            <div key={port} className="flex items-center gap-1 truncate">
+              <span className="font-mono">{info.uniqueId ? info.uniqueId.slice(-8) : 'N/A'}</span>
+              <span style={{ color: 'var(--text-muted)' }}>{info.version || ''}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -216,7 +232,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const {
     institution, patientInfo, setPatientInfo, assessments, resetAssessment,
-    deviceConnStatus, deviceOnlineMap, connectAllDevices, disconnectAllDevices,
+    deviceConnStatus, deviceOnlineMap, macInfo, connectAllDevices, disconnectAllDevices,
   } = useAssessment();
   const [showDialog, setShowDialog] = useState(false);
   const [pendingPath, setPendingPath] = useState('');
@@ -286,6 +302,7 @@ export default function Dashboard() {
             onConnect={connectAllDevices}
             onDisconnect={disconnectAllDevices}
             deviceOnlineMap={deviceOnlineMap}
+            macInfo={macInfo}
           />
 
           {institution && (

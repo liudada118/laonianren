@@ -32,6 +32,8 @@ export function AssessmentProvider({ children }) {
   const [deviceOnlineMap, setDeviceOnlineMap] = useState({});
   // WebSocket 连接状态
   const [wsConnected, setWsConnected] = useState(false);
+  // MAC 地址信息 { '/dev/ttyXXX': { uniqueId, version }, ... }
+  const [macInfo, setMacInfo] = useState({});
 
   // 监听 BackendBridge 的设备状态事件
   useEffect(() => {
@@ -44,10 +46,15 @@ export function AssessmentProvider({ children }) {
     const offDisconnect = backendBridge.on('disconnect', () => {
       setWsConnected(false);
     });
+    const offMacInfo = backendBridge.on('macInfo', (info) => {
+      console.log('[AssessmentContext] 收到MAC信息:', info);
+      setMacInfo(info);
+    });
     return () => {
       offStatus();
       offConnect();
       offDisconnect();
+      offMacInfo();
     };
   }, []);
 
@@ -55,12 +62,22 @@ export function AssessmentProvider({ children }) {
   const connectAllDevices = useCallback(async () => {
     try {
       setDeviceConnStatus('connecting');
-      // 1. 调用后端 connPort 连接所有串口设备
+
+      // 1. 先连接 WebSocket，确保能接收到 macInfo 等实时消息
+      if (!backendBridge.isConnected) {
+        backendBridge.connect();
+        // 等待 WebSocket 连接成功（最多3秒）
+        await new Promise((resolve) => {
+          if (backendBridge.isConnected) { resolve(); return; }
+          const off = backendBridge.on('connect', () => { off(); resolve(); });
+          setTimeout(() => { off(); resolve(); }, 3000);
+        });
+        console.log('[一键连接] WebSocket 已连接');
+      }
+
+      // 2. 调用后端 connPort 连接所有串口设备（MAC信息会通过 WebSocket 推送）
       const connResult = await backendBridge.connPort();
       console.log('[一键连接] connPort result:', connResult);
-
-      // 2. 连接 WebSocket 接收实时数据
-      backendBridge.connect();
 
       setDeviceConnStatus('connected');
       return { success: true, data: connResult };
@@ -134,6 +151,7 @@ export function AssessmentProvider({ children }) {
     deviceConnStatus,
     deviceOnlineMap,
     wsConnected,
+    macInfo,
     connectAllDevices,
     disconnectAllDevices,
     backendBridge, // 暴露 backendBridge 实例供各页面使用

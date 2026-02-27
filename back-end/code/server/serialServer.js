@@ -923,6 +923,8 @@ app.post('/getHandPdf' , async (req , res) => {
         })
         if (leftRows && leftRows.length) {
           const leftKeys = Object.keys(leftDataArr || {})
+          console.log('[getHandPdf] 左手assessmentId=%s, rows=%d, keys=%s', leftAssessmentId, leftRows.length, JSON.stringify(leftKeys))
+          leftKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (leftDataArr[k] || []).length))
           const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
           leftArr = lk ? leftDataArr[lk] : null
           // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
@@ -930,7 +932,7 @@ app.post('/getHandPdf' , async (req , res) => {
             leftArr = leftDataArr[leftKeys[0]]
           }
           if (!bestRow) bestRow = leftRows[0]
-          console.log('[getHandPdf] 左手数据: key=%s, frames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0)
+          console.log('[getHandPdf] 左手最终: key=%s, frames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0)
         }
       }
 
@@ -942,6 +944,8 @@ app.post('/getHandPdf' , async (req , res) => {
         })
         if (rightRows && rightRows.length) {
           const rightKeys = Object.keys(rightDataArr || {})
+          console.log('[getHandPdf] 右手assessmentId=%s, rows=%d, keys=%s', rightAssessmentId, rightRows.length, JSON.stringify(rightKeys))
+          rightKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (rightDataArr[k] || []).length))
           const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
           rightArr = rk ? rightDataArr[rk] : null
           // 如果 HR 没找到，尝试取第一个可用的数据
@@ -949,7 +953,7 @@ app.post('/getHandPdf' , async (req , res) => {
             rightArr = rightDataArr[rightKeys[0]]
           }
           if (!bestRow) bestRow = rightRows[0]
-          console.log('[getHandPdf] 右手数据: key=%s, frames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0)
+          console.log('[getHandPdf] 右手最终: key=%s, frames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0)
         }
       }
 
@@ -1458,6 +1462,8 @@ app.get('/connPort', async (req, res) => {
 app.post('/startCol', async (req, res) => {
   try {
     const { fileName, select, name, collectName, date } = req.body
+    console.log('[startCol] 收到请求: assessmentId=%s, sampleType=%s, colName=%s, 当前activeSendTypes=%s',
+      req.body?.assessmentId, req.body?.sampleType || req.body?.sample_type, req.body?.colName, JSON.stringify(activeSendTypes))
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assessmentId')) {
       const v = req.body.assessmentId
       activeAssessmentId = v === null || v === undefined || v === '' ? null : String(v)
@@ -1475,9 +1481,16 @@ app.post('/startCol', async (req, res) => {
 
     const sensorArr = Object.keys(dataMap).map((a) => dataMap[a].type)
 
-    const length = sensorArr.filter((a) => a.includes(file)).length
-    console.log(sensorArr, file, length)
-    if (length > 0) {
+    // 原始逻辑：检查 file 类型是否有对应的在线设备
+    const lengthByFile = sensorArr.filter((a) => a && a.includes(file)).length
+    // 新增逻辑：检查 activeSendTypes 中的类型是否有对应的在线设备
+    const lengthBySendTypes = activeSendTypes && activeSendTypes.length
+      ? sensorArr.filter((a) => a && activeSendTypes.includes(a)).length
+      : 0
+    const canStart = lengthByFile > 0 || lengthBySendTypes > 0
+    console.log('[startCol] sensorArr=%s, file=%s, lengthByFile=%d, activeSendTypes=%s, lengthBySendTypes=%d, canStart=%s',
+      JSON.stringify(sensorArr), file, lengthByFile, JSON.stringify(activeSendTypes), lengthBySendTypes, canStart)
+    if (canStart) {
       colFlag = true
       colName = (req.body.date || req.body.colName || '')
       colPersonName = req.body.fileName || req.body.name || req.body.collectName || ''
@@ -1496,11 +1509,13 @@ app.post('/startCol', async (req, res) => {
 app.post('/setActiveMode', (req, res) => {
   try {
     const { mode } = req.body || {}
+    console.log('[setActiveMode] 收到请求: mode=%s, 当前activeSendTypes=%s', mode, JSON.stringify(activeSendTypes))
     const result = applyActiveMode(mode)
     if (!result) {
       res.json(new HttpResult(1, {}, 'invalid mode'))
       return
     }
+    console.log('[setActiveMode] 切换完成: activeSendTypes=%s, activeSampleType=%s', JSON.stringify(activeSendTypes), activeSampleType)
     res.json(new HttpResult(0, result, 'success'))
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setActiveMode failed'))
@@ -1510,8 +1525,9 @@ app.post('/setActiveMode', (req, res) => {
 
 // 鍋滄閲囬泦
 app.get('/endCol', async (req, res) => {
+  console.log('[endCol] 收到请求: 当前assessmentId=%s, activeSendTypes=%s', activeAssessmentId, JSON.stringify(activeSendTypes))
   colFlag = false
-  res.json(new HttpResult(0, 'success', '鍋滄閲囬泦'));
+  res.json(new HttpResult(0, 'success', '偁止采集'));
 })
 
 // 鑾峰彇鏁版嵁搴撴墍鏈夊瓨鍙栧垪琛?
@@ -3148,6 +3164,10 @@ function storageData(data) {
   const rawAssessmentId = activeAssessmentId
   const parsedAssessmentId = rawAssessmentId !== null && rawAssessmentId !== undefined ? Number(rawAssessmentId) : NaN
   const timestamp = Date.now()
+  // 调试日志：打印存储的数据key和assessmentId
+  const dataKeys = Object.keys(data || {})
+  console.log('[storageData] keys=%s, assessmentId=%s, sampleType=%s, activeSendTypes=%s',
+    JSON.stringify(dataKeys), activeAssessmentId, activeSampleType, JSON.stringify(activeSendTypes))
   // const date = saveTime;
 
 
