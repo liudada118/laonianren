@@ -188,6 +188,64 @@ class BackendBridge {
     return res.json();
   }
 
+  /* ─── 报告生成 API ─── */
+
+  /**
+   * 获取握力报告数据
+   * @param {object} params - { timestamp, assessmentId, collectName }
+   * @returns {Promise<object>} { code, data: { render_data: { left, right, activeHand } }, msg }
+   */
+  async getGripReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getHandPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取站立评估报告数据
+   * @param {object} params - { timestamp, assessmentId, fps, threshold_ratio }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getStandingReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getDbHeatmap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取步态评估报告数据
+   * @param {object} params - { timestamp, assessmentId, collectName, body_weight_kg }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getGaitReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getFootPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取起坐评估报告数据
+   * @param {object} params - { timestamp, assessmentId, collectName }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getSitStandReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getSitAndFootPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
   async bindKey(key) {
     const res = await fetch(`${this.httpUrl}/bindKey`, {
       method: 'POST',

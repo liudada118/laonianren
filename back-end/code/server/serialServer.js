@@ -15,6 +15,7 @@ const { bytes4ToInt10 } = require('../util/parseData');
 const { initDb, dbLoadCsv, deleteDbData, dbGetData, getCsvData, changeDbName, changeDbDataName } = require('../util/db');
 const { hand, jqbed, endiSit, endiBack } = require('../util/line');
 const { callPy } = require('../pyWorker');
+const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
 const { default: axios } = require('axios');
 const module2 = require('../util/aes_ecb')
@@ -918,15 +919,15 @@ app.post('/getHandPdf' , async (req , res) => {
     let rightRenderResult = null
     try {
       leftRenderResult = leftArr
-        ? await callPy('generate_grip_render_report', {
+        ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: leftArr,
-            hand_type: '\u5de6\u624b',
+            hand_type: '左手',
           })
         : null
       rightRenderResult = rightArr
-        ? await callPy('generate_grip_render_report', {
+        ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: rightArr,
-            hand_type: '\u53f3\u624b',
+            hand_type: '右手',
           })
         : null
     } catch (e) {
@@ -1085,7 +1086,7 @@ app.post('/getSitAndFootPdf', async (req, res) => {
 
     let renderData = null
     try {
-      renderData = await callPy('generate_sit_stand_render_report', {
+      renderData = await callAlgorithm('generate_sit_stand_render_report', {
         stand_data: standData,
         sit_data: sitData,
         username: resolvedName || req.body?.collectName || req.body?.userName || 'user',
@@ -1244,7 +1245,7 @@ app.post('/getFootPdf', async (req, res) => {
     })
     let renderData = null
     try {
-      renderData = await callPy('generate_gait_render_report', {
+      renderData = await callAlgorithm('generate_gait_render_report', {
         d1: data1,
         d2: data2,
         d3: data3,
@@ -1558,7 +1559,7 @@ app.post('/getDbHistory', async (req, res) => {
   if (dataArr['foot']) {
     // const peak_frame = await callPy("get_peak_frame", { sensor_data: dataArr['foot'] })
     // console.log(peak_frame)
-    const copData = await callPy("replay_server", { sensor_data: dataArr['foot'] })
+    const copData = await callAlgorithm("replay_server", { sensor_data: dataArr['foot'] })
     copData.length = length
     res.json(new HttpResult(0, copData, 'success'));
     return
@@ -1640,7 +1641,7 @@ app.post('/getDbHeatmap', async (req, res) => {
       pdfArrData = sensor
       let renderData = null
       try {
-        renderData = await callPy('generate_standing_render_report', {
+        renderData = await callAlgorithm('generate_standing_render_report', {
           data_array: sensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
@@ -1945,7 +1946,7 @@ app.post('/getSysconfig', async (req, res) => {
 // 鏌ユ壘pyConfig
 app.get('/getPyConfig', async (req, res) => {
 
-  const obj = await callPy('getParam',)
+  const obj = await callAlgorithm('getParam')
   res.json(new HttpResult(0, obj, 'success'));
 })
 
@@ -1954,7 +1955,7 @@ app.post('/changePy', async (req, res) => {
   let object = {}
   object[path] = JSON.parse(value)
   console.log(object, 'object')
-  const obj = await callPy('setParam', { obj: object })
+  const obj = await callAlgorithm('setParam', { obj: object })
   res.json(new HttpResult(0, obj, 'success'));
 })
 
@@ -2607,7 +2608,7 @@ async function connectPort() {
             } else if (dataItem.type == 'foot') {
               dataItem.arr = pointArr
               if (lastFootPointArr.length) {
-                dataItem.cop = await callPy('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
+                dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
               }
 
             } else if (dataItem.type === 'foot1' || dataItem.type === 'foot2' || dataItem.type === 'foot3' || dataItem.type === 'foot4') {
@@ -2808,7 +2809,7 @@ async function connectPort() {
               controlMode = ALGOR
 
               if (oldControlMode == HANDLE && controlMode == ALGOR) {
-                await callPy('resetMessage')
+                await callAlgorithm('resetMessage')
               }
 
               let max = 24, controlArr = []

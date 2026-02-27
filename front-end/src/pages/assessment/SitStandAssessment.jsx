@@ -4,6 +4,7 @@ import { useAssessment } from '../../contexts/AssessmentContext';
 import { usePressureScene } from '../../hooks/usePressureScene';
 import EChart from '../../components/ui/EChart';
 import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
+import { backendBridge } from '../../lib/BackendBridge';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
@@ -447,20 +448,40 @@ export default function SitStandAssessment() {
     clearInterval(timerRef.current);
     stopSimulation(); // 停止模拟数据更新
     setPhase('processing');
-    // 生成报告数据
-    setTimeout(() => {
+    // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
+    const generateReport = async () => {
+      try {
+        if (isBackendMode) {
+          await new Promise(r => setTimeout(r, 1000));
+          const resp = await backendBridge.getSitStandReport({
+            timestamp: Date.now(),
+            collectName: patientInfo?.name || 'test',
+          });
+          if (resp?.code === 0 && resp?.data?.render_data) {
+            console.log('[SitStand] 后端报告数据已获取:', resp.data);
+            setSitstandReportData(resp.data.render_data);
+            setShowComplete(true);
+            return;
+          }
+          console.warn('[SitStand] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+        }
+      } catch (e) {
+        console.warn('[SitStand] 后端报告接口调用失败，回退到前端算法:', e.message);
+      }
+      // 前端算法 fallback
       try {
         const report = generateSitStandReportData(
           seatPressureHistory, footpadPressureHistory,
           seatStats, footpadStats, seatCoP, footpadCoP, timer
         );
-        console.log('[SitStand] 报告数据已生成:', report);
+        console.log('[SitStand] 前端报告数据已生成:', report);
         setSitstandReportData(report);
       } catch (e) {
         console.error('[SitStand] 报告生成失败:', e);
       }
       setShowComplete(true);
-    }, 2000);
+    };
+    generateReport();
   };
 
   const viewReport = () => {

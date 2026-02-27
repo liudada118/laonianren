@@ -882,17 +882,37 @@ export default function GaitAssessment() {
     clearInterval(timerRef.current);
     if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
     setPhase('processing');
-    // 生成报告数据
-    setTimeout(() => {
+    // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
+    const generateReport = async () => {
+      try {
+        if (isBackendMode) {
+          await new Promise(r => setTimeout(r, 1000));
+          const resp = await backendBridge.getGaitReport({
+            timestamp: Date.now(),
+            collectName: patientInfo?.name || 'test',
+          });
+          if (resp?.code === 0 && resp?.data?.render_data) {
+            console.log('[GaitAssessment] 后端报告数据已获取:', resp.data);
+            setGaitReportData(resp.data.render_data);
+            setShowComplete(true);
+            return;
+          }
+          console.warn('[GaitAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+        }
+      } catch (e) {
+        console.warn('[GaitAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
+      }
+      // 前端算法 fallback
       try {
         const report = generateGaitReportData(sensorData, sensorStats, timer);
-        console.log('[GaitAssessment] 报告数据已生成:', report);
+        console.log('[GaitAssessment] 前端报告数据已生成:', report);
         setGaitReportData(report);
       } catch (e) {
         console.error('[GaitAssessment] 报告生成失败:', e);
       }
       setShowComplete(true);
-    }, 2000);
+    };
+    generateReport();
   };
 
   const viewReport = () => {

@@ -467,15 +467,34 @@ export default function StandingAssessment() {
       simIntervalRef.current = null;
     }
 
-    // 生成报告
-    setTimeout(() => {
+    // 生成报告：优先调用后端JS算法接口，失败时回退到前端算法
+    const generateReport = async () => {
+      try {
+        if (isBackendMode) {
+          await new Promise(r => setTimeout(r, 1000));
+          const resp = await backendBridge.getStandingReport({
+            timestamp: Date.now(),
+          });
+          if (resp?.code === 0 && resp?.data?.render_data) {
+            console.log('[StandingAssessment] 后端报告数据已获取:', resp.data);
+            setReportData(resp.data.render_data);
+            setShowCompleteDialog(true);
+            return;
+          }
+          console.warn('[StandingAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+        }
+      } catch (e) {
+        console.warn('[StandingAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
+      }
+      // 前端算法 fallback
       if (collectedFrames.current.length > 0) {
         const report = generateFootReport(collectedFrames.current);
         console.log('分析报告:', report);
         setReportData(report);
       }
       setShowCompleteDialog(true);
-    }, 2000);
+    };
+    generateReport();
   };
 
   const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); setReportMode('static'); completeAssessment('standing', { completed: true }); };
