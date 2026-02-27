@@ -192,7 +192,7 @@ class BackendBridge {
 
   /**
    * 获取握力报告数据
-   * @param {object} params - { timestamp, assessmentId, collectName }
+   * @param {object} params - { timestamp, collectName, leftAssessmentId, rightAssessmentId }
    * @returns {Promise<object>} { code, data: { render_data: { left, right, activeHand } }, msg }
    */
   async getGripReport(params = {}) {

@@ -573,22 +573,44 @@ function getActiveSendIntervalMs() {
   return min
 }
 
+let _updateTimerDebounce = null
+let _lastTimerUpdateTs = 0
+const TIMER_DEBOUNCE_MS = 500      // 防抖间隔：500ms内不重复触发
+const TIMER_THRESHOLD_MS = 10      // 间隔变化阈值：变化<10ms不重建定时器
+
 function updateSendTimerForActiveTypes() {
+  // 如果定时器还没启动，立即执行一次
+  if (!playtimer) {
+    _doUpdateSendTimer()
+    _lastTimerUpdateTs = Date.now()
+    return
+  }
+  // 防抖：避免每帧数据到达都重建定时器
+  if (_updateTimerDebounce) return
+  const now = Date.now()
+  // 如果距离上次更新不到 TIMER_DEBOUNCE_MS，跳过
+  if (now - _lastTimerUpdateTs < TIMER_DEBOUNCE_MS) return
+  _updateTimerDebounce = setTimeout(() => {
+    _updateTimerDebounce = null
+    _lastTimerUpdateTs = Date.now()
+    _doUpdateSendTimer()
+  }, TIMER_DEBOUNCE_MS)
+}
+
+function _doUpdateSendTimer() {
   const interval = getActiveSendIntervalMs()
-  console.log('[DEBUG] updateSendTimer: interval=', interval, 'activeSendTypes=', activeSendTypes, 'dataMap keys=', Object.keys(dataMap), 'parserArr keys=', Object.keys(parserArr))
-  // Log HZ values for each device in dataMap
-  Object.keys(dataMap).forEach(k => { console.log('[DEBUG] dataMap[' + k + '] type=', dataMap[k]?.type, 'HZ=', dataMap[k]?.HZ, 'stamp=', dataMap[k]?.stamp) })
   if (!activeSendTypes || !Array.isArray(activeSendTypes) || !activeSendTypes.length) return
   const ms = Math.max(MIN_SEND_INTERVAL_MS, Math.floor(interval ?? DEFAULT_SEND_MS))
-  if (currentSendIntervalMs === ms && playtimer) return
+  // 如果定时器已运行且间隔变化小于阈值，不重建
+  if (playtimer && currentSendIntervalMs !== null && Math.abs(ms - currentSendIntervalMs) < TIMER_THRESHOLD_MS) return
   if (playtimer) {
     clearInterval(playtimer)
   }
-  // console.log('[hz] current interval', ms, 'activeTypes', activeSendTypes, 'cache', sensorHzCache)
   currentSendIntervalMs = ms
   playtimer = setInterval(() => {
     colAndSendData()
   }, ms)
+  // console.log('[timer] send interval updated to', ms, 'ms')
 }
 
 function resetSendTimer() {
@@ -874,45 +896,106 @@ app.post('/getHandPdf' , async (req , res) => {
       req.query?.date ??
       ''
 
-    const { assessmentId, matchedDate, matchedTimestamp, tsNum } =
-      await resolveAssessmentContext(currentDb, req, rawTimestamp)
+    // 新方式：前端传入 leftAssessmentId 和 rightAssessmentId，分别查询左右手数据
+    const leftAssessmentId = normalizeAssessmentId(req.body?.leftAssessmentId)
+    const rightAssessmentId = normalizeAssessmentId(req.body?.rightAssessmentId)
 
-    if (!assessmentId) {
-      res.json(new HttpResult(1, {}, 'missing assessment_id'))
-      return
+    let leftArr = null
+    let rightArr = null
+    let bestRow = null
+    let matchedDate = null
+    let matchedTimestamp = null
+    let tsNum = Number(rawTimestamp)
+
+    if (leftAssessmentId || rightAssessmentId) {
+      // ===== 新逻辑：分别从两个 assessmentId 中提取 HL / HR 数据 =====
+      console.log('[getHandPdf] 使用分离模式: leftId=%s, rightId=%s', leftAssessmentId, rightAssessmentId)
+
+      if (leftAssessmentId) {
+        const { dataArr: leftDataArr, rows: leftRows } = await dbGetData({
+          db: currentDb,
+          params: [leftAssessmentId],
+          byAssessmentId: true
+        })
+        if (leftRows && leftRows.length) {
+          const leftKeys = Object.keys(leftDataArr || {})
+          const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
+          leftArr = lk ? leftDataArr[lk] : null
+          // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
+          if (!leftArr && leftKeys.length > 0) {
+            leftArr = leftDataArr[leftKeys[0]]
+          }
+          if (!bestRow) bestRow = leftRows[0]
+          console.log('[getHandPdf] 左手数据: key=%s, frames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0)
+        }
+      }
+
+      if (rightAssessmentId) {
+        const { dataArr: rightDataArr, rows: rightRows } = await dbGetData({
+          db: currentDb,
+          params: [rightAssessmentId],
+          byAssessmentId: true
+        })
+        if (rightRows && rightRows.length) {
+          const rightKeys = Object.keys(rightDataArr || {})
+          const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
+          rightArr = rk ? rightDataArr[rk] : null
+          // 如果 HR 没找到，尝试取第一个可用的数据
+          if (!rightArr && rightKeys.length > 0) {
+            rightArr = rightDataArr[rightKeys[0]]
+          }
+          if (!bestRow) bestRow = rightRows[0]
+          console.log('[getHandPdf] 右手数据: key=%s, frames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0)
+        }
+      }
+
+      matchedDate = bestRow?.date || null
+      matchedTimestamp = bestRow?.timestamp || null
+    } else {
+      // ===== 旧逻辑兼容：使用单个 assessmentId 或 timestamp 查询 =====
+      const resolved = await resolveAssessmentContext(currentDb, req, rawTimestamp)
+      const assessmentId = resolved.assessmentId
+      matchedDate = resolved.matchedDate
+      matchedTimestamp = resolved.matchedTimestamp
+      tsNum = resolved.tsNum || tsNum
+
+      if (!assessmentId) {
+        res.json(new HttpResult(1, {}, 'missing assessment_id'))
+        return
+      }
+
+      const { dataArr, rows } = await dbGetData({
+        db: currentDb,
+        params: [assessmentId],
+        byAssessmentId: true
+      })
+
+      if (!rows || !rows.length) {
+        res.json(new HttpResult(1, {}, 'no data for assessment_id'))
+        return
+      }
+
+      const targetTs = Number(matchedTimestamp ?? tsNum)
+      bestRow = Array.isArray(rows) && rows.length
+        ? rows.reduce((best, row) => {
+            const t = Number(row?.timestamp)
+            if (!Number.isFinite(t)) return best
+            if (!best) return row
+            const bestT = Number(best?.timestamp)
+            if (!Number.isFinite(bestT)) return row
+            return Math.abs(t - targetTs) < Math.abs(bestT - targetTs) ? row : best
+          }, null)
+        : null
+      const keys = Object.keys(dataArr || {})
+      const leftKey = keys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
+      const rightKey = keys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
+
+      leftArr = leftKey ? dataArr[leftKey] : null
+      rightArr = rightKey ? dataArr[rightKey] : null
     }
-
-    const { dataArr, rows } = await dbGetData({
-      db: currentDb,
-      params: [assessmentId],
-      byAssessmentId: true
-    })
-
-    if (!rows || !rows.length) {
-      res.json(new HttpResult(1, {}, 'no data for assessment_id'))
-      return
-    }
-
-    const targetTs = Number(matchedTimestamp ?? tsNum)
-    const bestRow = Array.isArray(rows) && rows.length
-      ? rows.reduce((best, row) => {
-          const t = Number(row?.timestamp)
-          if (!Number.isFinite(t)) return best
-          if (!best) return row
-          const bestT = Number(best?.timestamp)
-          if (!Number.isFinite(bestT)) return row
-          return Math.abs(t - targetTs) < Math.abs(bestT - targetTs) ? row : best
-        }, null)
-      : null
-    const keys = Object.keys(dataArr || {})
-    const leftKey = keys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
-    const rightKey = keys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
-
-    const leftArr = leftKey ? dataArr[leftKey] : null
-    const rightArr = rightKey ? dataArr[rightKey] : null
 
     if (!leftArr && !rightArr) {
-      res.json(new HttpResult(1, { keys }, 'no hand data'))
+      res.json(new HttpResult(1, {}, 'no hand data'))
       return
     }
 
@@ -1363,6 +1446,10 @@ app.post('/startCol', async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assessmentId')) {
       const v = req.body.assessmentId
       activeAssessmentId = v === null || v === undefined || v === '' ? null : String(v)
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'sampleType') || Object.prototype.hasOwnProperty.call(req.body || {}, 'sample_type')) {
+      const v = req.body.sampleType ?? req.body.sample_type
+      activeSampleType = v === null || v === undefined || v === '' ? null : String(v)
     }
     selectArr = select
     if (typeof req.body.fileName === 'string') req.body.fileName = decodeField(req.body.fileName)

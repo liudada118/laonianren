@@ -224,6 +224,8 @@ export default function GripAssessment() {
   // 串口实时数据 ref（用于采集时记录）
   const isRecordingRef = useRef(false);
   const currentHandRef = useRef('left'); // 'left' | 'right'
+  const leftAssessmentIdRef = useRef(null);
+  const rightAssessmentIdRef = useRef(null);
 
   // 让 currentHandRef 跟随 phase 自动同步，确保热力图始终显示当前阶段对应的手的数据
   useEffect(() => {
@@ -547,14 +549,30 @@ export default function GripAssessment() {
     } else if (isBackendMode) {
       // 后端模式：调用后端API开始采集，数据通过WebSocket自动流入
       addSimLog(`后端模式开始采集 ${isLeft ? '左手' : '右手'}`, 'info');
+      // 清空对应手的数据
+      if (isLeft) {
+        leftFullDataRef.current = [];
+        leftRawFramesRef.current = [];
+        setLeftData([]);
+      } else {
+        rightFullDataRef.current = [];
+        rightRawFramesRef.current = [];
+        setRightData([]);
+      }
+      const aid = `grip_${isLeft ? 'L' : 'R'}_${Date.now()}`;
+      if (isLeft) {
+        leftAssessmentIdRef.current = aid;
+      } else {
+        rightAssessmentIdRef.current = aid;
+      }
       backendBridge.startCol({
         name: patientInfo?.name || 'test',
-        assessmentId: `grip_${Date.now()}`,
-        sampleType: isLeft ? 'grip_left' : 'grip_right',
+        assessmentId: aid,
+        sampleType: '1',
         date: new Date().toISOString(),
         colName: isLeft ? '左手握力' : '右手握力',
       }).then(() => {
-        addSimLog('后端采集已启动', 'info');
+        addSimLog(`后端采集已启动 (assessmentId=${aid})`, 'info');
       }).catch(e => {
         addSimLog(`后端采集启动失败: ${e.message}`, 'error');
       });
@@ -599,6 +617,8 @@ export default function GripAssessment() {
             const resp = await backendBridge.getGripReport({
               timestamp: Date.now(),
               collectName: patientInfo?.name || 'test',
+              leftAssessmentId: leftAssessmentIdRef.current,
+              rightAssessmentId: rightAssessmentIdRef.current,
             });
             if (resp?.code === 0 && resp?.data?.render_data) {
               console.log('[GripAssessment] 后端报告数据已获取:', resp.data);
