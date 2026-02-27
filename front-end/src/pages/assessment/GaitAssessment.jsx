@@ -15,8 +15,9 @@ import gaitDemoDataUrl from '../../assets/gait_demo_data.json?url';
 import { generateGaitReportData } from '../../lib/gaitReportGenerator';
 
 /* ─── 图表样式常量 ─── */
-const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706', purple: '#7C3AED', cyan: '#0891B2' };
-const tip = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332', fontSize: 11 }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
+const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#3B82F6', green: '#10B981', red: '#EF4444', amber: '#F59E0B', purple: '#8B5CF6', cyan: '#06B6D4' };
+const tip = { backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#E5E7EB', borderWidth: 1, textStyle: { color: '#1F2937', fontSize: 11, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }, extraCssText: 'box-shadow:0 4px 16px rgba(0,0,0,0.08);border-radius:8px;backdrop-filter:blur(4px);' };
+const chartFont = { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' };
 
 /* ─── 左侧统一数据面板 ─── */
 function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, connectionState }) {
@@ -243,26 +244,26 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
   /* EChart options */
   const fpaOption = useMemo(() => ({
     animation: false,
-    grid: { top: 30, bottom: 30, left: 50, right: 20 },
-    legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
-    xAxis: { type: 'category', name: '步序', data: Array.from({ length: Math.max(leftSteps.length, rightSteps.length) }, (_, i) => i + 1), axisLabel: { fontSize: 10, color: C.text } },
-    yAxis: { type: 'value', name: 'FPA (°)', axisLabel: { fontSize: 10, color: C.text }, splitLine: { lineStyle: { color: C.grid } } },
+    grid: { top: 36, bottom: 30, left: 50, right: 20 },
+    legend: { top: 4, textStyle: { fontSize: 10, color: C.text, ...chartFont }, itemWidth: 14, itemHeight: 8, itemGap: 16 },
+    xAxis: { type: 'category', name: '步序', data: Array.from({ length: Math.max(leftSteps.length, rightSteps.length) }, (_, i) => i + 1), axisLabel: { fontSize: 10, color: C.text, ...chartFont }, nameTextStyle: { color: C.text, fontSize: 10, ...chartFont } },
+    yAxis: { type: 'value', name: 'FPA (°)', axisLabel: { fontSize: 10, color: C.text, ...chartFont }, nameTextStyle: { color: C.text, fontSize: 10, ...chartFont }, splitLine: { lineStyle: { color: C.grid, type: 'dashed' } } },
     series: [
-      { name: '左脚', type: 'bar', data: leftSteps, itemStyle: { color: C.blue } },
-      { name: '右脚', type: 'bar', data: rightSteps, itemStyle: { color: C.amber } },
+      { name: '左脚', type: 'bar', data: leftSteps, barMaxWidth: 16, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#60A5FA' }, { offset: 1, color: '#3B82F6' }] }, borderRadius: [3, 3, 0, 0] } },
+      { name: '右脚', type: 'bar', data: rightSteps, barMaxWidth: 16, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#FBBF24' }, { offset: 1, color: '#F59E0B' }] }, borderRadius: [3, 3, 0, 0] } },
     ],
     tooltip: { trigger: 'axis', ...tip },
   }), [leftSteps, rightSteps]);
 
   const makeTimeOpt = (field, label) => ({
     animation: false,
-    grid: { top: 20, bottom: 30, left: 50, right: 20 },
-    legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
-    xAxis: { type: 'category', data: leftTime.length > 0 ? leftTime : rightTime, axisLabel: { fontSize: 9, color: C.text, rotate: 30 }, show: leftTime.length > 0 },
-    yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text }, splitLine: { lineStyle: { color: C.grid } } },
+    grid: { top: 28, bottom: 30, left: 50, right: 20 },
+    legend: { top: 0, textStyle: { fontSize: 10, color: C.text, ...chartFont }, itemWidth: 14, itemHeight: 8, itemGap: 16 },
+    xAxis: { type: 'category', data: leftTime.length > 0 ? leftTime : rightTime, axisLabel: { fontSize: 9, color: C.text, rotate: 30, ...chartFont }, show: leftTime.length > 0 },
+    yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text, ...chartFont }, nameTextStyle: { color: C.text, fontSize: 10, ...chartFont }, splitLine: { lineStyle: { color: C.grid, type: 'dashed' } } },
     series: [
-      { name: '左脚', type: 'line', smooth: true, symbol: 'none', data: ts.left?.[field] || [], lineStyle: { color: C.blue, width: 1.5 } },
-      { name: '右脚', type: 'line', smooth: true, symbol: 'none', data: ts.right?.[field] || [], lineStyle: { color: C.amber, width: 1.5 } },
+      { name: '左脚', type: 'line', smooth: true, symbol: 'none', data: ts.left?.[field] || [], lineStyle: { color: C.blue, width: 2 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.15)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } } },
+      { name: '右脚', type: 'line', smooth: true, symbol: 'none', data: ts.right?.[field] || [], lineStyle: { color: C.amber, width: 2 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(245,158,11,0.15)' }, { offset: 1, color: 'rgba(245,158,11,0)' }] } } },
     ],
     tooltip: { trigger: 'axis', ...tip },
   });
@@ -271,16 +272,17 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
   const copSpeedOption = useMemo(() => makeTimeOpt('copSpeed', 'mm/s'), [ts]);
   const pressureOption = useMemo(() => makeTimeOpt('pressure', 'N/cm²'), [ts]);
 
-  const partColors = ['#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6', '#1abc9c'];
+  const partColors = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#06B6D4'];
   const makePartOpt = (curves) => ({
     animation: false,
-    grid: { top: 30, bottom: 30, left: 50, right: 20 },
-    legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
+    grid: { top: 36, bottom: 30, left: 50, right: 20 },
+    legend: { top: 4, textStyle: { fontSize: 10, color: C.text, ...chartFont }, itemWidth: 14, itemHeight: 8, itemGap: 12, icon: 'roundRect' },
     xAxis: { type: 'category', data: curves[0]?.data?.map((_, i) => i) || [], show: false },
-    yAxis: { type: 'value', name: 'N', axisLabel: { fontSize: 10, color: C.text }, splitLine: { lineStyle: { color: C.grid } } },
+    yAxis: { type: 'value', name: 'N', axisLabel: { fontSize: 10, color: C.text, ...chartFont }, nameTextStyle: { color: C.text, fontSize: 10, ...chartFont }, splitLine: { lineStyle: { color: C.grid, type: 'dashed' } } },
     series: curves.map((c, i) => ({
       name: `S${i + 1}`, type: 'line', smooth: true, symbol: 'none', data: c.data || [],
-      lineStyle: { color: partColors[i % partColors.length], width: 1.5 },
+      lineStyle: { color: partColors[i % partColors.length], width: 2 },
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: partColors[i % partColors.length] + '18' }, { offset: 1, color: partColors[i % partColors.length] + '00' }] } },
     })),
     tooltip: { trigger: 'axis', ...tip },
   });

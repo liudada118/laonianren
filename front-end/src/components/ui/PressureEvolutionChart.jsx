@@ -1,72 +1,10 @@
 import React, { useRef, useEffect } from 'react';
+import { renderMatrixToCanvas, drawColorbar, setupHiDPICanvas, roundRect, FONT_FAMILY } from './heatmapUtils';
 
 /**
- * PressureEvolutionChart - 动态压力演变渲染组件
- * 渲染左右脚各10帧裁剪后的热力图网格
- *
- * Props:
- *   evolutionData: {
- *     left: { frames: number[][][], titles: string[], bbox: number[], vmax: number },
- *     right: { ... }
- *   }
+ * PressureEvolutionChart - 动态压力演变渲染组件 (优化版)
+ * 渲染左右脚各10帧裁剪后的热力图网格，带色条、圆角、高 DPI
  */
-
-// Jet LUT
-function buildJetLUT() {
-  const lut = new Uint8Array(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    let r, g, b;
-    if (t < 0.125) { r = 0; g = 0; b = 0.5 + t * 4; }
-    else if (t < 0.375) { r = 0; g = (t - 0.125) * 4; b = 1; }
-    else if (t < 0.625) { r = (t - 0.375) * 4; g = 1; b = 1 - (t - 0.375) * 4; }
-    else if (t < 0.875) { r = 1; g = 1 - (t - 0.625) * 4; b = 0; }
-    else { r = 1 - (t - 0.875) * 2; g = 0; b = 0; }
-    const idx = i * 4;
-    lut[idx] = Math.round(Math.min(1, Math.max(0, r)) * 255);
-    lut[idx + 1] = Math.round(Math.min(1, Math.max(0, g)) * 255);
-    lut[idx + 2] = Math.round(Math.min(1, Math.max(0, b)) * 255);
-    lut[idx + 3] = 255;
-  }
-  return lut;
-}
-const JET_LUT = buildJetLUT();
-
-function renderFrame(ctx, frameData, x, y, cellW, cellH, vmax) {
-  if (!frameData || frameData.length === 0) return;
-  const rows = frameData.length;
-  const cols = frameData[0].length;
-  const threshold = vmax * 0.02;
-
-  const offCanvas = document.createElement('canvas');
-  offCanvas.width = cols;
-  offCanvas.height = rows;
-  const offCtx = offCanvas.getContext('2d');
-  const imgData = offCtx.createImageData(cols, rows);
-  const pixels = imgData.data;
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const val = frameData[r][c];
-      const idx = (r * cols + c) * 4;
-      if (val <= threshold) {
-        pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0; pixels[idx + 3] = 255;
-      } else {
-        const norm = Math.min(1, val / vmax);
-        const lutIdx = Math.round(norm * 255) * 4;
-        pixels[idx] = JET_LUT[lutIdx];
-        pixels[idx + 1] = JET_LUT[lutIdx + 1];
-        pixels[idx + 2] = JET_LUT[lutIdx + 2];
-        pixels[idx + 3] = 255;
-      }
-    }
-  }
-  offCtx.putImageData(imgData, 0, 0);
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(offCanvas, x, y, cellW, cellH);
-}
 
 export default function PressureEvolutionChart({ evolutionData, className = '' }) {
   const canvasRef = useRef(null);
@@ -74,81 +12,136 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
   useEffect(() => {
     if (!evolutionData || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
 
     const leftData = evolutionData.left;
     const rightData = evolutionData.right;
+
     const numCols = 10;
-    const numRows = 2;
-    const labelH = 24;
-    const titleH = 18;
-    const cellW = 70;
-    const cellH = 90;
-    const gap = 4;
-    const labelW = 80;
-
-    const totalW = labelW + numCols * (cellW + gap);
-    const totalH = titleH + numRows * (cellH + labelH + gap) + 10;
-
-    canvas.width = totalW;
-    canvas.height = totalH;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, totalW, totalH);
-
-    // Title
-    ctx.fillStyle = '#1A2332';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
+    const cellW = 72;
+    const cellH = 96;
+    const gap = 6;
+    const labelW = 90;
+    const rowGap = 32;
+    const titleH = 20;
+    const colorbarW = 14;
+    const colorbarGap = 40;
+    const paddingTop = 12;
+    const paddingBottom = 8;
 
     const rows = [
-      { data: leftData, label: 'Left Foot' },
-      { data: rightData, label: 'Right Foot' },
+      { data: leftData, label: 'Left Foot', color: '#0066CC' },
+      { data: rightData, label: 'Right Foot', color: '#D97706' },
     ];
 
-    rows.forEach((row, rowIdx) => {
-      const yBase = titleH + rowIdx * (cellH + labelH + gap);
+    const totalW = labelW + numCols * (cellW + gap) + colorbarGap + colorbarW + 30;
+    const totalH = paddingTop + rows.length * (cellH + titleH + rowGap) - rowGap + paddingBottom;
 
-      // Row label
-      ctx.fillStyle = '#1A2332';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(row.label, labelW - 10, yBase + cellH / 2 + 4);
+    const ctx = setupHiDPICanvas(canvas, totalW, totalH);
+
+    // Background
+    ctx.fillStyle = '#F9FAFB';
+    ctx.fillRect(0, 0, totalW, totalH);
+
+    rows.forEach((row, rowIdx) => {
+      const yBase = paddingTop + rowIdx * (cellH + titleH + rowGap);
+
+      // Row label with colored dot
+      ctx.fillStyle = row.color;
+      ctx.beginPath();
+      ctx.arc(12, yBase + cellH / 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#1F2937';
+      ctx.font = `600 12px ${FONT_FAMILY}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(row.label, 22, yBase + cellH / 2 + 4);
 
       if (!row.data || !row.data.frames) return;
 
       const frames = row.data.frames;
       const titles = row.data.titles || [];
       const vmax = row.data.vmax || 1;
+      const threshold = vmax * 0.02;
 
       for (let col = 0; col < Math.min(frames.length, numCols); col++) {
         const x = labelW + col * (cellW + gap);
         const y = yBase;
 
-        // Black background for cell
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(x, y, cellW, cellH);
+        // Card shadow
+        ctx.shadowColor = 'rgba(0,0,0,0.08)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1;
+
+        // Rounded card background (dark)
+        roundRect(ctx, x, y, cellW, cellH, 4);
+        ctx.fillStyle = '#1A1A2E';
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
 
         // Render heatmap frame
-        renderFrame(ctx, frames[col], x, y, cellW, cellH, vmax);
+        const frameData = frames[col];
+        if (frameData && frameData.length > 0) {
+          const { canvas: offCanvas, rows: fRows, cols: fCols } = renderMatrixToCanvas(
+            frameData, vmax, threshold, '#000'
+          );
 
-        // Title below
-        ctx.fillStyle = '#4B5563';
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'center';
-        const titleText = titles[col] || '';
-        const titleLines = titleText.split('\n');
-        titleLines.forEach((line, li) => {
-          ctx.fillText(line, x + cellW / 2, y + cellH + 10 + li * 10);
-        });
+          // Fit inside cell with 2px padding
+          const pad = 2;
+          const innerW = cellW - pad * 2;
+          const innerH = cellH - pad * 2;
+          const scaleX = innerW / fCols;
+          const scaleY = innerH / fRows;
+          const scale = Math.min(scaleX, scaleY);
+          const drawW = fCols * scale;
+          const drawH = fRows * scale;
+          const offX = x + pad + (innerW - drawW) / 2;
+          const offY = y + pad + (innerH - drawH) / 2;
+
+          ctx.save();
+          roundRect(ctx, x + 1, y + 1, cellW - 2, cellH - 2, 3);
+          ctx.clip();
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(offCanvas, offX, offY, drawW, drawH);
+          ctx.restore();
+        }
 
         // Highlight peak frame
+        const titleText = titles[col] || '';
         if (titleText.includes('Peak')) {
           ctx.strokeStyle = '#EF4444';
           ctx.lineWidth = 2;
-          ctx.strokeRect(x, y, cellW, cellH);
+          roundRect(ctx, x, y, cellW, cellH, 4);
+          ctx.stroke();
+
+          // Peak badge
+          ctx.fillStyle = '#EF4444';
+          roundRect(ctx, x + cellW / 2 - 16, y - 6, 32, 12, 6);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = `bold 7px ${FONT_FAMILY}`;
+          ctx.textAlign = 'center';
+          ctx.fillText('PEAK', x + cellW / 2, y + 2);
         }
+
+        // Title below
+        ctx.fillStyle = '#6B7B8D';
+        ctx.font = `10px ${FONT_FAMILY}`;
+        ctx.textAlign = 'center';
+        const titleLines = titleText.replace('Peak ', '').split('\n');
+        titleLines.forEach((line, li) => {
+          ctx.fillText(line, x + cellW / 2, y + cellH + 12 + li * 11);
+        });
       }
+
+      // Colorbar
+      const cbX = labelW + numCols * (cellW + gap) + 16;
+      const cbY = yBase + 4;
+      const cbH = cellH - 8;
+      drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, vmax);
     });
   }, [evolutionData]);
 

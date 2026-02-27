@@ -1,52 +1,23 @@
 import React, { useRef, useEffect } from 'react';
+import { renderMatrixToCanvas, drawColorbar, setupHiDPICanvas, roundRect, FONT_FAMILY } from './heatmapUtils';
 
 /**
- * FootprintHeatmapChart - 足印叠加热力图 + FPA辅助线
- *
- * Props:
- *   heatmapData: {
- *     heatmap: number[][],  // H x W 矩阵
- *     fpaLines: [{ heel: [x,y], fore: [x,y], angle: float, isRight: bool }],
- *     size: [H, W],
- *   }
- *   width: number - 渲染宽度
- *   height: number - 渲染高度
+ * FootprintHeatmapChart - 足印叠加热力图 + FPA辅助线 (优化版)
+ * 带色条、圆角卡片、高 DPI、更精致的 FPA 线
  */
 
-function buildJetLUT() {
-  const lut = new Uint8Array(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    let r, g, b;
-    if (t < 0.125) { r = 0; g = 0; b = 0.5 + t * 4; }
-    else if (t < 0.375) { r = 0; g = (t - 0.125) * 4; b = 1; }
-    else if (t < 0.625) { r = (t - 0.375) * 4; g = 1; b = 1 - (t - 0.375) * 4; }
-    else if (t < 0.875) { r = 1; g = 1 - (t - 0.625) * 4; b = 0; }
-    else { r = 1 - (t - 0.875) * 2; g = 0; b = 0; }
-    const idx = i * 4;
-    lut[idx] = Math.round(Math.min(1, Math.max(0, r)) * 255);
-    lut[idx + 1] = Math.round(Math.min(1, Math.max(0, g)) * 255);
-    lut[idx + 2] = Math.round(Math.min(1, Math.max(0, b)) * 255);
-    lut[idx + 3] = 255;
-  }
-  return lut;
-}
-const JET_LUT = buildJetLUT();
-
-export default function FootprintHeatmapChart({ heatmapData, width = 500, height = 600, className = '' }) {
+export default function FootprintHeatmapChart({ heatmapData, width = 560, height = 660, className = '' }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
     if (!heatmapData || !heatmapData.heatmap || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
     const { heatmap, fpaLines = [], size } = heatmapData;
-
     const H = size[0];
     const W = size[1];
 
-    // 计算 vmax
+    // Compute vmax
     let vmax = 0;
     for (let r = 0; r < H; r++) {
       for (let c = 0; c < W; c++) {
@@ -54,121 +25,140 @@ export default function FootprintHeatmapChart({ heatmapData, width = 500, height
       }
     }
     if (vmax <= 0) vmax = 1;
-    const displayVmax = vmax * 0.8; // 稍微压低上限让颜色更饱满
+
+    const displayVmax = vmax * 0.8;
     const threshold = vmax * 0.02;
 
-    // 创建原始尺寸热力图
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = W;
-    offCanvas.height = H;
-    const offCtx = offCanvas.getContext('2d');
-    const imgData = offCtx.createImageData(W, H);
-    const pixels = imgData.data;
+    const padding = 20;
+    const colorbarW = 16;
+    const colorbarGap = 20;
+    const cardW = width - padding * 2 - colorbarW - colorbarGap - 20;
+    const cardH = height - padding * 2;
 
-    for (let r = 0; r < H; r++) {
-      for (let c = 0; c < W; c++) {
-        const val = heatmap[r][c];
-        const idx = (r * W + c) * 4;
-        if (val <= threshold) {
-          pixels[idx] = 255; pixels[idx + 1] = 255; pixels[idx + 2] = 255; pixels[idx + 3] = 255;
-        } else {
-          const norm = Math.min(1, val / displayVmax);
-          const lutIdx = Math.round(norm * 255) * 4;
-          pixels[idx] = JET_LUT[lutIdx];
-          pixels[idx + 1] = JET_LUT[lutIdx + 1];
-          pixels[idx + 2] = JET_LUT[lutIdx + 2];
-          pixels[idx + 3] = 255;
-        }
-      }
-    }
-    offCtx.putImageData(imgData, 0, 0);
+    const ctx = setupHiDPICanvas(canvas, width, height);
 
-    // 缩放到目标尺寸
-    canvas.width = width;
-    canvas.height = height;
-    ctx.fillStyle = '#ffffff';
+    // Background
+    ctx.fillStyle = '#F9FAFB';
     ctx.fillRect(0, 0, width, height);
 
-    // 保持宽高比
-    const scaleX = width / W;
-    const scaleY = height / H;
+    // Card
+    ctx.shadowColor = 'rgba(0,0,0,0.06)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+    roundRect(ctx, padding, padding, cardW, cardH, 8);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.lineWidth = 1;
+    roundRect(ctx, padding, padding, cardW, cardH, 8);
+    ctx.stroke();
+
+    // Render heatmap
+    const { canvas: offCanvas } = renderMatrixToCanvas(heatmap, displayVmax, threshold, 'transparent');
+
+    const innerPad = 8;
+    const innerW = cardW - innerPad * 2;
+    const innerH = cardH - innerPad * 2;
+    const scaleX = innerW / W;
+    const scaleY = innerH / H;
     const scale = Math.min(scaleX, scaleY);
     const drawW = W * scale;
     const drawH = H * scale;
-    const offsetX = (width - drawW) / 2;
-    const offsetY = (height - drawH) / 2;
+    const offsetX = padding + innerPad + (innerW - drawW) / 2;
+    const offsetY = padding + innerPad + (innerH - drawH) / 2;
 
+    ctx.save();
+    roundRect(ctx, padding + 2, padding + 2, cardW - 4, cardH - 4, 7);
+    ctx.clip();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(offCanvas, offsetX, offsetY, drawW, drawH);
 
-    // 绘制 FPA 线
+    // Draw FPA lines
     fpaLines.forEach(line => {
       const { heel, fore, angle, isRight } = line;
-      // heel/fore 坐标是 [x, y] 在原始矩阵坐标系中
       const hx = heel[0] * scale + offsetX;
       const hy = heel[1] * scale + offsetY;
       const fx = fore[0] * scale + offsetX;
       const fy = fore[1] * scale + offsetY;
 
-      // 延长线
       const vecX = fx - hx;
       const vecY = fy - hy;
       const extRatio = 0.3;
       const plotFx = fx + vecX * extRatio;
       const plotFy = fy + vecY * extRatio;
 
-      // 足轴线 (白底 + 黑线)
+      // Foot axis line - glow effect
       ctx.beginPath();
       ctx.moveTo(hx, hy);
       ctx.lineTo(plotFx, plotFy);
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 3.5;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(hx, hy);
       ctx.lineTo(plotFx, plotFy);
-      ctx.strokeStyle = 'black';
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = isRight ? '#F59E0B' : '#3B82F6';
+      ctx.lineWidth = 1.8;
       ctx.stroke();
 
-      // 垂直参考线 (虚线)
+      // Vertical reference line (dashed)
       const footLen = Math.sqrt(vecX * vecX + vecY * vecY);
       ctx.beginPath();
-      ctx.setLineDash([4, 3]);
+      ctx.setLineDash([3, 3]);
       ctx.moveTo(hx, hy);
-      ctx.lineTo(hx, hy - footLen * 1.2);
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineTo(hx, hy - footLen * 1.1);
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 角度标签
-      const isOut = angle > 0;
-      const textColor = isOut ? '#FBBF24' : '#22D3EE';
-      const bgColor = 'rgba(48,48,48,0.7)';
+      // Heel dot
+      ctx.beginPath();
+      ctx.arc(hx, hy, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+
+      // Angle label - pill badge
       const text = `${angle.toFixed(1)}°`;
-      const textOffsetX = isRight ? 8 : -8;
-      const textAlign = isRight ? 'left' : 'right';
-
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = textAlign;
+      ctx.font = `bold 9px ${FONT_FAMILY}`;
       const metrics = ctx.measureText(text);
-      const textW = metrics.width + 6;
-      const textH = 14;
-      const textX = fx + textOffsetX;
-      const textY = fy;
+      const pillW = metrics.width + 10;
+      const pillH = 16;
+      const pillX = fx + (isRight ? 6 : -6 - pillW);
+      const pillY = fy - pillH / 2;
 
-      // Background
-      ctx.fillStyle = bgColor;
-      const bgX = textAlign === 'left' ? textX - 3 : textX - textW + 3;
-      ctx.fillRect(bgX, textY - textH + 2, textW, textH);
+      // Pill background
+      const isOut = angle > 0;
+      const pillColor = isOut ? 'rgba(245,158,11,0.85)' : 'rgba(59,130,246,0.85)';
+      roundRect(ctx, pillX, pillY, pillW, pillH, 8);
+      ctx.fillStyle = pillColor;
+      ctx.fill();
 
-      // Text
-      ctx.fillStyle = textColor;
-      ctx.fillText(text, textX, textY);
+      // Pill text
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `bold 9px ${FONT_FAMILY}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(text, pillX + pillW / 2, pillY + pillH / 2 + 3);
     });
+
+    ctx.restore();
+
+    // Colorbar
+    const cbX = padding + cardW + colorbarGap;
+    const cbY = padding + innerPad;
+    const cbH = cardH - innerPad * 2;
+    drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, displayVmax);
+
+    // Title label
+    ctx.fillStyle = '#6B7B8D';
+    ctx.font = `10px ${FONT_FAMILY}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Pressure (N)', cbX + colorbarW / 2, cbY - 6);
   }, [heatmapData, width, height]);
 
   if (!heatmapData || !heatmapData.heatmap) return null;
@@ -176,8 +166,6 @@ export default function FootprintHeatmapChart({ heatmapData, width = 500, height
   return (
     <canvas
       ref={canvasRef}
-      width={width}
-      height={height}
       className={className}
       style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
     />

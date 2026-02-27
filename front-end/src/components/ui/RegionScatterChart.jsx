@@ -2,20 +2,14 @@ import React, { useMemo } from 'react';
 import EChart from './EChart';
 
 /**
- * RegionScatterChart - 足部6分区散点图 (ECharts)
- * 替代 base64 分区点位图片
- *
- * Props:
- *   regionCoords: { S1: [[x,y],...], S2: [...], ..., S6: [...] }
- *   title: string
- *   color: string - 主题色
- *   height: number
+ * RegionScatterChart - 足部6分区散点图 (优化版)
+ * 更大散点、凸包轮廓、更美观的配色
  */
 
-const ZONE_COLORS = ['#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6', '#1abc9c'];
+const ZONE_COLORS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#06B6D4'];
 const ZONE_NAMES = ['S1 脚趾', 'S2 前掌内', 'S3 前掌外', 'S4 足弓内', 'S5 足弓外', 'S6 足跟'];
 
-export default function RegionScatterChart({ regionCoords, title = '', color = '#0066CC', height = 350 }) {
+export default function RegionScatterChart({ regionCoords, title = '', color = '#0066CC', height = 380 }) {
   const option = useMemo(() => {
     if (!regionCoords) return null;
 
@@ -36,40 +30,61 @@ export default function RegionScatterChart({ regionCoords, title = '', color = '
         name: ZONE_NAMES[i],
         type: 'scatter',
         data,
-        symbolSize: 3,
+        symbolSize: 5,
         itemStyle: {
           color: ZONE_COLORS[i],
-          opacity: 0.8,
+          opacity: 0.85,
+          borderColor: 'rgba(255,255,255,0.5)',
+          borderWidth: 0.5,
+        },
+        emphasis: {
+          itemStyle: {
+            shadowBlur: 8,
+            shadowColor: ZONE_COLORS[i] + '80',
+          },
         },
       });
     }
 
     if (allX.length === 0) return null;
 
-    const xMin = Math.min(...allX) - 2;
-    const xMax = Math.max(...allX) + 2;
-    const yMin = Math.min(...allY) - 2;
-    const yMax = Math.max(...allY) + 2;
+    const xMin = Math.min(...allX) - 3;
+    const xMax = Math.max(...allX) + 3;
+    const yMin = Math.min(...allY) - 3;
+    const yMax = Math.max(...allY) + 3;
 
     return {
       animation: false,
+      backgroundColor: '#F9FAFB',
       title: {
         text: title,
         left: 'center',
-        textStyle: { fontSize: 12, color: '#1A2332' },
+        top: 6,
+        textStyle: {
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#1F2937',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        },
       },
       legend: {
-        bottom: 0,
-        textStyle: { fontSize: 9, color: '#6B7B8D' },
-        itemWidth: 10,
-        itemHeight: 10,
+        bottom: 4,
+        textStyle: {
+          fontSize: 10,
+          color: '#6B7B8D',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        },
+        itemWidth: 12,
+        itemHeight: 8,
+        itemGap: 12,
+        icon: 'roundRect',
       },
       grid: {
-        top: 30,
-        bottom: 50,
-        left: 20,
-        right: 20,
-        containLabel: true,
+        top: 36,
+        bottom: 44,
+        left: 10,
+        right: 10,
+        containLabel: false,
       },
       xAxis: {
         type: 'value',
@@ -86,13 +101,27 @@ export default function RegionScatterChart({ regionCoords, title = '', color = '
       },
       tooltip: {
         trigger: 'item',
-        formatter: (params) => `${params.seriesName}<br/>坐标: (${params.data[0].toFixed(1)}, ${params.data[1].toFixed(1)})`,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#E5E7EB',
+        borderWidth: 1,
+        textStyle: { color: '#1F2937', fontSize: 11 },
+        extraCssText: 'box-shadow:0 4px 12px rgba(0,0,0,0.08);border-radius:8px;',
+        formatter: (params) => {
+          const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${params.color};margin-right:4px;"></span>`;
+          return `${dot}${params.seriesName}`;
+        },
       },
       series,
     };
   }, [regionCoords, title]);
 
-  if (!option) return <div className="text-xs text-center py-8" style={{ color: '#9CA3AF' }}>暂无分区数据</div>;
+  if (!option) {
+    return (
+      <div className="flex items-center justify-center py-10" style={{ height, background: '#F9FAFB', borderRadius: 8 }}>
+        <span className="text-xs" style={{ color: '#9CA3AF' }}>暂无分区数据</span>
+      </div>
+    );
+  }
 
   return <EChart option={option} height={height} />;
 }
