@@ -2,22 +2,65 @@
  * Python 算法统一桥接模块
  * ========================
  * 通过 Node.js 子进程调用 Python bridge.py，实现所有算法的统一调用。
+ * 自动检测 Python 可执行文件路径，兼容 Windows / macOS / Linux。
  *
  * 用法:
  *   const { callPython } = require('./python/pythonBridge');
  *   const result = await callPython('generate_grip_render_report', { sensor_data, hand_type });
  */
 
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 
 const BRIDGE_SCRIPT = path.join(__dirname, 'bridge.py');
 
-// Python 可执行文件路径（优先使用 python3，回退到 python）
-const PYTHON_CMD = process.env.PYTHON_CMD || 'python3';
-
 // 超时时间（毫秒）
 const TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000; // 3分钟
+
+// ─── 自动检测 Python 可执行文件 ───
+
+let _pythonCmd = null;
+
+function getPythonCmd() {
+  if (_pythonCmd) return _pythonCmd;
+
+  // 如果环境变量指定了，直接使用
+  if (process.env.PYTHON_CMD) {
+    _pythonCmd = process.env.PYTHON_CMD;
+    console.log(`[Python] 使用环境变量 PYTHON_CMD: ${_pythonCmd}`);
+    return _pythonCmd;
+  }
+
+  // 候选命令列表（按优先级排序）
+  const isWin = process.platform === 'win32';
+  const candidates = isWin
+    ? ['python', 'python3', 'py -3', 'py']
+    : ['python3', 'python'];
+
+  for (const cmd of candidates) {
+    try {
+      // 尝试执行 python --version 来验证命令是否可用
+      const parts = cmd.split(' ');
+      const testArgs = [...parts.slice(1), '--version'];
+      const result = execSync(`${parts[0]} ${testArgs.join(' ')}`, {
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      const version = result.toString().trim();
+      console.log(`[Python] 检测到: ${cmd} → ${version}`);
+      _pythonCmd = cmd;
+      return _pythonCmd;
+    } catch (e) {
+      // 这个命令不可用，尝试下一个
+    }
+  }
+
+  // 都找不到，使用默认值（让后续调用时报出明确错误）
+  _pythonCmd = isWin ? 'python' : 'python3';
+  console.warn(`[Python] 未检测到可用的 Python，使用默认: ${_pythonCmd}`);
+  return _pythonCmd;
+}
 
 /**
  * 调用 Python 算法
@@ -40,22 +83,30 @@ async function callPython(funcName, params = {}) {
       params: params,
     });
 
-    console.log(`[Python] 调用 ${funcName}, 输入数据大小: ${(inputData.length / 1024).toFixed(1)}KB`);
+    const pythonCmd = getPythonCmd();
+    console.log(`[Python] 调用 ${funcName}, 输入数据大小: ${(inputData.length / 1024).toFixed(1)}KB, cmd: ${pythonCmd}`);
+
+    // 解析命令（支持 "py -3" 这种带参数的命令）
+    const cmdParts = pythonCmd.split(' ');
+    const spawnCmd = cmdParts[0];
+    const spawnArgs = [...cmdParts.slice(1), BRIDGE_SCRIPT];
 
     let child;
     try {
-      child = spawn(PYTHON_CMD, [BRIDGE_SCRIPT], {
+      child = spawn(spawnCmd, spawnArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: TIMEOUT_MS,
+        windowsHide: true,
         env: {
           ...process.env,
           PYTHONUNBUFFERED: '1',
+          PYTHONIOENCODING: 'utf-8',
           MPLBACKEND: 'Agg',
         },
       });
     } catch (spawnErr) {
       console.error('[Python] 无法启动子进程:', spawnErr.message);
-      fail(new Error(`Cannot spawn Python process: ${spawnErr.message}`));
+      fail(new Error(`Cannot spawn Python process (cmd: ${pythonCmd}): ${spawnErr.message}`));
       return;
     }
 
@@ -85,9 +136,14 @@ async function callPython(funcName, params = {}) {
       if (settled) return;
 
       if (code !== 0) {
-        console.error(`[Python] 进程退出码: ${code}, signal: ${signal}`);
+        let errMsg = `Python process exited with code ${code}`;
+        // 提供更友好的错误提示
+        if (code === 9009 || code === 127) {
+          errMsg = `Python 命令 "${pythonCmd}" 未找到 (exit code ${code})。请安装 Python3 或设置环境变量 PYTHON_CMD`;
+        }
+        console.error(`[Python] ${errMsg}`);
         if (stderr) console.error('[Python] stderr:', stderr.substring(0, 2000));
-        fail(new Error(`Python process exited with code ${code}: ${stderr.substring(0, 500)}`));
+        fail(new Error(`${errMsg}: ${stderr.substring(0, 500)}`));
         return;
       }
 
