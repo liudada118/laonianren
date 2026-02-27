@@ -219,27 +219,12 @@ function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, opt
 /* ─── GPU Shader-based rendering ─── */
 
 const DEFAULT_GRADIENT = {
-  0.00: '#0000ff',
-  0.05: '#0033ff',
-  0.10: '#0066ff',
-  0.15: '#0099ff',
-  0.20: '#00ccff',
-  0.25: '#00ffff',
-  0.30: '#00ffcc',
-  0.35: '#00ff99',
-  0.40: '#00ff66',
-  0.45: '#00ff33',
-  0.50: '#33ff00',
-  0.55: '#66ff00',
-  0.60: '#99ff00',
-  0.65: '#ccff00',
-  0.70: '#ffff00',
-  0.75: '#ffcc00',
-  0.80: '#ff9900',
-  0.85: '#ff6600',
-  0.90: '#ff3300',
-  0.95: '#ff1100',
-  1.00: '#ff0000'
+  0.14: '#0000FF',
+  0.28: '#0066FF',
+  0.42: '#00FF00',
+  0.56: '#FFFF00',
+  0.70: '#FF6600',
+  0.84: '#FF0000'
 };
 
 function buildGradientTexture(gradient) {
