@@ -2960,39 +2960,45 @@ function colAndSendData() {
  */
 function sendData() {
   let obj
-  if (baudRate == 921600) {
-    // 灏嗛噰闆嗗埌鐨勪覆鍙ｆ暟鎹浆鍖栨垚鍓嶇闇€瑕佺殑鏁版嵁
-    obj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })))
+  // 统一解析所有设备数据（parseData 对 HL/HR 会自动用 last+next 拼接，对其他设备用 data.arr）
+  // 先用不带 type 的方式解析，确保 HL/HR 正确拼接
+  const dataSnapshot = JSON.parse(JSON.stringify({ ...dataMap }))
+  const allObj = parseData(parserArr, dataSnapshot)
+  // 再用 highHZ 方式解析非手套设备（脚垫、坐垫等用 data.arr）
+  const highHZObj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
 
-    // 濡傛灉鏈哄櫒浜烘墍鏈塼ype閮戒笉鍖呭惈杩欎釜type  渚垮垹闄よ繖涓猼ype
-    for (let i = 0; i < Object.keys(obj).length; i++) {
-      const key = Object.keys(obj)[i]
-      if (!Object.values(constantObj.type).includes(key)) {
-        delete obj[key]
+  // 合并：HL/HR 用 allObj 的结果，其他设备用 highHZObj 的结果
+  obj = {}
+  Object.keys(highHZObj).forEach(key => {
+    obj[key] = highHZObj[key]
+  })
+  // HL/HR 覆盖用 allObj 的结果（确保 last+next 正确拼接）
+  if (allObj.HL) obj.HL = allObj.HL
+  if (allObj.HR) obj.HR = allObj.HR
+
+  // 根据 activeSendTypes 过滤（如果设置了的话）
+  if (activeSendTypes && Array.isArray(activeSendTypes) && activeSendTypes.length) {
+    obj = filterDataByTypes(obj, activeSendTypes)
+  }
+
+  // 同时推送 data 和 sitData 两种格式，前端 BackendBridge 都能处理
+  if (obj && Object.keys(obj).length) {
+    const payload = {}
+    // 手套数据通过 data 字段推送
+    const gloveData = {}
+    const otherData = {}
+    Object.keys(obj).forEach(key => {
+      if (key === 'HL' || key === 'HR') {
+        gloveData[key] = obj[key]
+      } else {
+        otherData[key] = obj[key]
       }
-    }
-    obj = filterDataByTypes(obj, activeSendTypes)
-    // 濡傛灉obj閲岄潰鍖呭惈  鏈哄櫒浜簍ype 鍙戦€佹暟鎹?
-    if (Object.keys(obj).filter((a) => Object.values(constantObj.type).includes(a)).length) {
-      socketSendData(server, JSON.stringify({ data: obj }))
-    }
-  } else {
-    // 濡傛灉涓插彛鍙戦€佹暟鎹?
-    const arr = []
-
-    obj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
-    for (let i = 0; i < 4096; i++) {
-      arr.push(Math.floor(Math.random() * 100))
-    }
-
-    // const dataMap = {
-    //   com3: {
-    //     data: arr
-    //   }
-    // }
-    // console.log(obj)
-    obj = filterDataByTypes(obj, activeSendTypes)
-    socketSendData(server, JSON.stringify({ sitData: obj }))
+    })
+    if (Object.keys(gloveData).length) payload.data = gloveData
+    if (Object.keys(otherData).length) payload.sitData = otherData
+    // 如果没有分类的数据，用 sitData 兜底
+    if (!payload.data && !payload.sitData) payload.sitData = obj
+    socketSendData(server, JSON.stringify(payload))
   }
 
   // const now = Date.now()

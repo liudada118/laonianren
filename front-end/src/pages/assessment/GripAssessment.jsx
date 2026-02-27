@@ -252,11 +252,9 @@ export default function GripAssessment() {
   useEffect(() => {
     if (!isGlobalConnected || backendCleanupRef.current) return;
 
-    // 设置手套模式
-    backendBridge.setActiveMode(1).then(() => {
-      console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
-      addSimLog('已自动设置为手套模式 (mode=1)', 'info');
-    }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
+    // 不再调用 setActiveMode，一键连接后所有数据链路始终可用
+    console.log('[GripAssessment] 全局已连接，直接监听手套数据');
+    addSimLog('全局已连接，直接监听手套数据', 'info');
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
@@ -405,13 +403,13 @@ export default function GripAssessment() {
 
   /* ─── 断开手套 ─── */
   const handleDisconnect = useCallback(async () => {
-    // 断开后端模式
+    // 断开后端模式（只取消事件监听，不断开全局 WebSocket）
     if (isBackendMode) {
       if (backendCleanupRef.current) {
         backendCleanupRef.current();
         backendCleanupRef.current = null;
       }
-      backendBridge.disconnect();
+      // 不再调用 backendBridge.disconnect()，保持全局 ws 连接
       setIsBackendMode(false);
     }
     await gloveService.disconnect();
@@ -437,9 +435,8 @@ export default function GripAssessment() {
       const connResult = await backendBridge.connPort();
       addSimLog(`后端连接结果: ${JSON.stringify(connResult)}`, 'info');
 
-      // 设置手套模式 (mode=1)
-      await backendBridge.setActiveMode(1);
-      addSimLog('已设置为手套模式 (mode=1)', 'info');
+      // 不再调用 setActiveMode，后端始终推送所有数据
+      addSimLog('后端已连接，监听手套数据', 'info');
 
       // 连接WebSocket
       backendBridge.connect();
@@ -621,15 +618,16 @@ export default function GripAssessment() {
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    // 组件卸载时断开串口
+    // 组件卸载时断开串口（仅串口直连模式）
     if (gloveService.connected) {
       gloveService.disconnect();
     }
-    // 清理后端连接
+    // 清理事件监听（不断开全局 WebSocket）
     if (backendCleanupRef.current) {
       backendCleanupRef.current();
+      backendCleanupRef.current = null;
     }
-    backendBridge.disconnect();
+    // 不再调用 backendBridge.disconnect()，保持全局连接
   }, []);
 
   /* ─── 报告模式 ─── */
