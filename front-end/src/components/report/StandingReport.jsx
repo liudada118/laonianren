@@ -42,8 +42,130 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
   const contentRef = useRef(null);
   const data = useMemo(() => {
     if (!reportData) return generateMockReport();
-    // 将 generateFootReport 输出转换为报告组件期望的格式
     const r = reportData;
+
+    // ---- 检测数据来源：后端 Python render_data 还是前端 generateFootReport ----
+    const isBackendFormat = !!(r.additional_data || r.arch_features || r.cop_time_series);
+
+    if (isBackendFormat) {
+      // ============================================================
+      // 后端 Python render_data 格式适配
+      // ============================================================
+      const ad = r.additional_data || {};
+      const af = r.arch_features || {};
+      const cts = r.cop_time_series || {};
+      const leftCopM = r.left_cop_metrics || {};
+      const rightCopM = r.right_cop_metrics || {};
+      const leftSway = r.left_sway_features || {};
+      const rightSway = r.right_sway_features || {};
+
+      const leftArchF = af.left_foot || {};
+      const rightArchF = af.right_foot || {};
+      const leftArea = ad.left_area || {};
+      const rightArea = ad.right_area || {};
+      const leftPres = ad.left_pressure || {};
+      const rightPres = ad.right_pressure || {};
+      const copRes = ad.cop_results || {};
+
+      // 速度序列和时间点（直接使用后端计算的数据）
+      const velocitySeries = cts.velocity_series || [];
+      const timePoints = cts.time_points || [];
+
+      // 置信椭圆面积
+      const leftEllipseArea = leftCopM['置信椭圆面积'] || 0;
+      const rightEllipseArea = rightCopM['置信椭圆面积'] || 0;
+
+      return {
+        left: {
+          archIndex: leftArchF.area_index,
+          length: ad.left_length || 0,
+          width: ad.left_width || 0,
+          totalArea: leftArea.total_area_cm2 || 0,
+          forefootArea: (leftArea.area_cm2 && leftArea.area_cm2[0]) || 0,
+          midfootArea: (leftArea.area_cm2 && leftArea.area_cm2[1]) || 0,
+          hindfootArea: (leftArea.area_cm2 && leftArea.area_cm2[2]) || 0,
+          forefootPressure: (leftPres['前足'] || 0) * 100,
+          midfootPressure: (leftPres['中足'] || 0) * 100,
+          hindfootPressure: (leftPres['后足'] || 0) * 100,
+          regionPressure: {
+            forefoot: (leftPres['前足'] || 0) * 100,
+            midfoot: (leftPres['中足'] || 0) * 100,
+            hindfoot: (leftPres['后足'] || 0) * 100,
+          },
+        },
+        right: {
+          archIndex: rightArchF.area_index,
+          length: ad.right_length || 0,
+          width: ad.right_width || 0,
+          totalArea: rightArea.total_area_cm2 || 0,
+          forefootArea: (rightArea.area_cm2 && rightArea.area_cm2[0]) || 0,
+          midfootArea: (rightArea.area_cm2 && rightArea.area_cm2[1]) || 0,
+          hindfootArea: (rightArea.area_cm2 && rightArea.area_cm2[2]) || 0,
+          forefootPressure: (rightPres['前足'] || 0) * 100,
+          midfootPressure: (rightPres['中足'] || 0) * 100,
+          hindfootPressure: (rightPres['后足'] || 0) * 100,
+          regionPressure: {
+            forefoot: (rightPres['前足'] || 0) * 100,
+            midfoot: (rightPres['中足'] || 0) * 100,
+            hindfoot: (rightPres['后足'] || 0) * 100,
+          },
+        },
+        bilateral: {
+          leftPressureRatio: 50,
+          rightPressureRatio: 50,
+        },
+        copData: { leftCop: [], rightCop: [] },
+        ellipseData: {
+          left: { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: leftEllipseArea },
+          right: { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: rightEllipseArea },
+        },
+        copTimeSeries: {
+          velocitySeries,
+          timePoints,
+          pathLength: cts.path_length || 0,
+          contactArea: cts.contact_area || 0,
+          lsRatio: cts.ls_ratio || 0,
+          eccentricity: cts.eccentricity || 0,
+          deltaY: cts.delta_y || 0,
+          deltaX: cts.delta_x || 0,
+          majorAxis: cts.major_axis || 0,
+          minorAxis: cts.minor_axis || 0,
+          maxDisplacement: cts.max_displacement || 0,
+          minDisplacement: cts.min_displacement || 0,
+          avgVelocity: cts.avg_velocity || 0,
+          rmsDisplacement: cts.rms_displacement || 0,
+          stdY: cts.std_y || 0,
+          stdX: cts.std_x || 0,
+        },
+        rawData: {
+          leftSectionCoords: leftArchF.section_coords || null,
+          rightSectionCoords: rightArchF.section_coords || null,
+          leftCopTrajectory: [],
+          rightCopTrajectory: [],
+          peakFrameFlat: af.peak_frame_data || [],
+        },
+        additionalData: {
+          copResults: {
+            distLeftToBoth: copRes.dist_left_to_both ? (copRes.dist_left_to_both * 7 / 10) : 0,
+            distRightToBoth: copRes.dist_right_to_both ? (copRes.dist_right_to_both * 7 / 10) : 0,
+            leftForward: copRes.left_forward ? (copRes.left_forward * 7 / 10) : 0,
+          }
+        },
+        // 后端 COP 指标（供 COP 参数表直接使用）
+        backendCopMetrics: {
+          left: leftCopM,
+          right: rightCopM,
+        },
+        backendSwayFeatures: {
+          left: leftSway,
+          right: rightSway,
+        },
+      };
+    }
+
+    // ============================================================
+    // 前端 generateFootReport 格式（原有逻辑）
+    // ============================================================
     const leftArch = r.left?.archAnalysis || {};
     const rightArch = r.right?.archAnalysis || {};
     const leftFoot = r.left?.footData || {};
@@ -60,7 +182,6 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       if (p.y < 32) leftCop.push([p.x, p.y]);
       else rightCop.push([p.x, p.y]);
     });
-    // 如果没有分离左右，全部放到两边
     if (leftCop.length === 0 && rightCop.length === 0) {
       copTraj.forEach(p => {
         leftCop.push([p.x, p.y]);
@@ -75,7 +196,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       const dx = (copTraj[i].x - copTraj[i-1].x) * 7.0;
       const dy = (copTraj[i].y - copTraj[i-1].y) * 7.0;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      const dt = 0.05; // ~20fps
+      const dt = 0.05;
       velocitySeries.push(dist / dt);
       timePoints.push(i * dt);
     }
@@ -163,7 +284,6 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         stdY: copMet.stdY || 0,
         stdX: copMet.stdX || 0,
       },
-      // 原始数据（用于Canvas图表）
       rawData: {
         leftSectionCoords: r.left?.sectionCoords || null,
         rightSectionCoords: r.right?.sectionCoords || null,
