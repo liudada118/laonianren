@@ -848,12 +848,19 @@ def calculate_pressure_features(data, time_vector):
 
     data = np.array(data, dtype=float)
     time_vector = np.array(time_vector, dtype=float)
-    if data.size == 0: return {"压力峰值": 0, "冲量": 0, "负载率": 0}
+    _default = {"压力峰值": 0, "冲量": 0, "负载率": 0}
+    if data.size == 0 or time_vector.size == 0: return _default
+    if data.size < 2 or time_vector.size < 2: 
+        # 数据点不足以计算梯度/积分
+        return {"压力峰值": float(np.max(np.abs(data))), "冲量": 0, "负载率": 0}
     pressure_peak = np.max(np.abs(data))
     try: impulse = simpson(data, x=time_vector)
     except: impulse = float(np.trapz(data, time_vector))
-    gradients = np.gradient(data, time_vector)
-    loading_rate = np.max(gradients) if gradients.size > 0 else 0
+    try:
+        gradients = np.gradient(data, time_vector)
+        loading_rate = np.max(gradients) if gradients.size > 0 else 0
+    except (IndexError, ValueError):
+        loading_rate = 0
     return {"压力峰值": pressure_peak, "冲量": impulse, "负载率": loading_rate}
 
 
@@ -863,8 +870,11 @@ def calculate_temporal_features(pressure_curve, time_vector):
 
     pressure_curve = np.array(pressure_curve, dtype=float)
     time_vector = np.array(time_vector, dtype=float)
-    if pressure_curve.size == 0:
-        return {"峰值时间_绝对": 0, "峰值时间_百分比": 0, "接触时间_绝对": 0, "接触时间_百分比": 0}
+    _default = {"峰值时间_绝对": 0, "峰值时间_百分比": 0, "接触时间_绝对": 0, "接触时间_百分比": 0}
+    if pressure_curve.size == 0 or time_vector.size == 0:
+        return _default
+    if pressure_curve.size < 2 or time_vector.size < 2:
+        return _default
     t_start = time_vector[0]
     t_end = time_vector[-1]
     total_duration = t_end - t_start if t_end != t_start else 1.0
