@@ -2352,6 +2352,8 @@ def cal_cop_fromData(data_array, threshold_ratio=0.8, fps=42, r_radius=0.1, time
         'arch_features': arch_results,
         'additional_data': additional_data,
         'cop_time_series': calculate_cop_time_series(left_cop, right_cop, additional_data),
+        'left_cop_trajectory': left_cop,
+        'right_cop_trajectory': right_cop,
     }
 
     # 控制台摘要
