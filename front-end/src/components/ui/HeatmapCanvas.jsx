@@ -1,9 +1,9 @@
 import React, { useRef, useEffect } from 'react';
-import { renderMatrixToCanvas, setupHiDPICanvas } from './heatmapUtils';
+import { renderMatrixToCanvas } from './heatmapUtils';
 
 /**
- * HeatmapCanvas - 通用 Canvas 热力图渲染组件 (优化版)
- * 使用 Turbo 色谱、高 DPI、Gamma 校正
+ * HeatmapCanvas - 通用 Canvas 热力图渲染组件
+ * 直接大像素 Canvas，不使用 DPR 缩放
  */
 
 export default function HeatmapCanvas({
@@ -25,7 +25,6 @@ export default function HeatmapCanvas({
     const rows = data.length;
     const cols = data[0].length;
 
-    // Compute vmax
     let maxVal = vmax;
     if (!maxVal || maxVal <= 0) {
       maxVal = 0;
@@ -40,9 +39,10 @@ export default function HeatmapCanvas({
     const threshold = maxVal * maskThreshold;
     const { canvas: offCanvas } = renderMatrixToCanvas(data, maxVal, threshold, bgColor);
 
-    const ctx = setupHiDPICanvas(canvas, width, height);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
 
-    // Aspect ratio
     const scaleX = width / cols;
     const scaleY = height / rows;
     const scale = Math.min(scaleX, scaleY);
@@ -51,7 +51,7 @@ export default function HeatmapCanvas({
     const offsetX = (width - drawW) / 2;
     const offsetY = (height - drawH) / 2;
 
-    ctx.fillStyle = '#F9FAFB';
+    ctx.fillStyle = '#F8FAFC';
     ctx.fillRect(0, 0, width, height);
 
     if (smooth) {

@@ -1,9 +1,10 @@
 import React, { useRef, useEffect } from 'react';
-import { renderMatrixToCanvas, drawColorbar, setupHiDPICanvas, roundRect, FONT_FAMILY } from './heatmapUtils';
+import { renderMatrixToCanvas, drawColorbar, roundRect, FONT } from './heatmapUtils';
 
 /**
- * GaitAverageChart - 步态平均热力图 + COP轨迹 (优化版)
- * 带色条、圆角卡片、高 DPI、COP 轨迹渐变
+ * GaitAverageChart - 步态平均热力图 + COP轨迹
+ * 
+ * 不使用 DPR 缩放，直接大像素 Canvas
  */
 
 export default function GaitAverageChart({ gaitAvgData, className = '' }) {
@@ -15,48 +16,54 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     const canvas = canvasRef.current;
 
     const sides = [
-      { data: gaitAvgData.left, label: 'Left Foot', subLabel: 'Average', color: '#0066CC', dotColor: '#3B82F6' },
-      { data: gaitAvgData.right, label: 'Right Foot', subLabel: 'Average', color: '#D97706', dotColor: '#F59E0B' },
+      { data: gaitAvgData.left, label: 'Left Foot', color: '#3B82F6' },
+      { data: gaitAvgData.right, label: 'Right Foot', color: '#F59E0B' },
     ].filter(s => s.data && s.data.heatmap);
 
     if (sides.length === 0) return;
 
     const padding = 24;
-    const labelH = 36;
-    const cellW = 220;
-    const cellH = 320;
-    const gap = 32;
-    const colorbarW = 14;
-    const colorbarGap = 16;
+    const labelH = 32;
+    const cellW = 200;
+    const cellH = 300;
+    const gap = 40;
+    const colorbarW = 16;
+    const colorbarGap = 12;
 
-    const totalW = padding * 2 + sides.length * (cellW + colorbarGap + colorbarW + 20) + (sides.length - 1) * gap;
-    const totalH = padding + labelH + cellH + padding + 10;
+    const blockW = cellW + colorbarGap + colorbarW + 24;
+    const totalW = padding * 2 + sides.length * blockW + (sides.length - 1) * gap;
+    const totalH = padding + labelH + cellH + padding;
 
-    const ctx = setupHiDPICanvas(canvas, totalW, totalH);
+    canvas.width = totalW;
+    canvas.height = totalH;
+    const ctx = canvas.getContext('2d');
 
     // Background
-    ctx.fillStyle = '#F9FAFB';
+    ctx.fillStyle = '#F8FAFC';
     ctx.fillRect(0, 0, totalW, totalH);
 
     sides.forEach((side, idx) => {
-      const { data, label, subLabel, color, dotColor } = side;
+      const { data, label, color } = side;
       const heatmap = data.heatmap;
       const cops = data.copTrajectories || [];
 
-      // Compute vmax
-      let vmax = 0;
+      // 使用 P95 百分位数做 vmax
+      const nonZeroVals = [];
       for (const row of heatmap) {
         for (const v of row) {
-          if (v > vmax) vmax = v;
+          if (v > 0) nonZeroVals.push(v);
         }
       }
-      if (vmax <= 0) vmax = 1;
+      if (nonZeroVals.length === 0) return;
+      nonZeroVals.sort((a, b) => a - b);
+      const p95Idx = Math.floor(nonZeroVals.length * 0.95);
+      const vmax = nonZeroVals[p95Idx] || nonZeroVals[nonZeroVals.length - 1] || 1;
+      const threshold = vmax * 0.005;
 
-      const threshold = vmax * 0.02;
-      const displayVmax = vmax * 0.85;
-      const { canvas: offCanvas, rows, cols } = renderMatrixToCanvas(heatmap, displayVmax, threshold, 'transparent');
+      const rows = heatmap.length;
+      const cols = heatmap[0].length;
+      const { canvas: offCanvas } = renderMatrixToCanvas(heatmap, vmax, threshold, 'transparent');
 
-      const blockW = cellW + colorbarGap + colorbarW + 20;
       const baseX = padding + idx * (blockW + gap);
       const cardX = baseX;
       const cardY = padding + labelH;
@@ -64,36 +71,31 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
       // Label
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(baseX + 2, padding + labelH / 2 - 2, 5, 0, Math.PI * 2);
+      ctx.arc(baseX + 4, padding + labelH / 2, 5, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#1F2937';
-      ctx.font = `bold 13px ${FONT_FAMILY}`;
+      ctx.font = `bold 13px ${FONT}`;
       ctx.textAlign = 'left';
-      ctx.fillText(label, baseX + 14, padding + labelH / 2 + 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, baseX + 16, padding + labelH / 2);
 
       ctx.fillStyle = '#9CA3AF';
-      ctx.font = `11px ${FONT_FAMILY}`;
-      ctx.fillText(`${subLabel} (${data.stepCount} steps)`, baseX + 14 + ctx.measureText(label).width + 6, padding + labelH / 2 + 2);
+      ctx.font = `11px ${FONT}`;
+      const labelEnd = baseX + 16 + ctx.measureText(label).width + 6;
+      ctx.fillText(`(${data.stepCount} steps)`, labelEnd, padding + labelH / 2);
 
-      // Card shadow
-      ctx.shadowColor = 'rgba(0,0,0,0.06)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 2;
-      roundRect(ctx, cardX, cardY, cellW, cellH, 8);
+      // Card
+      roundRect(ctx, cardX, cardY, cellW, cellH, 6);
       ctx.fillStyle = '#FFFFFF';
       ctx.fill();
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-
-      // Card border
       ctx.strokeStyle = '#E5E7EB';
       ctx.lineWidth = 1;
-      roundRect(ctx, cardX, cardY, cellW, cellH, 8);
+      roundRect(ctx, cardX, cardY, cellW, cellH, 6);
       ctx.stroke();
 
-      // Heatmap inside card
-      const innerPad = 10;
+      // Heatmap
+      const innerPad = 8;
       const innerW = cellW - innerPad * 2;
       const innerH = cellH - innerPad * 2;
       const scaleX = innerW / cols;
@@ -105,20 +107,15 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
       const offY = cardY + innerPad + (innerH - drawH) / 2;
 
       ctx.save();
-      roundRect(ctx, cardX + 2, cardY + 2, cellW - 4, cellH - 4, 7);
+      roundRect(ctx, cardX + 1, cardY + 1, cellW - 2, cellH - 2, 5);
       ctx.clip();
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(offCanvas, offX, offY, drawW, drawH);
-      ctx.restore();
 
-      // COP trajectories with gradient
-      cops.forEach((trail, trailIdx) => {
+      // COP trajectories
+      cops.forEach((trail) => {
         if (!trail || trail.length < 2) return;
-
-        ctx.save();
-        roundRect(ctx, cardX + 2, cardY + 2, cellW - 4, cellH - 4, 7);
-        ctx.clip();
 
         for (let i = 1; i < trail.length; i++) {
           const px0 = trail[i - 1][1] * scale + offX;
@@ -139,35 +136,35 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
 
         // Start/end markers
         if (trail.length > 0) {
-          const startPx = trail[0][1] * scale + offX;
-          const startPy = trail[0][0] * scale + offY;
+          const sx = trail[0][1] * scale + offX;
+          const sy = trail[0][0] * scale + offY;
           ctx.beginPath();
-          ctx.arc(startPx, startPy, 3, 0, Math.PI * 2);
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2);
           ctx.fillStyle = '#22D3EE';
           ctx.fill();
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 1;
           ctx.stroke();
 
-          const endPx = trail[trail.length - 1][1] * scale + offX;
-          const endPy = trail[trail.length - 1][0] * scale + offY;
+          const ex = trail[trail.length - 1][1] * scale + offX;
+          const ey = trail[trail.length - 1][0] * scale + offY;
           ctx.beginPath();
-          ctx.arc(endPx, endPy, 3, 0, Math.PI * 2);
+          ctx.arc(ex, ey, 3, 0, Math.PI * 2);
           ctx.fillStyle = '#F43F5E';
           ctx.fill();
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-
-        ctx.restore();
       });
+
+      ctx.restore();
 
       // Colorbar
       const cbX = cardX + cellW + colorbarGap;
       const cbY = cardY + innerPad;
       const cbH = cellH - innerPad * 2;
-      drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, displayVmax);
+      drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, vmax);
     });
   }, [gaitAvgData]);
 

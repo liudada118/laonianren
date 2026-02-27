@@ -1,9 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { renderMatrixToCanvas, drawColorbar, setupHiDPICanvas, roundRect, FONT_FAMILY } from './heatmapUtils';
+import { renderMatrixToCanvas, drawColorbar, roundRect, FONT } from './heatmapUtils';
 
 /**
- * PressureEvolutionChart - 动态压力演变渲染组件 (优化版)
- * 渲染左右脚各10帧裁剪后的热力图网格，带色条、圆角、高 DPI
+ * PressureEvolutionChart - 动态压力演变渲染组件
+ * 左右脚各10帧裁剪后的热力图网格
+ * 
+ * 不使用 DPR 缩放，直接用大像素 Canvas 保证清晰度
  */
 
 export default function PressureEvolutionChart({ evolutionData, className = '' }) {
@@ -17,44 +19,47 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
     const rightData = evolutionData.right;
 
     const numCols = 10;
-    const cellW = 72;
-    const cellH = 96;
-    const gap = 6;
-    const labelW = 90;
-    const rowGap = 32;
-    const titleH = 20;
-    const colorbarW = 14;
-    const colorbarGap = 40;
-    const paddingTop = 12;
-    const paddingBottom = 8;
+    const cellW = 80;
+    const cellH = 110;
+    const cellGap = 8;
+    const labelW = 80;
+    const rowGap = 40;
+    const titleH = 22;
+    const colorbarW = 16;
+    const colorbarMargin = 16;
+    const padTop = 16;
+    const padBottom = 12;
 
     const rows = [
-      { data: leftData, label: 'Left Foot', color: '#0066CC' },
-      { data: rightData, label: 'Right Foot', color: '#D97706' },
+      { data: leftData, label: 'Left Foot', color: '#3B82F6' },
+      { data: rightData, label: 'Right Foot', color: '#F59E0B' },
     ];
 
-    const totalW = labelW + numCols * (cellW + gap) + colorbarGap + colorbarW + 30;
-    const totalH = paddingTop + rows.length * (cellH + titleH + rowGap) - rowGap + paddingBottom;
+    const totalW = labelW + numCols * (cellW + cellGap) - cellGap + colorbarMargin + colorbarW + 40;
+    const totalH = padTop + rows.length * (cellH + titleH + rowGap) - rowGap + padBottom;
 
-    const ctx = setupHiDPICanvas(canvas, totalW, totalH);
+    canvas.width = totalW;
+    canvas.height = totalH;
+    const ctx = canvas.getContext('2d');
 
     // Background
-    ctx.fillStyle = '#F9FAFB';
+    ctx.fillStyle = '#F8FAFC';
     ctx.fillRect(0, 0, totalW, totalH);
 
     rows.forEach((row, rowIdx) => {
-      const yBase = paddingTop + rowIdx * (cellH + titleH + rowGap);
+      const yBase = padTop + rowIdx * (cellH + titleH + rowGap);
 
-      // Row label with colored dot
+      // Row label
       ctx.fillStyle = row.color;
       ctx.beginPath();
-      ctx.arc(12, yBase + cellH / 2, 4, 0, Math.PI * 2);
+      ctx.arc(14, yBase + cellH / 2, 5, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#1F2937';
-      ctx.font = `600 12px ${FONT_FAMILY}`;
+      ctx.font = `bold 13px ${FONT}`;
       ctx.textAlign = 'left';
-      ctx.fillText(row.label, 22, yBase + cellH / 2 + 4);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(row.label, 26, yBase + cellH / 2);
 
       if (!row.data || !row.data.frames) return;
 
@@ -64,22 +69,13 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
       const threshold = vmax * 0.02;
 
       for (let col = 0; col < Math.min(frames.length, numCols); col++) {
-        const x = labelW + col * (cellW + gap);
+        const x = labelW + col * (cellW + cellGap);
         const y = yBase;
 
-        // Card shadow
-        ctx.shadowColor = 'rgba(0,0,0,0.08)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 1;
-
-        // Rounded card background (dark)
+        // Card background (dark)
         roundRect(ctx, x, y, cellW, cellH, 4);
         ctx.fillStyle = '#1A1A2E';
         ctx.fill();
-
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
 
         // Render heatmap frame
         const frameData = frames[col];
@@ -88,8 +84,7 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
             frameData, vmax, threshold, '#000'
           );
 
-          // Fit inside cell with 2px padding
-          const pad = 2;
+          const pad = 3;
           const innerW = cellW - pad * 2;
           const innerH = cellH - pad * 2;
           const scaleX = innerW / fCols;
@@ -109,36 +104,41 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
           ctx.restore();
         }
 
-        // Highlight peak frame
+        // Peak highlight
         const titleText = titles[col] || '';
         if (titleText.includes('Peak')) {
           ctx.strokeStyle = '#EF4444';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.5;
           roundRect(ctx, x, y, cellW, cellH, 4);
           ctx.stroke();
 
           // Peak badge
           ctx.fillStyle = '#EF4444';
-          roundRect(ctx, x + cellW / 2 - 16, y - 6, 32, 12, 6);
+          roundRect(ctx, x + cellW / 2 - 18, y - 8, 36, 14, 7);
           ctx.fill();
           ctx.fillStyle = '#fff';
-          ctx.font = `bold 7px ${FONT_FAMILY}`;
+          ctx.font = `bold 9px ${FONT}`;
           ctx.textAlign = 'center';
-          ctx.fillText('PEAK', x + cellW / 2, y + 2);
+          ctx.textBaseline = 'middle';
+          ctx.fillText('PEAK', x + cellW / 2, y - 1);
         }
 
-        // Title below
-        ctx.fillStyle = '#6B7B8D';
-        ctx.font = `10px ${FONT_FAMILY}`;
+        // Title below cell - 截断时间显示，只保留整数ms
+        let displayTitle = titleText;
+        // 处理类似 "12.987012987ms" 的情况，截断为整数
+        displayTitle = displayTitle.replace(/(\d+)\.\d+(ms)/g, '$1$2');
+        // 处理 "Start 0ms" / "End 701ms" / "Peak 64ms"
+        displayTitle = displayTitle.replace('Peak ', '');
+
+        ctx.fillStyle = '#9CA3AF';
+        ctx.font = `10px ${FONT}`;
         ctx.textAlign = 'center';
-        const titleLines = titleText.replace('Peak ', '').split('\n');
-        titleLines.forEach((line, li) => {
-          ctx.fillText(line, x + cellW / 2, y + cellH + 12 + li * 11);
-        });
+        ctx.textBaseline = 'top';
+        ctx.fillText(displayTitle, x + cellW / 2, y + cellH + 4);
       }
 
       // Colorbar
-      const cbX = labelW + numCols * (cellW + gap) + 16;
+      const cbX = labelW + numCols * (cellW + cellGap) - cellGap + colorbarMargin;
       const cbY = yBase + 4;
       const cbH = cellH - 8;
       drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, vmax);
