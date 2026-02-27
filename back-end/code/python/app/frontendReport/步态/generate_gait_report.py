@@ -1482,14 +1482,18 @@ def analyze_gait_cycle(gait_events, frame_ms=40):
     right_on, right_off = gait_events["right"]["foot_on"], gait_events["right"]["toe_off"]
     if len(left_on) < 3 or len(right_on) < 1: return {}, 0, 0
 
+    # 找到第一对连续的非 None 的 left_on 值作为周期起止
     i = 1
-    # while i < len(left_on) - 1:
-    #     if left_on[i] is not None and left_on[i+1] is not None: break
-    #     i += 1
-    # if i >= len(left_on) - 1: return {}, 0, 0
+    while i < len(left_on) - 1:
+        if left_on[i] is not None and left_on[i+1] is not None: break
+        i += 1
+    if i >= len(left_on) - 1: return {}, 0, 0
 
     cycle_start = left_on[i] 
     cycle_end = left_on[i + 1]
+
+    # cycle_start / cycle_end 仍然可能为 None（防御性检查）
+    if cycle_start is None or cycle_end is None: return {}, 0, 0
 
     right_step_on = -1
     for k in range(len(right_on)):
@@ -1502,12 +1506,14 @@ def analyze_gait_cycle(gait_events, frame_ms=40):
     if right_step_on - 1 >= 0 and right_step_on - 1 < len(right_off):
         double_stance1_end = right_off[right_step_on - 1]
     else: double_stance1_end = cycle_start + 5 
+    if double_stance1_end is None: double_stance1_end = cycle_start + 5
 
     left_single_start = double_stance1_end + 1 if double_stance1_end else cycle_start
     left_single_end = right_on[right_step_on]
+    if left_single_end is None: left_single_end = left_single_start + 5
 
     double_stance2_start = left_single_end + 1
-    double_stance2_end = left_off[i] if i < len(left_off) else left_single_end + 5
+    double_stance2_end = left_off[i] if i < len(left_off) and left_off[i] is not None else left_single_end + 5
 
     right_single_start = double_stance2_end + 1
     right_single_end = cycle_end
