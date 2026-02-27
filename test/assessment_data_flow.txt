@@ -1,0 +1,50 @@
+评估页面数据流分析
+==================
+
+1. GripAssessment（握力评估）
+   - 数据源：GloveSerialService（WebSerial API）
+   - 数据格式：256个值的数组（16x16矩阵）
+   - 回调：gloveService.onLeftHandData(arr256) / gloveService.onRightHandData(arr256)
+   - 后端数据：sitData.HL.arr / sitData.HR.arr（256个值数组）
+   - 已有后端模式，需要改为自动检测全局连接状态
+   - 后端模式设置：setActiveMode(1)
+
+2. SitStandAssessment（起坐评估）
+   - 数据源：usePressureScene hook → PressureSensorSerial（WebSerial API）
+   - 坐垫数据格式：32×32矩阵（1024个值的flat数组）
+   - 脚垫数据格式：64×64矩阵（4096个值的flat数组）
+   - 回调：seatSensor.onData(frame) / footpadSensor.onData(frame)
+     frame = { matrix: 2D矩阵, maxVal, minVal, nonZeroCount, timestamp }
+   - 后端数据：sitData.sit.arr（1024个值）→ 需转为32×32矩阵
+   - 后端数据：sitData.foot1.arr（4096个值）→ 需转为64×64矩阵
+   - 后端模式设置：setActiveMode(3)
+
+3. StandingAssessment（静态站立评估）
+   - 数据源：SerialService（WebSerial API）
+   - 数据格式：64×64矩阵
+   - 回调：serialService.setOnData(handleSerialData) → handleSerialData(matrix)
+     matrix是64×64的2D数组
+   - 后端数据：sitData.foot1.arr（4096个值）→ 需parseFrameData转为64×64矩阵
+   - 后端模式设置：setActiveMode(5)
+
+4. GaitAssessment（步态评估）
+   - 数据源：footpadServices[key]（4个FootpadSerialService实例）
+   - SENSOR_KEYS = ['foot1', 'foot2', 'foot3', 'foot4']
+   - 数据格式：每个传感器64×64矩阵
+   - 回调：footpadServices[key].setOnData(matrix => ...)
+     matrix是64×64的2D数组
+   - 后端数据：sitData.foot1/foot2/foot3/foot4.arr（各4096个值）→ 各转为64×64矩阵
+   - 后端模式设置：setActiveMode(5)
+
+后端WebSocket推送格式：
+  手套模式(baudRate==921600): { data: { HL: { status, arr, stamp, HZ }, HR: {...} } }
+  高频模式(其他): { sitData: { foot1: { status, arr, stamp, HZ }, foot2: {...}, sit: {...}, HL: {...}, HR: {...} } }
+
+BackendBridge事件映射：
+  sitData.HL.arr → leftHandData事件
+  sitData.HR.arr → rightHandData事件
+  sitData.sit.arr → sitData事件
+  sitData.foot1.arr → foot1Data事件
+  sitData.foot2.arr → foot2Data事件
+  sitData.foot3.arr → foot3Data事件
+  sitData.foot4.arr → foot4Data事件

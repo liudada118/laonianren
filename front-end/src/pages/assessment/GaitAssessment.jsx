@@ -4,6 +4,7 @@ import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
 import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
 import { footpadServices, SENSOR_KEYS } from '../../lib/footpad-sdk/services/FootpadSerialService';
+import { backendBridge } from '../../lib/BackendBridge';
 import { generateAnimatedWalkwayData } from '../../lib/footpad-sdk/utils/mockFootprintData';
 import gaitDemoDataUrl from '../../assets/gait_demo_data.json?url';
 import { generateGaitReportData } from '../../lib/gaitReportGenerator';
@@ -573,7 +574,8 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
   const [deviceStatus, setDeviceStatus] = useState('disconnected');
@@ -591,6 +593,10 @@ export default function GaitAssessment() {
   const [sensorData, setSensorData] = useState({});
   const [connectionState, setConnectionState] = useState({});
   const sceneRef = useRef(null);
+
+  /* 后端模式 */
+  const [isBackendMode, setIsBackendMode] = useState(false);
+  const backendCleanupRef = useRef(null);
 
   /* 模拟数据相关 */
   const simRef = useRef(null);
@@ -748,6 +754,57 @@ export default function GaitAssessment() {
     
     return result;
   }, []);
+
+  /* ─── 后端数据通道：全局一键连接后自动启用 ─── */
+  useEffect(() => {
+    if (!isGlobalConnected) return;
+    if (backendCleanupRef.current) return; // 已在监听
+
+    // 设置后端模式5（脚垫模式）
+    backendBridge.setActiveMode(5).then(() => {
+      console.log('[GaitAssessment] 已设置后端模式 mode=5');
+    }).catch(e => console.error('[GaitAssessment] setActiveMode failed:', e));
+
+    setIsBackendMode(true);
+    setDeviceStatus('connected');
+    setConnectionState({ sensor1: true, sensor2: true, sensor3: true, sensor4: true });
+
+    // foot1-foot4 映射到 sensor1-sensor4
+    const footToSensor = { foot1Data: 'sensor1', foot2Data: 'sensor2', foot3Data: 'sensor3', foot4Data: 'sensor4' };
+    const unsubs = [];
+
+    Object.entries(footToSensor).forEach(([event, sensorKey]) => {
+      const handler = (arr) => {
+        if (!arr || arr.length === 0) return;
+        // 后端推送的是 4096 个值的 flat 数组，转为 64x64 矩阵
+        const matrix = [];
+        for (let r = 0; r < 64; r++) {
+          matrix.push(arr.slice(r * 64, (r + 1) * 64));
+        }
+        const filtered = denoiseMatrix(matrix, 15, 20);
+        setSensorData(prev => {
+          const newData = { ...prev, [sensorKey]: filtered };
+          computeStats(newData);
+          return newData;
+        });
+      };
+      unsubs.push(backendBridge.on(event, handler));
+    });
+
+    backendCleanupRef.current = () => {
+      unsubs.forEach(fn => fn());
+      setIsBackendMode(false);
+    };
+
+    console.log('[GaitAssessment] 后端数据通道已建立');
+
+    return () => {
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
+    };
+  }, [isGlobalConnected, computeStats, denoiseMatrix]);
 
   /* 模拟数据 - 使用真实CSV数据回放 */
   const handleSimulate = useCallback(async () => {
@@ -910,17 +967,17 @@ export default function GaitAssessment() {
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
             <div className={`zeiss-status-dot ${deviceStatus}`} />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
+            <span className="text-xs" style={{ color: isBackendMode ? '#7C3AED' : 'var(--text-tertiary)' }}>
+              {isBackendMode ? '后端已连接' : deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
             </span>
-            {deviceStatus === 'disconnected' && (
+            {!isBackendMode && deviceStatus === 'disconnected' && (
               <>
                 <button onClick={() => handleConnect()} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)' }}>连接</button>
                 <span style={{ color: 'var(--border-medium)' }}>|</span>
                 <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: 'var(--success)' }}>模拟</button>
               </>
             )}
-            {deviceStatus === 'connected' && (
+            {!isBackendMode && deviceStatus === 'connected' && (
               <button onClick={simRef.current ? stopSimulate : handleDisconnect} className="text-xs font-medium ml-1" style={{ color: C.red }}>断开</button>
             )}
           </div>

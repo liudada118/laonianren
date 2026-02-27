@@ -2,20 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 
-/* ─── 图标组件 ─── */
-
-// 通用图标组件 - 加载外部PNG图标文件，支持颜色染色
-const IconImage = ({ src, alt, tintColor }) => (
-  <img 
-    src={src} 
-    alt={alt} 
-    className="w-full h-full object-contain" 
-    style={{ 
-      filter: tintColor ? undefined : 'brightness(0) saturate(100%) opacity(0.15)',
-    }} 
-  />
-);
-
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
   {
@@ -30,6 +16,7 @@ const ASSESSMENTS = [
     iconColor: '#B8CBE0',
     icon: '/icons/hand.png',
     iconBg: 'linear-gradient(135deg, #E8F2FF 0%, #D6E8FA 100%)',
+    devices: ['HL', 'HR'],
   },
   {
     key: 'sitstand',
@@ -43,6 +30,7 @@ const ASSESSMENTS = [
     iconColor: '#A8C8B8',
     icon: '/icons/sit-stand.png',
     iconBg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
+    devices: ['sit', 'foot1', 'foot2', 'foot3', 'foot4'],
   },
   {
     key: 'standing',
@@ -56,6 +44,7 @@ const ASSESSMENTS = [
     iconColor: '#BEB0D8',
     icon: '/icons/footprint.png',
     iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
+    devices: ['foot1', 'foot2', 'foot3', 'foot4'],
   },
   {
     key: 'gait',
@@ -69,8 +58,20 @@ const ASSESSMENTS = [
     iconColor: '#D4C4A0',
     icon: '/icons/walking.png',
     iconBg: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+    devices: ['foot1', 'foot2', 'foot3', 'foot4'],
   }
 ];
+
+/* ─── 设备名称映射 ─── */
+const DEVICE_LABELS = {
+  HL: '左手套',
+  HR: '右手套',
+  sit: '坐垫',
+  foot1: '脚垫1',
+  foot2: '脚垫2',
+  foot3: '脚垫3',
+  foot4: '脚垫4',
+};
 
 /* ─── 患者信息弹窗 ─── */
 function PatientDialog({ open, onClose, onConfirm }) {
@@ -140,10 +141,83 @@ function PatientDialog({ open, onClose, onConfirm }) {
   );
 }
 
+/* ─── 一键连接按钮组件 ─── */
+function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap }) {
+  const isConnected = status === 'connected';
+  const isConnecting = status === 'connecting';
+  const isError = status === 'error';
+
+  // 统计在线设备数
+  const allDevices = ['HL', 'HR', 'sit', 'foot1', 'foot2', 'foot3', 'foot4'];
+  const onlineCount = allDevices.filter(d => deviceOnlineMap[d] === 'online').length;
+
+  const handleClick = () => {
+    if (isConnected || isError) {
+      onDisconnect();
+    } else if (!isConnecting) {
+      onConnect();
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      {/* 设备状态指示器 */}
+      {isConnected && (
+        <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+          {allDevices.map(d => (
+            <div key={d} className="flex items-center gap-1" title={`${DEVICE_LABELS[d]}: ${deviceOnlineMap[d] === 'online' ? '在线' : '离线'}`}>
+              <div className="w-1.5 h-1.5 rounded-full transition-colors"
+                style={{ background: deviceOnlineMap[d] === 'online' ? '#22c55e' : '#d1d5db' }} />
+            </div>
+          ))}
+          <span className="text-[10px] ml-1 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+            {onlineCount}/{allDevices.length}
+          </span>
+        </div>
+      )}
+
+      {/* 连接按钮 */}
+      <button
+        onClick={handleClick}
+        disabled={isConnecting}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+        style={{
+          background: isConnected ? '#059669' : isConnecting ? '#6B7B8D' : isError ? '#DC2626' : 'var(--zeiss-blue)',
+          color: 'white',
+          border: 'none',
+          cursor: isConnecting ? 'wait' : 'pointer',
+          opacity: isConnecting ? 0.8 : 1,
+        }}
+      >
+        {/* 图标 */}
+        {isConnecting ? (
+          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+        ) : isConnected ? (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        ) : (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        )}
+        {isConnecting ? '连接中...' : isConnected ? '已连接' : isError ? '重新连接' : '一键连接'}
+      </button>
+    </div>
+  );
+}
+
 /* ─── Dashboard 主页 ─── */
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { institution, patientInfo, setPatientInfo, assessments, resetAssessment } = useAssessment();
+  const {
+    institution, patientInfo, setPatientInfo, assessments, resetAssessment,
+    deviceConnStatus, deviceOnlineMap, connectAllDevices, disconnectAllDevices,
+  } = useAssessment();
   const [showDialog, setShowDialog] = useState(false);
   const [pendingPath, setPendingPath] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(null);
@@ -205,6 +279,15 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {/* ─── 一键连接按钮 ─── */}
+          <ConnectButton
+            status={deviceConnStatus}
+            onConnect={connectAllDevices}
+            onDisconnect={disconnectAllDevices}
+            deviceOnlineMap={deviceOnlineMap}
+          />
+
           {institution && (
             <span className="text-sm font-medium hidden lg:inline" style={{ color: 'var(--text-secondary)' }}>{institution}</span>
           )}
@@ -233,6 +316,11 @@ export default function Dashboard() {
         <div className="dashboard-grid px-2">
           {ASSESSMENTS.map((item, idx) => {
             const completed = assessments[item.key]?.completed;
+            // 检查该评估所需设备的在线状态
+            const requiredDevices = item.devices || [];
+            const onlineDevices = requiredDevices.filter(d => deviceOnlineMap[d] === 'online');
+            const allDevicesOnline = requiredDevices.length > 0 && onlineDevices.length === requiredDevices.length;
+            const someDevicesOnline = onlineDevices.length > 0;
 
             return (
               <div key={item.key}
@@ -250,6 +338,22 @@ export default function Dashboard() {
                   </div>
                 )}
 
+                {/* 设备状态指示（仅在已连接时显示） */}
+                {deviceConnStatus === 'connected' && !completed && (
+                  <div className="absolute top-4 right-4 flex items-center gap-1 px-2 py-0.5 rounded-full"
+                    style={{
+                      background: allDevicesOnline ? 'rgba(34,197,94,0.1)' : someDevicesOnline ? 'rgba(217,119,6,0.1)' : 'rgba(107,123,141,0.1)',
+                      border: `1px solid ${allDevicesOnline ? 'rgba(34,197,94,0.3)' : someDevicesOnline ? 'rgba(217,119,6,0.3)' : 'rgba(107,123,141,0.2)'}`,
+                    }}>
+                    <div className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: allDevicesOnline ? '#22c55e' : someDevicesOnline ? '#D97706' : '#9ca3af' }} />
+                    <span className="text-[9px] font-medium"
+                      style={{ color: allDevicesOnline ? '#059669' : someDevicesOnline ? '#D97706' : '#6B7B8D' }}>
+                      {onlineDevices.length}/{requiredDevices.length}
+                    </span>
+                  </div>
+                )}
+
                 {/* 序号标题 */}
                 <h3 className="text-[14px] md:text-[18px] font-bold mb-2 md:mb-3 self-start" style={{ color: 'var(--text-primary)' }}>
                   {item.num}.{item.title}
@@ -263,9 +367,7 @@ export default function Dashboard() {
                       src={item.icon} 
                       alt={item.title} 
                       className="w-full h-full object-contain"
-                      style={{ 
-                        opacity: 0.18,
-                      }} 
+                      style={{ opacity: 0.18 }} 
                     />
                   </div>
                 </div>
@@ -280,7 +382,7 @@ export default function Dashboard() {
                   <div className="flex gap-2 w-full">
                     <button onClick={(e) => { e.stopPropagation(); navigate(item.path, { state: { viewReport: true } }); }}
                       className="flex-1 py-2.5 rounded-[10px] text-xs font-semibold transition-all"
-                      style={{ background: 'var(--zeiss-blue-light)', color: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>
+                      style={{ background: item.accentBg, color: item.accent, border: `1px solid ${item.accent}30` }}>
                       查看报告
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); setShowResetConfirm(item.key); }}

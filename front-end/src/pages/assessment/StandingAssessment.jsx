@@ -5,6 +5,7 @@ import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
 import InsoleScene from '../../components/three/InsoleScene';
 import { serialService } from '../../lib/SerialService';
+import { backendBridge } from '../../lib/BackendBridge';
 import {
   splitLeftRight, calculateCOP, calculateTotalPressure, calculateContactArea,
   getValidCoords, divideXRegions, calculateRegionPressure, processFrameRealtime,
@@ -145,7 +146,8 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 /* ─── 主组件 ─── */
 export default function StandingAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment } = useAssessment();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus } = useAssessment();
+  const isGlobalConnected = deviceConnStatus === 'connected';
 
   // 设备与连接状态
   const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
@@ -176,6 +178,10 @@ export default function StandingAssessment() {
 
   // 报告数据
   const [reportData, setReportData] = useState(null);
+
+  // 后端模式
+  const [isBackendMode, setIsBackendMode] = useState(false);
+  const backendCleanupRef = useRef(null);
 
   // 模拟定时器
   const simIntervalRef = useRef(null);
@@ -392,6 +398,47 @@ export default function StandingAssessment() {
     }, 50); // 20fps
   }, [handleSerialData, denoiseMatrix]);
 
+  // ─── 后端数据通道：全局一键连接后自动启用 ───
+  useEffect(() => {
+    if (!isGlobalConnected) return;
+    if (backendCleanupRef.current) return; // 已在监听
+
+    // 设置后端模式5（脚垫模式）
+    backendBridge.setActiveMode(5).then(() => {
+      console.log('[StandingAssessment] 已设置后端模式 mode=5');
+    }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
+
+    setIsBackendMode(true);
+    setDeviceStatus('connected');
+
+    // 监听后端推送的脚垫数据（使用 foot1 作为主数据源）
+    const handleBackendFootData = (arr) => {
+      if (!arr || arr.length === 0) return;
+      // 后端推送的是 4096 个值的 flat 数组
+      currentRawFlat.current = arr;
+      const matrix = parseFrameData(arr);
+      // 应用噪音过滤
+      const filtered = denoiseMatrix(matrix, 12, 15);
+      handleSerialData(filtered);
+    };
+
+    const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
+
+    backendCleanupRef.current = () => {
+      unsubFoot1();
+      setIsBackendMode(false);
+    };
+
+    console.log('[StandingAssessment] 后端数据通道已建立');
+
+    return () => {
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
+    };
+  }, [isGlobalConnected, handleSerialData, denoiseMatrix]);
+
   // ─── 滤波阈值 ───
   useEffect(() => {
     serialService.setFilterThreshold(filterThreshold);
@@ -503,17 +550,17 @@ export default function StandingAssessment() {
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
             <div className={`zeiss-status-dot ${deviceStatus}`} />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
+            <span className="text-xs" style={{ color: isBackendMode ? '#7C3AED' : 'var(--text-tertiary)' }}>
+              {isBackendMode ? '后端已连接' : deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
             </span>
-            {deviceStatus === 'disconnected' && (
+            {!isBackendMode && deviceStatus === 'disconnected' && (
               <>
                 <button onClick={handleConnect} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)' }}>连接</button>
                 <span style={{ color: 'var(--border-medium)' }}>|</span>
                 <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: 'var(--success)' }}>模拟</button>
               </>
             )}
-            {deviceStatus === 'connected' && (
+            {!isBackendMode && deviceStatus === 'connected' && (
               <button onClick={handleDisconnect} className="text-xs font-medium ml-1" style={{ color: C.red }}>断开</button>
             )}
           </div>

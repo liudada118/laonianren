@@ -373,7 +373,8 @@ function SitStandReport({ patientInfo, reportData: propsReportData }) {
 export default function SitStandAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
@@ -406,8 +407,11 @@ export default function SitStandAssessment() {
     startSimulation,
     stopSimulation,
     updateConfig,
+    isBackendMode,
   } = usePressureScene({
     sceneConfig,
+    isGlobalConnected,
+    backendMode: 3, // 模式3：坐垫+脚垫
     onSeatData: useCallback((frame, stats) => {
       setSeatPressureHistory(prev => {
         const next = [...prev, stats.totalPressure];
@@ -422,7 +426,7 @@ export default function SitStandAssessment() {
     }, []),
   });
 
-  const deviceConnected = isSeatConnected || isFootpadConnected || isSimulating;
+  const deviceConnected = isSeatConnected || isFootpadConnected || isSimulating || isBackendMode;
 
   const handleConfigChange = useCallback((cfg) => {
     setSceneConfig(prev => { const n = { ...prev, ...cfg }; updateConfig(cfg); return n; });
@@ -623,9 +627,9 @@ export default function SitStandAssessment() {
                 { label: '脚垫 64×64', connected: isFootpadConnected },
               ].map(({ label, connected }) => (
                 <div key={label} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium"
-                  style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)', color: connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : 'var(--text-muted)' }}>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : '#D1D9E0' }} />
-                  {label} {connected ? '(硬件)' : isSimulating ? '(模拟)' : '(未连接)'}
+                  style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)', color: isBackendMode ? '#7C3AED' : connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : 'var(--text-muted)' }}>
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: isBackendMode ? '#7C3AED' : connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : '#D1D9E0' }} />
+                  {label} {isBackendMode ? '(后端)' : connected ? '(硬件)' : isSimulating ? '(模拟)' : '(未连接)'}
                 </div>
               ))}
             </div>

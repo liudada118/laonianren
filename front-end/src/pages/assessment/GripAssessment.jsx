@@ -188,12 +188,14 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 /* ─── 主组件 ─── */
 export default function GripAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment } = useAssessment();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge } = useAssessment();
   const videoRef = useRef(null);
 
-  const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
+  // 如果首页已一键连接，自动进入后端模式
+  const isGlobalConnected = deviceConnStatus === 'connected';
+  const [deviceStatus, setDeviceStatus] = useState(isGlobalConnected ? 'connected' : 'disconnected');
   const [isSimulating, setIsSimulating] = useState(false);
-  const [isBackendMode, setIsBackendMode] = useState(false);
+  const [isBackendMode, setIsBackendMode] = useState(isGlobalConnected);
   const backendCleanupRef = useRef(null);
   const [leftGloveConnected, setLeftGloveConnected] = useState(false);
   const [rightGloveConnected, setRightGloveConnected] = useState(false);
@@ -245,6 +247,46 @@ export default function GripAssessment() {
       setHeatmapCanvas(bodyCanvasRef.current.canvas);
     }
   }, []);
+
+  // 全局一键连接后，自动设置后端数据监听
+  useEffect(() => {
+    if (!isGlobalConnected || backendCleanupRef.current) return;
+
+    // 设置手套模式
+    backendBridge.setActiveMode(1).then(() => {
+      console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
+      addSimLog('已自动设置为手套模式 (mode=1)', 'info');
+    }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
+
+    setIsBackendMode(true);
+    setDeviceStatus('connected');
+
+    // 监听后端数据
+    const unsubLeft = backendBridge.on('leftHandData', (arr) => {
+      if (gloveService.onLeftHandData) {
+        gloveService.onLeftHandData(arr);
+      }
+    });
+    const unsubRight = backendBridge.on('rightHandData', (arr) => {
+      if (gloveService.onRightHandData) {
+        gloveService.onRightHandData(arr);
+      }
+    });
+
+    backendCleanupRef.current = () => {
+      unsubLeft();
+      unsubRight();
+    };
+
+    addSimLog('已自动连接后端数据通道', 'info');
+
+    return () => {
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
+    };
+  }, [isGlobalConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 设置手套串口数据回调
   useEffect(() => {

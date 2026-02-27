@@ -4,6 +4,11 @@
  * 管理 Three.js 3D 压力场景的生命周期，
  * 包括传感器连接、模拟数据、场景配置等。
  * 
+ * 数据源优先级：
+ * 1. 后端模式（全局一键连接后自动启用）：通过 BackendBridge WebSocket 接收后端数据
+ * 2. WebSerial 模式：通过浏览器 WebSerial API 直接连接传感器
+ * 3. 模拟模式：使用本地模拟数据
+ * 
  * 模拟模式支持两种数据源：
  * 1. 真实数据回放：从 sit_sim_data.json / stand_sim_data.json 加载
  * 2. 随机模拟：使用 PressureSimulator 生成
@@ -20,6 +25,7 @@ import {
   matrixStats,
   calculateCoP,
 } from '../lib/pressure-sensor';
+import { backendBridge } from '../lib/BackendBridge';
 
 const SIM_INTERVAL = 50; // 模拟数据更新间隔（ms），约 20fps
 
@@ -110,6 +116,8 @@ function denoiseMatrix(matrix, minNeighbors = 2, threshold = 5) {
  * @param {object} [options.sceneConfig] - 3D场景配置
  * @param {function} [options.onSeatData] - 坐垫数据回调
  * @param {function} [options.onFootpadData] - 脚垫数据回调
+ * @param {boolean} [options.isGlobalConnected] - 是否已全局一键连接
+ * @param {number} [options.backendMode] - 后端模式编号（3=坐垫+脚垫, 5=脚垫）
  */
 export function usePressureScene(options = {}) {
   const containerRef = useRef(null);
@@ -125,6 +133,9 @@ export function usePressureScene(options = {}) {
   const footSimDataRef = useRef(null);   // stand_sim_data.json frames
   const simFrameIdxRef = useRef(0);      // 当前回放帧索引
 
+  // 后端数据通道清理函数
+  const backendCleanupRef = useRef(null);
+
   const [isSeatConnected, setIsSeatConnected] = useState(false);
   const [isFootpadConnected, setIsFootpadConnected] = useState(false);
   const [seatStats, setSeatStats] = useState(null);
@@ -132,6 +143,7 @@ export function usePressureScene(options = {}) {
   const [seatCoP, setSeatCoP] = useState(null);
   const [footpadCoP, setFootpadCoP] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isBackendMode, setIsBackendMode] = useState(false);
 
   // 初始化场景
   useEffect(() => {
@@ -141,13 +153,13 @@ export function usePressureScene(options = {}) {
     scene.mount(containerRef.current);
     sceneRef.current = scene;
 
-    // 初始化传感器
+    // 初始化传感器（WebSerial 模式备用）
     const seatSensor = createSeatSensorSerial();
     const footpadSensor = createFootpadSensorSerial();
     seatSensorRef.current = seatSensor;
     footpadSensorRef.current = footpadSensor;
 
-    // 坐垫数据回调
+    // 坐垫数据回调（WebSerial 模式）
     seatSensor.onData((frame) => {
       scene.updateSeatData(frame.matrix);
       const stats = matrixStats(frame.matrix);
@@ -159,7 +171,7 @@ export function usePressureScene(options = {}) {
       }
     });
 
-    // 脚垫数据回调
+    // 脚垫数据回调（WebSerial 模式）
     footpadSensor.onData((frame) => {
       scene.updateFootpadData(frame.matrix);
       const stats = matrixStats(frame.matrix);
@@ -177,6 +189,10 @@ export function usePressureScene(options = {}) {
 
     return () => {
       if (simTimerRef.current) clearInterval(simTimerRef.current);
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
       seatSensor.disconnect();
       footpadSensor.disconnect();
       scene.unmount();
@@ -184,9 +200,113 @@ export function usePressureScene(options = {}) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── 后端数据通道：当全局一键连接后自动启用 ───
+  useEffect(() => {
+    const isGlobalConnected = optionsRef.current.isGlobalConnected;
+    if (!isGlobalConnected || !sceneRef.current) return;
+    if (backendCleanupRef.current) return; // 已经在监听了
+
+    const mode = optionsRef.current.backendMode || 3;
+
+    // 设置后端采集模式
+    backendBridge.setActiveMode(mode).then(() => {
+      console.log(`[usePressureScene] 已设置后端模式 mode=${mode}`);
+    }).catch(e => console.error('[usePressureScene] setActiveMode failed:', e));
+
+    setIsBackendMode(true);
+    setIsSeatConnected(true);
+    setIsFootpadConnected(true);
+
+    // 处理后端推送的坐垫数据
+    const handleSitData = (arr) => {
+      const scene = sceneRef.current;
+      if (!scene || !arr || arr.length === 0) return;
+
+      // 后端推送的是 1024 个值的 flat 数组，转为 32x32 矩阵
+      const size = Math.round(Math.sqrt(arr.length));
+      const matrix = denoiseMatrix(rotate180(flatToMatrix(arr, size)), 3, 15);
+      scene.updateSeatData(matrix);
+      const stats = matrixStats(matrix);
+      const cop = calculateCoP(matrix);
+      setSeatStats(stats);
+      setSeatCoP(cop);
+      if (optionsRef.current.onSeatData) {
+        optionsRef.current.onSeatData({
+          matrix,
+          maxVal: stats.max,
+          minVal: stats.min,
+          nonZeroCount: stats.nonZeroCount,
+          timestamp: Date.now(),
+        }, stats, cop);
+      }
+    };
+
+    // 处理后端推送的脚垫数据（合并 foot1-4 为一个 64x64 矩阵）
+    const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
+    const handleFootData = (type) => (arr) => {
+      const scene = sceneRef.current;
+      if (!scene || !arr || arr.length === 0) return;
+
+      footBuffers[type] = arr;
+
+      // 当所有4个脚垫都有数据时，合并为 64x64 矩阵
+      // 每个脚垫是 32x32 = 1024 个值（从4096中提取有效区域）
+      // 或者直接使用 64x64 = 4096 个值
+      // 根据后端数据格式，每个 foot 是 4096 个值 = 64x64
+      // 但实际上4个脚垫组合成一个完整的足底压力图
+      // 这里先用 foot1 的数据作为左脚，foot3 作为右脚（简化处理）
+      
+      // 使用当前可用的脚垫数据更新场景
+      const combined = combineFootpads(footBuffers);
+      if (combined) {
+        const matrix = denoiseMatrix(rotateCCW90(combined), 3, 12);
+        scene.updateFootpadData(matrix);
+        const stats = matrixStats(matrix);
+        const cop = calculateCoP(matrix);
+        setFootpadStats(stats);
+        setFootpadCoP(cop);
+        if (optionsRef.current.onFootpadData) {
+          optionsRef.current.onFootpadData({
+            matrix,
+            maxVal: stats.max,
+            minVal: stats.min,
+            nonZeroCount: stats.nonZeroCount,
+            timestamp: Date.now(),
+          }, stats, cop);
+        }
+      }
+    };
+
+    // 注册事件监听
+    const unsubSit = backendBridge.on('sitData', handleSitData);
+    const unsubFoot1 = backendBridge.on('foot1Data', handleFootData('foot1'));
+    const unsubFoot2 = backendBridge.on('foot2Data', handleFootData('foot2'));
+    const unsubFoot3 = backendBridge.on('foot3Data', handleFootData('foot3'));
+    const unsubFoot4 = backendBridge.on('foot4Data', handleFootData('foot4'));
+
+    backendCleanupRef.current = () => {
+      unsubSit();
+      unsubFoot1();
+      unsubFoot2();
+      unsubFoot3();
+      unsubFoot4();
+      setIsBackendMode(false);
+    };
+
+    console.log('[usePressureScene] 后端数据通道已建立');
+
+    return () => {
+      if (backendCleanupRef.current) {
+        backendCleanupRef.current();
+        backendCleanupRef.current = null;
+      }
+    };
+  }, [options.isGlobalConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 开始模拟（使用 setInterval 限制帧率）
   const startSimulation = useCallback(async () => {
     if (!sceneRef.current) return;
+    if (isBackendMode) return; // 后端模式下不启动模拟
     if (seatSensorRef.current?.getIsConnected() || footpadSensorRef.current?.getIsConnected()) return;
     if (simTimerRef.current) return; // 防止重复启动
 
@@ -320,7 +440,7 @@ export function usePressureScene(options = {}) {
         }
       }, SIM_INTERVAL);
     }
-  }, []);
+  }, [isBackendMode]);
 
   // 停止模拟
   const stopSimulation = useCallback(() => {
@@ -331,25 +451,27 @@ export function usePressureScene(options = {}) {
     setIsSimulating(false);
   }, []);
 
-  // 连接坐垫传感器
+  // 连接坐垫传感器（WebSerial 模式）
   const connectSeat = useCallback(async () => {
+    if (isBackendMode) return; // 后端模式下不允许 WebSerial 连接
     if (isSeatConnected) {
       await seatSensorRef.current?.disconnect();
     } else {
       stopSimulation();
       await seatSensorRef.current?.connect();
     }
-  }, [isSeatConnected, stopSimulation]);
+  }, [isSeatConnected, stopSimulation, isBackendMode]);
 
-  // 连接脚垫传感器
+  // 连接脚垫传感器（WebSerial 模式）
   const connectFootpad = useCallback(async () => {
+    if (isBackendMode) return; // 后端模式下不允许 WebSerial 连接
     if (isFootpadConnected) {
       await footpadSensorRef.current?.disconnect();
     } else {
       stopSimulation();
       await footpadSensorRef.current?.connect();
     }
-  }, [isFootpadConnected, stopSimulation]);
+  }, [isFootpadConnected, stopSimulation, isBackendMode]);
 
   // 更新场景配置
   const updateConfig = useCallback((config) => {
@@ -361,6 +483,7 @@ export function usePressureScene(options = {}) {
     isSeatConnected,
     isFootpadConnected,
     isSimulating,
+    isBackendMode,
     seatStats,
     footpadStats,
     seatCoP,
@@ -371,4 +494,65 @@ export function usePressureScene(options = {}) {
     stopSimulation,
     updateConfig,
   };
+}
+
+/**
+ * 合并4个脚垫数据为一个完整的足底压力矩阵
+ * 布局：foot1(左前) foot2(右前)
+ *       foot3(左后) foot4(右后)
+ * 每个脚垫是 64x64 = 4096 个值
+ * 合并后为 128x128 矩阵（或根据实际需要调整）
+ * 
+ * 简化方案：如果只有部分脚垫数据，使用可用的数据
+ */
+function combineFootpads(buffers) {
+  // 找到第一个有数据的脚垫
+  const available = Object.entries(buffers).filter(([, v]) => v && v.length > 0);
+  if (available.length === 0) return null;
+
+  // 如果只有一个脚垫有数据，直接使用它
+  if (available.length === 1) {
+    const [, arr] = available[0];
+    const size = Math.round(Math.sqrt(arr.length));
+    return flatToMatrix(arr, size);
+  }
+
+  // 多个脚垫数据：合并为更大的矩阵
+  // 每个脚垫 64x64，4个合并为 128x128
+  const size = 64;
+  const combined = Array.from({ length: size * 2 }, () => new Array(size * 2).fill(0));
+
+  // foot1 → 左上 (0,0)
+  if (buffers.foot1 && buffers.foot1.length >= size * size) {
+    const m = flatToMatrix(buffers.foot1, size);
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        combined[r][c] = m[r][c];
+  }
+
+  // foot2 → 右上 (0, size)
+  if (buffers.foot2 && buffers.foot2.length >= size * size) {
+    const m = flatToMatrix(buffers.foot2, size);
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        combined[r][size + c] = m[r][c];
+  }
+
+  // foot3 → 左下 (size, 0)
+  if (buffers.foot3 && buffers.foot3.length >= size * size) {
+    const m = flatToMatrix(buffers.foot3, size);
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        combined[size + r][c] = m[r][c];
+  }
+
+  // foot4 → 右下 (size, size)
+  if (buffers.foot4 && buffers.foot4.length >= size * size) {
+    const m = flatToMatrix(buffers.foot4, size);
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        combined[size + r][size + c] = m[r][c];
+  }
+
+  return combined;
 }
