@@ -71,9 +71,35 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       const velocitySeries = cts.velocity_series || [];
       const timePoints = cts.time_points || [];
 
+      // COP 轨迹数据（后端返回的 left_cop_trajectory / right_cop_trajectory）
+      const leftCopTraj = r.left_cop_trajectory || [];
+      const rightCopTraj = r.right_cop_trajectory || [];
+
       // 置信椭圆面积
       const leftEllipseArea = leftCopM['置信椭圆面积'] || 0;
       const rightEllipseArea = rightCopM['置信椭圆面积'] || 0;
+
+      // 从后端轨迹计算置信椭圆参数
+      const calcEllipseFromTraj = (pts, areaCm2) => {
+        if (!pts || pts.length < 3) return { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: areaCm2 };
+        const cx = pts.reduce((s,p) => s+p[0], 0) / pts.length;
+        const cy = pts.reduce((s,p) => s+p[1], 0) / pts.length;
+        const dx = pts.map(p => (p[0]-cx)*7.0);
+        const dy = pts.map(p => (p[1]-cy)*7.0);
+        const n = pts.length;
+        const covXX = dx.reduce((s,x) => s+x*x, 0)/n;
+        const covYY = dy.reduce((s,y) => s+y*y, 0)/n;
+        const covXY = dx.reduce((s,x,i) => s+x*dy[i], 0)/n;
+        const trace = covXX + covYY;
+        const det = covXX*covYY - covXY*covXY;
+        const disc = Math.sqrt(Math.max(0, trace*trace/4 - det));
+        const l1 = trace/2 + disc, l2 = trace/2 - disc;
+        const chi = 5.991;
+        const w = 2*Math.sqrt(chi*Math.max(l1,l2));
+        const h = 2*Math.sqrt(chi*Math.min(l1,l2));
+        const angle = covXY !== 0 ? Math.atan2(2*covXY, covXX-covYY)*90/Math.PI : 0;
+        return { center: [cx, cy], width: w/7, height: h/7, angle, area_cm2: areaCm2 || (Math.PI*w*h/4/100) };
+      };
 
       return {
         left: {
@@ -114,10 +140,10 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
           leftPressureRatio: 50,
           rightPressureRatio: 50,
         },
-        copData: { leftCop: [], rightCop: [] },
+        copData: { leftCop: leftCopTraj, rightCop: rightCopTraj },
         ellipseData: {
-          left: { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: leftEllipseArea },
-          right: { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: rightEllipseArea },
+          left: calcEllipseFromTraj(leftCopTraj, leftEllipseArea),
+          right: calcEllipseFromTraj(rightCopTraj, rightEllipseArea),
         },
         copTimeSeries: {
           velocitySeries,
@@ -140,8 +166,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         rawData: {
           leftSectionCoords: leftArchF.section_coords || null,
           rightSectionCoords: rightArchF.section_coords || null,
-          leftCopTrajectory: [],
-          rightCopTrajectory: [],
+          leftCopTrajectory: leftCopTraj,
+          rightCopTrajectory: rightCopTraj,
           peakFrameFlat: af.peak_frame_data || [],
         },
         additionalData: {
