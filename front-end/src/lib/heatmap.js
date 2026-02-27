@@ -1,6 +1,7 @@
 /**
  * Heatmap Canvas - GPU-accelerated heatmap rendering for pressure sensor data
  * Adapted from the original heatmap.js for the sarcopenia assessment system
+ * Enhanced with smooth Gaussian blur and rainbow gradient (blue to red)
  */
 import * as THREE from 'three';
 
@@ -218,19 +219,26 @@ function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, opt
 /* ─── GPU Shader-based rendering ─── */
 
 const DEFAULT_GRADIENT = {
-  0.00: '#ffffff',
-  0.01: '#4192fe',
-  0.08: '#49aaff',
-  0.17: '#51c6ff',
-  0.25: '#4ddff5',
-  0.33: '#34f6db',
-  0.42: '#6cffb9',
-  0.50: '#c5ff8b',
-  0.58: '#fdf655',
-  0.67: '#ffda41',
-  0.75: '#ffb54a',
-  0.83: '#ff9555',
-  0.92: '#ff7665',
+  0.00: '#0000ff',
+  0.05: '#0033ff',
+  0.10: '#0066ff',
+  0.15: '#0099ff',
+  0.20: '#00ccff',
+  0.25: '#00ffff',
+  0.30: '#00ffcc',
+  0.35: '#00ff99',
+  0.40: '#00ff66',
+  0.45: '#00ff33',
+  0.50: '#33ff00',
+  0.55: '#66ff00',
+  0.60: '#99ff00',
+  0.65: '#ccff00',
+  0.70: '#ffff00',
+  0.75: '#ffcc00',
+  0.80: '#ff9900',
+  0.85: '#ff6600',
+  0.90: '#ff3300',
+  0.95: '#ff1100',
   1.00: '#ff0000'
 };
 
@@ -262,10 +270,12 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uData: { value: dataTexture },
       uGradient: { value: gradientTexture },
       uTexel: { value: texelSize },
-      uSharpen: { value: 0.6 },
-      uGamma: { value: 1.0 },
+      uSharpen: { value: 0.0 },
+      uGamma: { value: 0.10 },
       uFlipX: { value: 0.0 },
-      uFlipY: { value: 1.0 }
+      uFlipY: { value: 1.0 },
+      uBlurRadius: { value: 4.0 },
+      uAlphaThreshold: { value: 0.02 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -275,7 +285,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       }
     `,
     fragmentShader: `
-      precision mediump float;
+      precision highp float;
       varying vec2 vUv;
       uniform sampler2D uData;
       uniform sampler2D uGradient;
@@ -284,32 +294,135 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uniform float uGamma;
       uniform float uFlipX;
       uniform float uFlipY;
+      uniform float uBlurRadius;
+      uniform float uAlphaThreshold;
+
+      // Multi-pass Gaussian blur for smooth heatmap
+      float gaussianBlur(vec2 uv) {
+        float sigma = uBlurRadius;
+        int radius = int(ceil(sigma * 2.0));
+        float total = 0.0;
+        float weightSum = 0.0;
+
+        for (int y = -6; y <= 6; y++) {
+          for (int x = -6; x <= 6; x++) {
+            if (abs(x) > radius || abs(y) > radius) continue;
+            float fx = float(x);
+            float fy = float(y);
+            float weight = exp(-(fx * fx + fy * fy) / (2.0 * sigma * sigma));
+            vec2 offset = vec2(fx * uTexel.x, fy * uTexel.y);
+            total += texture2D(uData, uv + offset).r * weight;
+            weightSum += weight;
+          }
+        }
+        return total / weightSum;
+      }
 
       void main() {
         vec2 uv = vUv;
         if (uFlipX > 0.5) uv.x = 1.0 - uv.x;
         if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
-        float c = texture2D(uData, uv).r;
-        float l = texture2D(uData, uv + vec2(-uTexel.x, 0.0)).r;
-        float r = texture2D(uData, uv + vec2(uTexel.x, 0.0)).r;
-        float u = texture2D(uData, uv + vec2(0.0, uTexel.y)).r;
-        float d = texture2D(uData, uv + vec2(0.0, -uTexel.y)).r;
-        float blur = (l + r + u + d) * 0.25;
-        float v = clamp(c + uSharpen * (c - blur), 0.0, 1.0);
+
+        // Apply Gaussian blur for smooth interpolation
+        float v = gaussianBlur(uv);
+
+        // Apply gamma correction for better visual contrast
         v = pow(v, uGamma);
+
+        // Clamp to valid range
+        v = clamp(v, 0.0, 1.0);
+
+        // Map through rainbow gradient
         vec4 col = texture2D(uGradient, vec2(v, 0.5));
-        gl_FragColor = col;
+
+        // Smooth alpha based on value - fade out near zero for clean look
+        // Use a wider transition band to ensure zero-data areas are fully transparent
+        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.08, v);
+
+        // Ensure truly zero values produce zero alpha
+        if (v < 0.005) alpha = 0.0;
+
+        gl_FragColor = vec4(col.rgb, alpha);
       }
     `
   });
+}
+
+/* ─── Gaussian blur helper for CPU-side data upscaling ─── */
+
+/**
+ * Upscale a small grid (srcW x srcH) to a larger grid (dstW x dstH)
+ * using bilinear interpolation, then apply Gaussian blur
+ */
+function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
+  // Step 1: Bilinear upscale
+  const upscaled = new Float32Array(dstW * dstH);
+  for (let dy = 0; dy < dstH; dy++) {
+    for (let dx = 0; dx < dstW; dx++) {
+      // Map destination pixel to source coordinates
+      const sx = (dx / dstW) * srcW;
+      const sy = (dy / dstH) * srcH;
+
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const x1 = Math.min(x0 + 1, srcW - 1);
+      const y1 = Math.min(y0 + 1, srcH - 1);
+
+      const fx = sx - x0;
+      const fy = sy - y0;
+
+      const v00 = srcArr[y0 * srcW + x0] || 0;
+      const v10 = srcArr[y0 * srcW + x1] || 0;
+      const v01 = srcArr[y1 * srcW + x0] || 0;
+      const v11 = srcArr[y1 * srcW + x1] || 0;
+
+      const val = v00 * (1 - fx) * (1 - fy) +
+                  v10 * fx * (1 - fy) +
+                  v01 * (1 - fx) * fy +
+                  v11 * fx * fy;
+
+      upscaled[dy * dstW + dx] = val;
+    }
+  }
+
+  // Step 2: Apply multiple passes of box blur (approximates Gaussian)
+  let current = upscaled;
+  for (let pass = 0; pass < (blurPasses || 3); pass++) {
+    const next = new Float32Array(dstW * dstH);
+    for (let y = 0; y < dstH; y++) {
+      for (let x = 0; x < dstW; x++) {
+        let sum = 0;
+        let count = 0;
+        for (let ky = -2; ky <= 2; ky++) {
+          for (let kx = -2; kx <= 2; kx++) {
+            const nx = x + kx;
+            const ny = y + ky;
+            if (nx >= 0 && nx < dstW && ny >= 0 && ny < dstH) {
+              const weight = 1.0 / (1.0 + Math.abs(kx) + Math.abs(ky));
+              sum += current[ny * dstW + nx] * weight;
+              count += weight;
+            }
+          }
+        }
+        next[y * dstW + x] = sum / count;
+      }
+    }
+    current = next;
+  }
+
+  return current;
 }
 
 /* ─── Main HeatmapCanvas class ─── */
 
 export class HeatmapCanvas {
   constructor(width, height, canvasWProp, canvasHProp, canvasName, options) {
-    this.width = 32;
-    this.height = 32;
+    // Internal data resolution - higher for smoother rendering
+    this.srcWidth = 32;
+    this.srcHeight = 32;
+    // GPU texture resolution - upscaled for smooth heatmap
+    this.width = 128;
+    this.height = 128;
     this.canvas = document.createElement('canvas');
 
     const contentWidth = 1024;
@@ -367,35 +480,45 @@ export class HeatmapCanvas {
       this.scene.add(plane);
       this.cpuCtx = this.canvas.getContext('2d');
       this.useGPU = true;
+
+      // Initial render with empty data to ensure canvas starts transparent
+      this.renderer.render(this.scene, this.camera);
+      this.cpuCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this.cpuCtx.drawImage(this.gpuCanvas, 0, 0, this.canvas.width, this.canvas.height);
     } catch (err) {
       this.useGPU = false;
     }
   }
 
   changeHeatmap(resArr, interp1, interp2, order) {
-    // 调试日志：每50帧打印一次
-    if (!this._frameCount) this._frameCount = 0;
-    this._frameCount++;
-    const shouldLog = this._frameCount % 50 === 1;
-
-    if (shouldLog) {
-      const nonZero = Array.isArray(resArr) ? resArr.filter(v => v > 0).length : 0;
-      const maxVal = Array.isArray(resArr) ? Math.max(...resArr) : 0;
-      console.log(`[Heatmap] changeHeatmap #${this._frameCount}: arrLen=${resArr?.length}, nonZero=${nonZero}, max=${maxVal}, useGPU=${this.useGPU}, canvas=${this.canvas.width}x${this.canvas.height}, options.max=${this.options.max}`);
-    }
-
     if (!this.useGPU) {
-      bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options);
+      bthClickHandle(resArr, this.canvas, this.srcWidth, this.srcHeight, interp1, interp2, order, this.options);
       return;
     }
+
     const min = typeof this.options.min === 'number' ? this.options.min : 0;
     const max = typeof this.options.max === 'number' ? this.options.max : 1;
     const range = max - min || 1;
+
+    // Upscale 32x32 source data to 128x128 with bilinear interpolation and blur
+    const srcTotal = this.srcWidth * this.srcHeight;
+    const normalizedSrc = new Float32Array(srcTotal);
+    for (let i = 0; i < srcTotal; i++) {
+      const v = Array.isArray(resArr) ? resArr[i] || 0 : 0;
+      let n = (v - min) / range;
+      if (n < 0) n = 0;
+      if (n > 1) n = 1;
+      normalizedSrc[i] = n;
+    }
+
+    // Upscale and blur for smooth heatmap
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 4);
+
+    // Write to GPU texture
     const data = this.dataTexture.image.data;
     const total = this.width * this.height;
     for (let i = 0; i < total; i++) {
-      const v = Array.isArray(resArr) ? resArr[i] || 0 : 0;
-      let n = (v - min) / range;
+      let n = blurred[i];
       if (n < 0) n = 0;
       if (n > 1) n = 1;
       const base = i * 4;
@@ -406,8 +529,8 @@ export class HeatmapCanvas {
       data[base + 3] = 255;
     }
     this.dataTexture.needsUpdate = true;
-    this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.6;
-    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 1.0;
+    this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.0;
+    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.10;
     this.material.uniforms.uFlipX.value = this.options.flipX ? 1.0 : 0.0;
     this.material.uniforms.uFlipY.value = this.options.flipY === false ? 0.0 : 1.0;
     this.renderer.render(this.scene, this.camera);
