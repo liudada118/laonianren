@@ -583,6 +583,7 @@ export default function GaitAssessment() {
   const [reportMode, setReportMode] = useState('static');
   const [showComplete, setShowComplete] = useState(false);
   const [gaitReportData, setGaitReportData] = useState(null);
+  const [csvExporting, setCsvExporting] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
 
@@ -873,6 +874,26 @@ export default function GaitAssessment() {
   }, []);
 
   /* 采集控制 */
+  /* ─── 导出CSV ─── */
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      const aid = assessmentIdRef.current;
+      if (!aid) { alert('没有可导出的采集数据'); setCsvExporting(false); return; }
+      const resp = await backendBridge.exportCsv({ assessmentId: aid, sampleType: '5' });
+      if (resp?.code === 0 && resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url; a.download = resp.data.fileName; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      } else {
+        alert('导出失败: ' + (resp?.msg || '未知错误'));
+      }
+    } catch (e) {
+      alert('导出失败: ' + e.message);
+    }
+    setCsvExporting(false);
+  };
+
   const start = () => {
     if (deviceStatus !== 'connected') return;
     setPhase('recording'); setTimer(0);
@@ -983,6 +1004,12 @@ export default function GaitAssessment() {
               </button>
             </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="zeiss-btn-ghost text-xs flex items-center gap-1"
+              style={csvExporting ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              {csvExporting ? '导出中...' : '保存CSV'}
+            </button>
             <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary text-xs py-2 px-3 md:px-4">返回首页</button>
           </div>
         </header>

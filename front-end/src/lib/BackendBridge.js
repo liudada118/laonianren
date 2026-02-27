@@ -246,6 +246,29 @@ class BackendBridge {
     return res.json();
   }
 
+  /**
+   * 导出采集数据为CSV文件
+   * @param {object} params - { assessmentId, assessmentIds, sampleType }
+   * @returns {Promise<object>} { code, data: { fileName, filePath, rowCount, dataKeys }, msg }
+   */
+  async exportCsv(params = {}) {
+    const res = await fetch(`${this.httpUrl}/exportCsv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取CSV文件下载URL
+   * @param {string} fileName - CSV文件名
+   * @returns {string} 下载URL
+   */
+  getCsvDownloadUrl(fileName) {
+    return `${this.httpUrl}/downloadCsvFile/${encodeURIComponent(fileName)}`;
+  }
+
   async bindKey(key) {
     const res = await fetch(`${this.httpUrl}/bindKey`, {
       method: 'POST',

@@ -1617,7 +1617,153 @@ app.post('/downlaod', async (req, res) => {
   }
 })
 
-// 鍒犻櫎鏁版嵁搴撴煇涓枃浠?
+// ─── 导出采集数据为CSV并返回下载链接 ───
+app.post('/exportCsv', async (req, res) => {
+  try {
+    const { assessmentId, sampleType, assessmentIds } = req.body || {}
+
+    // 支持多个 assessmentId（如握力左右手）
+    const ids = Array.isArray(assessmentIds) && assessmentIds.length
+      ? assessmentIds.filter(Boolean)
+      : assessmentId ? [assessmentId] : []
+
+    if (!ids.length) {
+      res.json(new HttpResult(1, {}, 'missing assessmentId'))
+      return
+    }
+
+    // 查询所有匹配的行
+    let allRows = []
+    for (const aid of ids) {
+      const rows = await new Promise((resolve, reject) => {
+        const sql = sampleType
+          ? 'SELECT * FROM matrix WHERE assessment_id=? AND sample_type=?'
+          : 'SELECT * FROM matrix WHERE assessment_id=?'
+        const params = sampleType ? [aid, String(sampleType)] : [aid]
+        currentDb.all(sql, params, (err, data) => {
+          if (err) return reject(err)
+          resolve(data || [])
+        })
+      })
+      allRows = allRows.concat(rows)
+    }
+
+    if (!allRows.length) {
+      res.json(new HttpResult(1, {}, 'no data found'))
+      return
+    }
+
+    // 解析所有行，收集所有数据 key
+    const keySet = new Set()
+    const parsedRows = allRows.map(row => {
+      try {
+        const obj = JSON.parse(row.data || '{}')
+        Object.keys(obj).forEach(k => keySet.add(k))
+        return obj
+      } catch {
+        return {}
+      }
+    })
+    const dataKeys = Array.from(keySet)
+
+    // 构建 CSV 表头
+    const headers = ['timestamp', 'date', 'assessment_id', 'sample_type']
+    dataKeys.forEach(key => {
+      headers.push(`${key}_pressure`, `${key}_area`, `${key}_max`, `${key}_min`, `${key}_avg`, `${key}_data`)
+    })
+
+    // 构建 CSV 行
+    const csvLines = [headers.join(',')]
+    allRows.forEach((row, idx) => {
+      const rowObj = parsedRows[idx] || {}
+      const line = [
+        row.timestamp || '',
+        (row.date || '').replace(/,/g, ' '),
+        (row.assessment_id || '').replace(/,/g, ' '),
+        row.sample_type || '',
+      ]
+      dataKeys.forEach(key => {
+        const item = rowObj[key]
+        const arr = Array.isArray(item) ? item : (item && item.arr ? item.arr : null)
+        if (Array.isArray(arr)) {
+          const pressure = arr.reduce((a, b) => a + b, 0)
+          const area = arr.filter(v => v > 0).length
+          const max = Math.max(...arr)
+          const positives = arr.filter(v => v > 0)
+          const min = positives.length ? Math.min(...positives) : 0
+          const avg = area > 0 ? (pressure / area).toFixed(2) : '0'
+          // 用双引号包裹 data 数组，防止逗号干扰
+          line.push(pressure, area, max, min, avg, `"${JSON.stringify(arr)}"`)
+        } else {
+          line.push('', '', '', '', '', '')
+        }
+      })
+      csvLines.push(line.join(','))
+    })
+
+    const csvContent = csvLines.join('\n')
+
+    // 生成文件名
+    const safeId = ids.join('_').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 80)
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)
+    const fileName = `export_${safeId}_${ts}.csv`
+
+    // 确保 data 目录存在
+    const csvDir = path.join(storageBase, 'data')
+    if (!fs.existsSync(csvDir)) {
+      fs.mkdirSync(csvDir, { recursive: true })
+    }
+    const csvFilePath = path.join(csvDir, fileName)
+    fs.writeFileSync(csvFilePath, '\uFEFF' + csvContent, 'utf-8')  // BOM for Excel
+    console.log('[exportCsv] CSV exported:', csvFilePath, 'rows:', allRows.length)
+
+    res.json(new HttpResult(0, {
+      fileName,
+      filePath: csvFilePath,
+      rowCount: allRows.length,
+      dataKeys,
+    }, 'export success'))
+  } catch (e) {
+    console.error('[exportCsv] failed:', e)
+    res.json(new HttpResult(1, {}, 'exportCsv failed: ' + e.message))
+  }
+})
+
+// ─── CSV 文件下载 ───
+app.get('/downloadCsvFile/:name', (req, res) => {
+  try {
+    const rawName = req.params.name || ''
+    const safeName = rawName.replace(/[\\/]/g, '').replace(/[\x00-\x1F<>:"|?*]/g, '')
+    if (!safeName || !safeName.endsWith('.csv')) {
+      res.status(400).send('Invalid file name')
+      return
+    }
+    const csvDir = path.join(storageBase, 'data')
+    const filePath = path.join(csvDir, safeName)
+    const resolvedPath = path.resolve(filePath)
+    const resolvedBase = path.resolve(csvDir) + path.sep
+    if (!resolvedPath.startsWith(resolvedBase)) {
+      res.status(403).send('Forbidden')
+      return
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      res.status(404).send('File not found')
+      return
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}"`)
+    res.sendFile(resolvedPath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(err.statusCode || 500).send('Download failed')
+      }
+    })
+  } catch (e) {
+    console.error('[downloadCsvFile] failed:', e)
+    if (!res.headersSent) res.status(500).send('Server Error')
+  }
+})
+
+// 鍒犻櫎鏁版嵁搴撴煇涓枃浠??
 app.post('/delete', async (req, res) => {
   try {
     const { fileArr } = req.body
