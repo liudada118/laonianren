@@ -14,7 +14,7 @@ const constantObj = require('../util/config');
 const { bytes4ToInt10 } = require('../util/parseData');
 const { initDb, dbLoadCsv, deleteDbData, dbGetData, getCsvData, changeDbName, changeDbDataName } = require('../util/db');
 const { hand, jqbed, endiSit, endiBack } = require('../util/line');
-const { callPy } = require('../pyWorker');
+// const { callPy } = require('../pyWorker');  // [已迁移到JS算法] Python子进程不再需要
 const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
 const { default: axios } = require('axios');
@@ -847,7 +847,8 @@ app.post('/uploadCanvas', upload.single('file'), async (req, res) => {
     const absolutePath = path.resolve(req.file.path)
     const name = `${pdfPath}/${baseName}`
     console.log(pdfArrData[0], name, `${imgPath}/${baseName}.png`)
-    const pdf = await callPy('generate_foot_pressure_report', {
+    // [已迁移] PDF生成功能待后续用JS实现，目前跳过
+    const pdf = await callAlgorithm('generate_foot_pressure_report', {
       data_array: pdfArrData,
       name: name,
       heatmap_png_path: `${imgPath}/${baseName}.png`,
@@ -2768,7 +2769,7 @@ async function connectPort() {
           if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
             updateSendTimerForActiveTypes()
           }
-          algorData = await callPy('server', { sensor_data: pointArr })
+          algorData = await callAlgorithm('server', { sensor_data: pointArr })
           if (algorData.control_command) {
             control_command = algorData.control_command
           }

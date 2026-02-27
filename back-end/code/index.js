@@ -6,7 +6,7 @@ const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
-const { startWorker, callPy } = require('./pyWorker')
+// const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
 const devWebRoot = path.join(__dirname, 'client', 'dist')
@@ -468,7 +468,7 @@ app.whenReady().then(async () => {
   // 开始本地api线程
   await startApiChild()
   // 开启python线程
-  startWorker(); // 
+  // startWorker(); // [已迁移到JS算法] Python子进程不再需要
   await createWindow()
 
   Menu.setApplicationMenu(null);

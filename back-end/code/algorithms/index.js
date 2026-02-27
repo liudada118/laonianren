@@ -58,8 +58,15 @@ async function callAlgorithm(funcName, params = {}) {
     case 'setParam':
       return _setParam(params);
 
+    case 'server':
+      return _airBedServer(params);
+
+    case 'generate_foot_pressure_report':
+      return _generateFootPressureReport(params);
+
     default:
-      throw new Error(`Unknown algorithm function: ${funcName}`);
+      console.warn(`[JS Algorithm] Unknown function: ${funcName}, returning null`);
+      return null;
   }
 }
 
@@ -196,6 +203,28 @@ function _setParam({ obj }) {
     _pyConfig = { ..._pyConfig, ...obj };
   }
   return _pyConfig;
+}
+
+// ============================================================
+// 气垫床控制算法 (stub - 待后续实现)
+// ============================================================
+
+function _airBedServer({ sensor_data }) {
+  // 气垫床控制算法原来由Python实现
+  // 目前返回空控制命令，不影响其他功能
+  return {
+    control_command: null,
+    frame_count: 0,
+  };
+}
+
+// ============================================================
+// 脚压力PDF报告 (stub - 待后续实现)
+// ============================================================
+
+function _generateFootPressureReport(params) {
+  console.warn('[JS Algorithm] generate_foot_pressure_report: PDF生成功能待后续JS实现');
+  return { status: 'not_implemented' };
 }
 
 module.exports = {
