@@ -9,8 +9,9 @@
  *   const result = await callPython('generate_grip_render_report', { sensor_data, hand_type });
  */
 
-const { spawn, execSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const BRIDGE_SCRIPT = path.join(__dirname, 'bridge.py');
 
@@ -21,34 +22,127 @@ const TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000; // 3分钟
 
 let _pythonCmd = null;
 
+function parseCmdParts(cmd) {
+  const raw = (cmd || '').trim();
+  if (!raw) return { cmd: '', args: [] };
+
+  const unquoted =
+    (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
+      ? raw.slice(1, -1)
+      : raw;
+
+  if (fs.existsSync(unquoted)) {
+    return { cmd: unquoted, args: [] };
+  }
+
+  const parts = raw.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const normalized = parts.map((p) => {
+    if ((p.startsWith('"') && p.endsWith('"')) || (p.startsWith("'") && p.endsWith("'"))) {
+      return p.slice(1, -1);
+    }
+    return p;
+  });
+
+  return { cmd: normalized[0] || '', args: normalized.slice(1) };
+}
+
+function probePython(cmd, checkNumpy = false) {
+  const parts = parseCmdParts(cmd);
+  if (!parts.cmd) return false;
+
+  const probeCode = checkNumpy
+    ? 'import sys,numpy;print(sys.version.split()[0]);print(numpy.__version__)'
+    : 'import sys;print(sys.version.split()[0])';
+
+  const result = spawnSync(parts.cmd, [...parts.args, '-c', probeCode], {
+    timeout: 5000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+    encoding: 'utf8',
+  });
+
+  return result.status === 0;
+}
+
 function getPythonCmd() {
   if (_pythonCmd) return _pythonCmd;
 
   // 如果环境变量指定了，直接使用
   if (process.env.PYTHON_CMD) {
-    _pythonCmd = process.env.PYTHON_CMD;
-    console.log(`[Python] 使用环境变量 PYTHON_CMD: ${_pythonCmd}`);
+    const envCmd = process.env.PYTHON_CMD;
+    if (probePython(envCmd, true)) {
+      _pythonCmd = envCmd;
+      console.log(`[Python] 使用环境变量 PYTHON_CMD: ${_pythonCmd}`);
+      return _pythonCmd;
+    }
+    console.warn(`[Python] PYTHON_CMD 不可用或缺少 numpy，忽略: ${envCmd}`);
+  }
+
+  const resourceBase = process.resourcesPath;
+  const isWin = process.platform === 'win32';
+
+  // 1) 优先项目内 venv（开发环境）
+  const localVenvPy = path.resolve(
+    __dirname,
+    '..',
+    '..',
+    'python',
+    'venv',
+    isWin ? 'Scripts' : 'bin',
+    isWin ? 'python.exe' : 'python'
+  );
+  if (fs.existsSync(localVenvPy) && probePython(localVenvPy, true)) {
+    _pythonCmd = localVenvPy;
+    console.log(`[Python] 使用项目 venv: ${_pythonCmd}`);
     return _pythonCmd;
   }
 
-  // 候选命令列表（按优先级排序）
-  const isWin = process.platform === 'win32';
+  // 2) 优先打包内 venv（生产环境）
+  if (resourceBase) {
+    const packagedVenvPy = path.join(
+      resourceBase,
+      'python',
+      'venv',
+      isWin ? 'Scripts' : 'bin',
+      isWin ? 'python.exe' : 'python'
+    );
+    if (fs.existsSync(packagedVenvPy) && probePython(packagedVenvPy, true)) {
+      _pythonCmd = packagedVenvPy;
+      console.log(`[Python] 使用打包 venv: ${_pythonCmd}`);
+      return _pythonCmd;
+    }
+  }
+
+  // 3) Windows 兼容旧逻辑：Python311 回退
+  if (isWin) {
+    const localLegacyPy = path.resolve(__dirname, '..', '..', 'python', 'Python311', 'python.exe');
+    if (fs.existsSync(localLegacyPy) && probePython(localLegacyPy, true)) {
+      _pythonCmd = localLegacyPy;
+      console.log(`[Python] 使用项目 Python311: ${_pythonCmd}`);
+      return _pythonCmd;
+    }
+
+    if (resourceBase) {
+      const packagedLegacyPy = path.join(resourceBase, 'python', 'Python311', 'python.exe');
+      if (fs.existsSync(packagedLegacyPy) && probePython(packagedLegacyPy, true)) {
+        _pythonCmd = packagedLegacyPy;
+        console.log(`[Python] 使用打包 Python311: ${_pythonCmd}`);
+        return _pythonCmd;
+      }
+    }
+  }
+
+  // 4) 最后回退到系统命令
   const candidates = isWin
     ? ['python', 'python3', 'py -3', 'py']
     : ['python3', 'python'];
 
   for (const cmd of candidates) {
     try {
-      // 尝试执行 python --version 来验证命令是否可用
-      const parts = cmd.split(' ');
-      const testArgs = [...parts.slice(1), '--version'];
-      const result = execSync(`${parts[0]} ${testArgs.join(' ')}`, {
-        timeout: 5000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      const version = result.toString().trim();
-      console.log(`[Python] 检测到: ${cmd} → ${version}`);
+      if (!probePython(cmd, true)) {
+        continue;
+      }
+      console.log(`[Python] 检测到可用命令: ${cmd}`);
       _pythonCmd = cmd;
       return _pythonCmd;
     } catch (e) {
@@ -58,7 +152,7 @@ function getPythonCmd() {
 
   // 都找不到，使用默认值（让后续调用时报出明确错误）
   _pythonCmd = isWin ? 'python' : 'python3';
-  console.warn(`[Python] 未检测到可用的 Python，使用默认: ${_pythonCmd}`);
+  console.warn(`[Python] 未检测到带 numpy 的 Python，使用默认: ${_pythonCmd}`);
   return _pythonCmd;
 }
 
@@ -87,9 +181,9 @@ async function callPython(funcName, params = {}) {
     console.log(`[Python] 调用 ${funcName}, 输入数据大小: ${(inputData.length / 1024).toFixed(1)}KB, cmd: ${pythonCmd}`);
 
     // 解析命令（支持 "py -3" 这种带参数的命令）
-    const cmdParts = pythonCmd.split(' ');
-    const spawnCmd = cmdParts[0];
-    const spawnArgs = [...cmdParts.slice(1), BRIDGE_SCRIPT];
+    const cmdParts = parseCmdParts(pythonCmd);
+    const spawnCmd = cmdParts.cmd;
+    const spawnArgs = [...cmdParts.args, BRIDGE_SCRIPT];
 
     let child;
     try {
