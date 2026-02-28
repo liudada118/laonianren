@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
@@ -146,12 +146,14 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 /* ─── 主组件 ─── */
 export default function StandingAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus } = useAssessment();
+  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const location = useLocation();
+  const viewReportMode = location.state?.viewReport && assessments.standing?.completed;
   const isGlobalConnected = deviceConnStatus === 'connected';
 
   // 设备与连接状态
   const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
-  const [phase, setPhase] = useState('idle'); // idle | recording | processing | report
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle'); // idle | recording | processing | report
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
@@ -177,7 +179,7 @@ export default function StandingAssessment() {
   const isRecordingRef = useRef(false);
 
   // 报告数据
-  const [reportData, setReportData] = useState(null);
+  const [reportData, setReportData] = useState(viewReportMode ? (assessments.standing?.report?.reportData || null) : null);
   const [csvExporting, setCsvExporting] = useState(false);
 
   // 后端模式

@@ -2278,88 +2278,125 @@ function ensureHistoryTable(db) {
 // 初始化历史记录表
 ensureHistoryTable(currentDb)
 
+// ─── 历史记录保存串行化锁，防止并发写入导致竞态条件 ───
+let _historySaveQueue = Promise.resolve()
+function serializedHistorySave(fn) {
+  _historySaveQueue = _historySaveQueue.then(fn).catch(fn)
+  return _historySaveQueue
+}
+
 /**
  * POST /api/history/save
  * 保存或更新一条评估记录
  * Body: { patientInfo: { name, gender, age, weight }, institution, assessments: { grip: {...}, ... } }
  */
 app.post('/api/history/save', (req, res) => {
-  try {
-    const { patientInfo, institution, assessments } = req.body || {}
-    if (!patientInfo || !patientInfo.name) {
-      return res.json(new HttpResult(1, {}, 'missing patientInfo.name'))
-    }
-
-    const now = new Date()
-    const dateStr = formatDateStr(now)
-
-    // 查找今天同一患者的记录
-    currentDb.get(
-      'SELECT * FROM assessment_history WHERE patient_name = ? AND date_str = ?',
-      [patientInfo.name, dateStr],
-      (err, existingRow) => {
-        if (err) {
-          console.error('[History] 查询失败:', err)
-          return res.json(new HttpResult(1, {}, 'database error'))
-        }
-
-        if (existingRow) {
-          // 更新已有记录：合并 assessments
-          let existingAssessments = {}
-          try { existingAssessments = JSON.parse(existingRow.assessments || '{}') } catch {}
-
-          for (const [type, data] of Object.entries(assessments || {})) {
-            if (data && data.completed) {
-              existingAssessments[type] = {
-                completed: true,
-                report: data.report || null,
-                completedAt: now.toISOString(),
-              }
-            }
-          }
-
-          currentDb.run(
-            'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ? WHERE id = ?',
-            [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, existingRow.id],
-            function (err2) {
-              if (err2) {
-                console.error('[History] 更新失败:', err2)
-                return res.json(new HttpResult(1, {}, 'update failed'))
-              }
-              res.json(new HttpResult(0, { id: existingRow.id, updated: true }, 'success'))
-            }
-          )
-        } else {
-          // 创建新记录
-          const id = generateHistoryId()
-          const assessmentData = {}
-          for (const [type, data] of Object.entries(assessments || {})) {
-            assessmentData[type] = {
-              completed: data?.completed || false,
-              report: data?.completed ? (data.report || null) : null,
-              completedAt: data?.completed ? now.toISOString() : null,
-            }
-          }
-
-          currentDb.run(
-            `INSERT INTO assessment_history (id, patient_name, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, patientInfo.name, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
-            function (err2) {
-              if (err2) {
-                console.error('[History] 插入失败:', err2)
-                return res.json(new HttpResult(1, {}, 'insert failed'))
-              }
-              res.json(new HttpResult(0, { id, updated: false }, 'success'))
-            }
-          )
-        }
+  // 将保存操作放入串行队列，避免并发读写导致数据丢失
+  serializedHistorySave(() => new Promise((resolve) => {
+    try {
+      const { patientInfo, institution, assessments } = req.body || {}
+      if (!patientInfo || !patientInfo.name) {
+        res.json(new HttpResult(1, {}, 'missing patientInfo.name'))
+        return resolve()
       }
-    )
-  } catch (e) {
-    console.error('[History] save error:', e)
-    res.json(new HttpResult(1, {}, 'save failed'))
-  }
+
+      // 统计本次请求中已完成的评估类型
+      const completedTypes = Object.entries(assessments || {})
+        .filter(([, d]) => d && d.completed)
+        .map(([t]) => t)
+      console.log(`[History] 保存请求: 患者=${patientInfo.name}, 已完成=[${completedTypes.join(',')}]`)
+
+      const now = new Date()
+      const dateStr = formatDateStr(now)
+
+      // 查找今天同一患者的记录
+      currentDb.get(
+        'SELECT * FROM assessment_history WHERE patient_name = ? AND date_str = ?',
+        [patientInfo.name, dateStr],
+        (err, existingRow) => {
+          if (err) {
+            console.error('[History] 查询失败:', err)
+            res.json(new HttpResult(1, {}, 'database error'))
+            return resolve()
+          }
+
+          if (existingRow) {
+            // 更新已有记录：合并 assessments
+            let existingAssessments = {}
+            try { existingAssessments = JSON.parse(existingRow.assessments || '{}') } catch {}
+
+            const prevCompleted = Object.entries(existingAssessments)
+              .filter(([, d]) => d && d.completed)
+              .map(([t]) => t)
+            console.log(`[History] 已有记录 id=${existingRow.id}, 已完成=[${prevCompleted.join(',')}], 正在合并...`)
+
+            for (const [type, data] of Object.entries(assessments || {})) {
+              if (data && data.completed) {
+                existingAssessments[type] = {
+                  completed: true,
+                  report: data.report || null,
+                  completedAt: now.toISOString(),
+                }
+              }
+            }
+
+            const afterCompleted = Object.entries(existingAssessments)
+              .filter(([, d]) => d && d.completed)
+              .map(([t]) => t)
+            console.log(`[History] 合并后已完成=[${afterCompleted.join(',')}]`)
+
+            currentDb.run(
+              'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ? WHERE id = ?',
+              [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, existingRow.id],
+              function (err2) {
+                if (err2) {
+                  console.error('[History] 更新失败:', err2)
+                  res.json(new HttpResult(1, {}, 'update failed'))
+                } else {
+                  console.log(`[History] 更新成功 id=${existingRow.id}`)
+                  res.json(new HttpResult(0, { id: existingRow.id, updated: true }, 'success'))
+                }
+                resolve()
+              }
+            )
+          } else {
+            // 创建新记录
+            const id = generateHistoryId()
+            const assessmentData = {}
+            for (const [type, data] of Object.entries(assessments || {})) {
+              assessmentData[type] = {
+                completed: data?.completed || false,
+                report: data?.completed ? (data.report || null) : null,
+                completedAt: data?.completed ? now.toISOString() : null,
+              }
+            }
+
+            console.log(`[History] 创建新记录 id=${id}, 患者=${patientInfo.name}`)
+
+            currentDb.run(
+              `INSERT INTO assessment_history (id, patient_name, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [id, patientInfo.name, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
+              function (err2) {
+                if (err2) {
+                  console.error('[History] 插入失败:', err2)
+                  res.json(new HttpResult(1, {}, 'insert failed'))
+                } else {
+                  console.log(`[History] 插入成功 id=${id}`)
+                  res.json(new HttpResult(0, { id, updated: false }, 'success'))
+                }
+                resolve()
+              }
+            )
+          }
+        }
+      )
+    } catch (e) {
+      console.error('[History] save error:', e)
+      res.json(new HttpResult(1, {}, 'save failed'))
+      resolve()
+    }
+  }));
 })
 
 /**

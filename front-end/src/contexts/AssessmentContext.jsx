@@ -25,6 +25,9 @@ const INITIAL_STATE = {
 export function AssessmentProvider({ children }) {
   const [state, setState] = useState(INITIAL_STATE);
 
+  // ─── 保存队列：防止并发写入导致竞态条件 ───
+  const saveQueueRef = useRef(Promise.resolve());
+
   // ─── 全局设备连接状态 ───
   // 'disconnected' | 'connecting' | 'connected' | 'error'
   const [deviceConnStatus, setDeviceConnStatus] = useState('disconnected');
@@ -120,9 +123,39 @@ export function AssessmentProvider({ children }) {
       assessments[type] = { completed: true, report, data };
 
       // 自动保存到后端数据库历史记录
+      // 使用队列串行化保存请求，避免并发写入导致竞态条件
       if (prev.patientInfo) {
-        saveAssessmentSession(prev.patientInfo, prev.institution, assessments)
-          .catch(e => console.error('自动保存历史记录失败:', e));
+        // 精简 assessments 数据：只传递 completed 和 report（不传 data，data 包含原始传感器数据太大）
+        const lightAssessments = {};
+        for (const [key, val] of Object.entries(assessments)) {
+          lightAssessments[key] = {
+            completed: val.completed,
+            report: val.report || null,
+          };
+        }
+
+        const doSave = async () => {
+          try {
+            const success = await saveAssessmentSession(prev.patientInfo, prev.institution, lightAssessments);
+            if (success) {
+              console.log(`[History] ${type} 评估记录已保存`);
+            } else {
+              console.error(`[History] ${type} 评估记录保存失败，尝试重试...`);
+              // 重试一次
+              const retrySuccess = await saveAssessmentSession(prev.patientInfo, prev.institution, lightAssessments);
+              if (retrySuccess) {
+                console.log(`[History] ${type} 评估记录重试保存成功`);
+              } else {
+                console.error(`[History] ${type} 评估记录重试保存仍然失败`);
+              }
+            }
+          } catch (e) {
+            console.error(`[History] ${type} 自动保存历史记录异常:`, e);
+          }
+        };
+
+        // 串行化：等待上一个保存完成后再执行当前保存
+        saveQueueRef.current = saveQueueRef.current.then(doSave).catch(doSave);
       }
 
       return { ...prev, assessments };

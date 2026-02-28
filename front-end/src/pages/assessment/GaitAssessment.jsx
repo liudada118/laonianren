@@ -589,7 +589,7 @@ export default function GaitAssessment() {
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
   const [reportMode, setReportMode] = useState('static');
   const [showComplete, setShowComplete] = useState(false);
-  const [gaitReportData, setGaitReportData] = useState(null);
+  const [gaitReportData, setGaitReportData] = useState(viewReportMode ? (assessments.gait?.report?.reportData || null) : null);
   const [csvExporting, setCsvExporting] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);

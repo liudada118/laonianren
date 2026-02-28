@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import HandModel from '../../components/three/HandModel';
 import GripReport from '../../components/report/GripReport';
@@ -188,7 +188,9 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 /* ─── 主组件 ─── */
 export default function GripAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge } = useAssessment();
+  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus, backendBridge: globalBridge } = useAssessment();
+  const location = useLocation();
+  const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   const videoRef = useRef(null);
 
   // 如果首页已一键连接，自动进入后端模式
@@ -199,7 +201,7 @@ export default function GripAssessment() {
   const backendCleanupRef = useRef(null);
   const [leftGloveConnected, setLeftGloveConnected] = useState(false);
   const [rightGloveConnected, setRightGloveConnected] = useState(false);
-  const [phase, setPhase] = useState('left-idle');
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'left-idle');
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [pressure, setPressure] = useState(0);
@@ -207,7 +209,7 @@ export default function GripAssessment() {
   const [rightData, setRightData] = useState([]);
   const [showLeftToast, setShowLeftToast] = useState(false);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
-  const [gripReportData, setGripReportData] = useState(null);
+  const [gripReportData, setGripReportData] = useState(viewReportMode ? (assessments.grip?.report?.reportData || null) : null);
   const [csvExporting, setCsvExporting] = useState(false);
   const timerRef = useRef(null);
   const leftRawFramesRef = useRef([]);
