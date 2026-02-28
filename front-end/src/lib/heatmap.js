@@ -259,7 +259,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uGamma: { value: 0.12 },
       uFlipX: { value: 0.0 },
       uFlipY: { value: 1.0 },
-      uBlurRadius: { value: 2.5 },
+      uBlurRadius: { value: 3.5 },
       uAlphaThreshold: { value: 0.04 }
     },
     vertexShader: `
@@ -289,8 +289,8 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
         float total = 0.0;
         float weightSum = 0.0;
 
-        for (int y = -6; y <= 6; y++) {
-          for (int x = -6; x <= 6; x++) {
+        for (int y = -8; y <= 8; y++) {
+          for (int x = -8; x <= 8; x++) {
             if (abs(x) > radius || abs(y) > radius) continue;
             float fx = float(x);
             float fy = float(y);
@@ -378,8 +378,8 @@ function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
       for (let x = 0; x < dstW; x++) {
         let sum = 0;
         let count = 0;
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
+        for (let ky = -2; ky <= 2; ky++) {
+          for (let kx = -2; kx <= 2; kx++) {
             const nx = x + kx;
             const ny = y + ky;
             if (nx >= 0 && nx < dstW && ny >= 0 && ny < dstH) {
@@ -406,8 +406,8 @@ export class HeatmapCanvas {
     this.srcWidth = 32;
     this.srcHeight = 32;
     // GPU texture resolution - upscaled for smooth heatmap
-    this.width = 128;
-    this.height = 128;
+    this.width = 256;
+    this.height = 256;
     this.canvas = document.createElement('canvas');
 
     const contentWidth = 1024;
@@ -497,7 +497,7 @@ export class HeatmapCanvas {
     }
 
     // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2);
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 3);
 
     // Write to GPU texture
     const data = this.dataTexture.image.data;
