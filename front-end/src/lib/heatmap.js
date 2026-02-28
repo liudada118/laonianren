@@ -219,12 +219,18 @@ function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, opt
 /* ─── GPU Shader-based rendering ─── */
 
 const DEFAULT_GRADIENT = {
-  0.14: '#4477BB',
-  0.28: '#5599CC',
-  0.42: '#66BB88',
-  0.56: '#CCBB55',
-  0.70: '#CC7744',
-  0.84: '#BB4444'
+  0.00: '#39bcff',
+  0.09: '#4bd7ff',
+  0.18: '#5cefff',
+  0.27: '#57f9ee',
+  0.36: '#41ffcc',
+  0.45: '#70ffa8',
+  0.54: '#c1ff84',
+  0.63: '#faff5e',
+  0.72: '#ffcb4a',
+  0.81: '#ffa95b',
+  0.90: '#ff8174',
+  1.00: '#ff5a84'
 };
 
 function buildGradientTexture(gradient) {
@@ -260,7 +266,8 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uFlipX: { value: 0.0 },
       uFlipY: { value: 1.0 },
       uBlurRadius: { value: 3.5 },
-      uAlphaThreshold: { value: 0.04 }
+      uAlphaThreshold: { value: 0.02 },
+      uThreshold: { value: 0.0 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -281,6 +288,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uniform float uFlipY;
       uniform float uBlurRadius;
       uniform float uAlphaThreshold;
+      uniform float uThreshold;
 
       void main() {
         vec2 uv = vUv;
@@ -288,10 +296,14 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
         if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
 
         // Data is already blurred on CPU side, just sample with hardware linear filtering
-        float v = texture2D(uData, uv).r;
+        float rawV = texture2D(uData, uv).r;
+
+        // Apply threshold: values below threshold become transparent
+        // uThreshold is normalized (0~1), smooth fade around threshold edge
+        float threshFade = smoothstep(uThreshold - 0.02, uThreshold + 0.02, rawV);
 
         // Apply gamma correction for better visual contrast
-        v = pow(v, uGamma);
+        float v = pow(rawV, uGamma);
 
         // Clamp to valid range
         v = clamp(v, 0.0, 1.0);
@@ -299,11 +311,16 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
         // Map through rainbow gradient
         vec4 col = texture2D(uGradient, vec2(v, 0.5));
 
-        // Smooth alpha based on value - fade out near zero for clean look
-        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.06, v);
+        // Wide smooth fade for soft edges - large transition zone
+        float alpha = smoothstep(0.01, 0.25, v);
+        // Quintic ease for ultra-smooth edge falloff
+        alpha = alpha * alpha * alpha * (alpha * (alpha * 6.0 - 15.0) + 10.0);
+
+        // Apply threshold fade
+        alpha *= threshFade;
 
         // Ensure truly zero values produce zero alpha
-        if (v < 0.005) alpha = 0.0;
+        if (rawV < 0.005) alpha = 0.0;
 
         gl_FragColor = vec4(col.rgb, alpha);
       }
@@ -494,7 +511,7 @@ export class HeatmapCanvas {
     }
 
     // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 3);
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2);
 
     // Write to GPU texture
     const data = this.dataTexture.image.data;
@@ -513,6 +530,7 @@ export class HeatmapCanvas {
     this.dataTexture.needsUpdate = true;
     this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.0;
     this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.12;
+    this.material.uniforms.uThreshold.value = typeof this.options.threshold === 'number' ? this.options.threshold : 0.0;
     this.material.uniforms.uFlipX.value = this.options.flipX ? 1.0 : 0.0;
     this.material.uniforms.uFlipY.value = this.options.flipY === false ? 0.0 : 1.0;
     this.renderer.render(this.scene, this.camera);

@@ -33,15 +33,19 @@ export function HandModel({
     // Use a clean light gray base color for the hand model
     // Don't use original material's map texture as it contains the old block-style heatmap
     const origColor = new THREE.Color(0.82, 0.82, 0.85);
-    const origMap = null; // Ignore original texture to avoid showing built-in heatmap
 
-    const material = new THREE.ShaderMaterial({
+    // Get heatmap texture dimensions for texel size calculation
+    const heatW = heatmapTexture.image ? heatmapTexture.image.width : 512;
+    const heatH = heatmapTexture.image ? heatmapTexture.image.height : 512;
+
+    return new THREE.ShaderMaterial({
       transparent: true,
       uniforms: {
         uOrigColor: { value: origColor },
-        uOrigMap: { value: origMap },
-        uHasOrigMap: { value: origMap ? 1.0 : 0.0 },
+        uOrigMap: { value: null },
+        uHasOrigMap: { value: 0.0 },
         uHeatmap: { value: heatmapTexture },
+        uHeatTexel: { value: new THREE.Vector2(1.0 / heatW, 1.0 / heatH) },
         uLightDir: { value: new THREE.Vector3(0.4, 0.6, 0.8).normalize() },
         uLightDir2: { value: new THREE.Vector3(-0.3, 0.4, 0.2).normalize() },
         uAmbient: { value: 0.65 },
@@ -66,40 +70,65 @@ export function HandModel({
         uniform sampler2D uOrigMap;
         uniform float uHasOrigMap;
         uniform sampler2D uHeatmap;
+        uniform vec2 uHeatTexel;
         uniform vec3 uLightDir;
         uniform vec3 uLightDir2;
         uniform float uAmbient;
 
+        // 13-tap Gaussian blur on heatmap texture for soft edges
+        vec4 sampleHeatmapBlurred(vec2 uv) {
+          vec4 sum = vec4(0.0);
+          float blurSize = 3.5;
+          vec2 off1 = uHeatTexel * blurSize;
+          vec2 off2 = uHeatTexel * blurSize * 2.0;
+          // Center (highest weight)
+          sum += texture2D(uHeatmap, uv) * 0.20;
+          // Ring 1: 4 cardinal neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off1.x,    0.0)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x,    0.0)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0,  off1.y)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0, -off1.y)) * 0.10;
+          // Ring 1: 4 diagonal neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off1.x,  off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x,  off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2( off1.x, -off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x, -off1.y)) * 0.05;
+          // Ring 2: 4 cardinal far neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off2.x,    0.0)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off2.x,    0.0)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0,  off2.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0, -off2.y)) * 0.05;
+          return sum;
+        }
+
         void main() {
-          // Base color from original material
           vec3 baseColor = uOrigColor;
           if (uHasOrigMap > 0.5) {
             baseColor *= texture2D(uOrigMap, vUv).rgb;
           }
-
-          // Two-light setup for better illumination
           float diff1 = max(dot(vNormal, uLightDir), 0.0);
           float diff2 = max(dot(vNormal, uLightDir2), 0.0) * 0.4;
           float totalDiff = min(diff1 + diff2, 1.0);
           vec3 litBase = baseColor * (uAmbient + (1.0 - uAmbient) * totalDiff);
 
-          // Heatmap overlay
-          vec4 heatColor = texture2D(uHeatmap, vUv);
+          // Sample with blur for soft edges
+          vec4 heatColor = sampleHeatmapBlurred(vUv);
           float heatAlpha = heatColor.a;
 
-          // Boost heatmap color brightness slightly for better visibility
-          vec3 boostedHeat = heatColor.rgb * 1.1;
+          // Quintic smoothstep for ultra-soft edge falloff
+          float t = clamp(heatAlpha, 0.0, 1.0);
+          float blendAlpha = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+          // Extra attenuation at very low alpha
+          blendAlpha *= smoothstep(0.0, 0.12, heatAlpha);
 
-          // Mix: where heatmap has data, show heatmap color with lighting; otherwise show original
+          vec3 boostedHeat = heatColor.rgb * 1.05;
           vec3 heatLit = boostedHeat * (0.7 + 0.3 * totalDiff);
-          vec3 finalColor = mix(litBase, heatLit, heatAlpha * 0.88);
+          vec3 finalColor = mix(litBase, heatLit, blendAlpha * 0.90);
 
           gl_FragColor = vec4(finalColor, 1.0);
         }
       `
     });
-
-    return material;
   }, []);
 
   // 将纹理应用到模型的函数 - 使用自定义 shader 混合
