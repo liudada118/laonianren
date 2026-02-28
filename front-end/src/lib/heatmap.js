@@ -256,11 +256,11 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uGradient: { value: gradientTexture },
       uTexel: { value: texelSize },
       uSharpen: { value: 0.0 },
-      uGamma: { value: 0.15 },
+      uGamma: { value: 0.12 },
       uFlipX: { value: 0.0 },
       uFlipY: { value: 1.0 },
-      uBlurRadius: { value: 1.0 },
-      uAlphaThreshold: { value: 0.08 }
+      uBlurRadius: { value: 2.5 },
+      uAlphaThreshold: { value: 0.04 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -322,7 +322,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
 
         // Smooth alpha based on value - fade out near zero for clean look
         // Use a wider transition band to ensure zero-data areas are fully transparent
-        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.05, v);
+        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.06, v);
 
         // Ensure truly zero values produce zero alpha
         if (v < 0.005) alpha = 0.0;
@@ -497,7 +497,7 @@ export class HeatmapCanvas {
     }
 
     // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 1);
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2);
 
     // Write to GPU texture
     const data = this.dataTexture.image.data;
@@ -515,7 +515,7 @@ export class HeatmapCanvas {
     }
     this.dataTexture.needsUpdate = true;
     this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.0;
-    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.15;
+    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.12;
     this.material.uniforms.uFlipX.value = this.options.flipX ? 1.0 : 0.0;
     this.material.uniforms.uFlipY.value = this.options.flipY === false ? 0.0 : 1.0;
     this.renderer.render(this.scene, this.camera);
