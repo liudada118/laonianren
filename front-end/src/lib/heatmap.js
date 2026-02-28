@@ -219,12 +219,12 @@ function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, opt
 /* ─── GPU Shader-based rendering ─── */
 
 const DEFAULT_GRADIENT = {
-  0.14: '#0000FF',
-  0.28: '#0066FF',
-  0.42: '#00FF00',
-  0.56: '#FFFF00',
-  0.70: '#FF6600',
-  0.84: '#FF0000'
+  0.14: '#4477BB',
+  0.28: '#5599CC',
+  0.42: '#66BB88',
+  0.56: '#CCBB55',
+  0.70: '#CC7744',
+  0.84: '#BB4444'
 };
 
 function buildGradientTexture(gradient) {
@@ -256,11 +256,11 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uGradient: { value: gradientTexture },
       uTexel: { value: texelSize },
       uSharpen: { value: 0.0 },
-      uGamma: { value: 0.10 },
+      uGamma: { value: 0.15 },
       uFlipX: { value: 0.0 },
       uFlipY: { value: 1.0 },
-      uBlurRadius: { value: 4.0 },
-      uAlphaThreshold: { value: 0.02 }
+      uBlurRadius: { value: 1.0 },
+      uAlphaThreshold: { value: 0.08 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -322,7 +322,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
 
         // Smooth alpha based on value - fade out near zero for clean look
         // Use a wider transition band to ensure zero-data areas are fully transparent
-        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.08, v);
+        float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.05, v);
 
         // Ensure truly zero values produce zero alpha
         if (v < 0.005) alpha = 0.0;
@@ -378,8 +378,8 @@ function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
       for (let x = 0; x < dstW; x++) {
         let sum = 0;
         let count = 0;
-        for (let ky = -2; ky <= 2; ky++) {
-          for (let kx = -2; kx <= 2; kx++) {
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
             const nx = x + kx;
             const ny = y + ky;
             if (nx >= 0 && nx < dstW && ny >= 0 && ny < dstH) {
@@ -497,7 +497,7 @@ export class HeatmapCanvas {
     }
 
     // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 4);
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 1);
 
     // Write to GPU texture
     const data = this.dataTexture.image.data;
@@ -515,7 +515,7 @@ export class HeatmapCanvas {
     }
     this.dataTexture.needsUpdate = true;
     this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.0;
-    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.10;
+    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.15;
     this.material.uniforms.uFlipX.value = this.options.flipX ? 1.0 : 0.0;
     this.material.uniforms.uFlipY.value = this.options.flipY === false ? 0.0 : 1.0;
     this.renderer.render(this.scene, this.camera);
