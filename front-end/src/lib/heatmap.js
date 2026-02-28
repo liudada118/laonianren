@@ -282,34 +282,13 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uniform float uBlurRadius;
       uniform float uAlphaThreshold;
 
-      // Multi-pass Gaussian blur for smooth heatmap
-      float gaussianBlur(vec2 uv) {
-        float sigma = uBlurRadius;
-        int radius = int(ceil(sigma * 2.0));
-        float total = 0.0;
-        float weightSum = 0.0;
-
-        for (int y = -8; y <= 8; y++) {
-          for (int x = -8; x <= 8; x++) {
-            if (abs(x) > radius || abs(y) > radius) continue;
-            float fx = float(x);
-            float fy = float(y);
-            float weight = exp(-(fx * fx + fy * fy) / (2.0 * sigma * sigma));
-            vec2 offset = vec2(fx * uTexel.x, fy * uTexel.y);
-            total += texture2D(uData, uv + offset).r * weight;
-            weightSum += weight;
-          }
-        }
-        return total / weightSum;
-      }
-
       void main() {
         vec2 uv = vUv;
         if (uFlipX > 0.5) uv.x = 1.0 - uv.x;
         if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
 
-        // Apply Gaussian blur for smooth interpolation
-        float v = gaussianBlur(uv);
+        // Data is already blurred on CPU side, just sample with hardware linear filtering
+        float v = texture2D(uData, uv).r;
 
         // Apply gamma correction for better visual contrast
         v = pow(v, uGamma);
@@ -321,7 +300,6 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
         vec4 col = texture2D(uGradient, vec2(v, 0.5));
 
         // Smooth alpha based on value - fade out near zero for clean look
-        // Use a wider transition band to ensure zero-data areas are fully transparent
         float alpha = smoothstep(uAlphaThreshold, uAlphaThreshold + 0.06, v);
 
         // Ensure truly zero values produce zero alpha
@@ -344,55 +322,74 @@ function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
   const upscaled = new Float32Array(dstW * dstH);
   for (let dy = 0; dy < dstH; dy++) {
     for (let dx = 0; dx < dstW; dx++) {
-      // Map destination pixel to source coordinates
       const sx = (dx / dstW) * srcW;
       const sy = (dy / dstH) * srcH;
-
       const x0 = Math.floor(sx);
       const y0 = Math.floor(sy);
       const x1 = Math.min(x0 + 1, srcW - 1);
       const y1 = Math.min(y0 + 1, srcH - 1);
-
       const fx = sx - x0;
       const fy = sy - y0;
-
       const v00 = srcArr[y0 * srcW + x0] || 0;
       const v10 = srcArr[y0 * srcW + x1] || 0;
       const v01 = srcArr[y1 * srcW + x0] || 0;
       const v11 = srcArr[y1 * srcW + x1] || 0;
-
-      const val = v00 * (1 - fx) * (1 - fy) +
-                  v10 * fx * (1 - fy) +
-                  v01 * (1 - fx) * fy +
-                  v11 * fx * fy;
-
-      upscaled[dy * dstW + dx] = val;
+      upscaled[dy * dstW + dx] = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
     }
   }
 
-  // Step 2: Apply multiple passes of box blur (approximates Gaussian)
+  // Step 2: Separable Gaussian blur (horizontal then vertical) - O(n) per pixel
+  const radius = 3;
+  const sigma = 2.0;
+  // Pre-compute 1D Gaussian kernel
+  const kernelSize = radius * 2 + 1;
+  const kernel = new Float32Array(kernelSize);
+  let kernelSum = 0;
+  for (let i = 0; i < kernelSize; i++) {
+    const d = i - radius;
+    kernel[i] = Math.exp(-(d * d) / (2 * sigma * sigma));
+    kernelSum += kernel[i];
+  }
+  for (let i = 0; i < kernelSize; i++) kernel[i] /= kernelSum;
+
   let current = upscaled;
   for (let pass = 0; pass < (blurPasses || 3); pass++) {
-    const next = new Float32Array(dstW * dstH);
+    // Horizontal pass
+    const hBlur = new Float32Array(dstW * dstH);
     for (let y = 0; y < dstH; y++) {
+      const rowOff = y * dstW;
       for (let x = 0; x < dstW; x++) {
         let sum = 0;
-        let count = 0;
-        for (let ky = -2; ky <= 2; ky++) {
-          for (let kx = -2; kx <= 2; kx++) {
-            const nx = x + kx;
-            const ny = y + ky;
-            if (nx >= 0 && nx < dstW && ny >= 0 && ny < dstH) {
-              const weight = 1.0 / (1.0 + Math.abs(kx) + Math.abs(ky));
-              sum += current[ny * dstW + nx] * weight;
-              count += weight;
-            }
+        let wSum = 0;
+        for (let k = -radius; k <= radius; k++) {
+          const nx = x + k;
+          if (nx >= 0 && nx < dstW) {
+            const w = kernel[k + radius];
+            sum += current[rowOff + nx] * w;
+            wSum += w;
           }
         }
-        next[y * dstW + x] = sum / count;
+        hBlur[rowOff + x] = sum / wSum;
       }
     }
-    current = next;
+    // Vertical pass
+    const vBlur = new Float32Array(dstW * dstH);
+    for (let x = 0; x < dstW; x++) {
+      for (let y = 0; y < dstH; y++) {
+        let sum = 0;
+        let wSum = 0;
+        for (let k = -radius; k <= radius; k++) {
+          const ny = y + k;
+          if (ny >= 0 && ny < dstH) {
+            const w = kernel[k + radius];
+            sum += hBlur[ny * dstW + x] * w;
+            wSum += w;
+          }
+        }
+        vBlur[y * dstW + x] = sum / wSum;
+      }
+    }
+    current = vBlur;
   }
 
   return current;
@@ -406,8 +403,8 @@ export class HeatmapCanvas {
     this.srcWidth = 32;
     this.srcHeight = 32;
     // GPU texture resolution - upscaled for smooth heatmap
-    this.width = 256;
-    this.height = 256;
+    this.width = 128;
+    this.height = 128;
     this.canvas = document.createElement('canvas');
 
     const contentWidth = 1024;
