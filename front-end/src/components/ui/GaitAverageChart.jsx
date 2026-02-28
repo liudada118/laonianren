@@ -1,10 +1,9 @@
 import React, { useRef, useEffect } from 'react';
-import { renderMatrixToCanvas, drawColorbar, roundRect, FONT } from './heatmapUtils';
+import { renderMatrixToCanvas, drawColorbar, roundRect, calcP95Vmax } from './heatmapUtils';
 
 /**
  * GaitAverageChart - 步态平均热力图 + COP轨迹
- * 
- * 不使用 DPR 缩放，直接大像素 Canvas
+ * 黑色背景，jet色谱，白色COP轨迹，使用双线性上采样插值
  */
 
 export default function GaitAverageChart({ gaitAvgData, className = '' }) {
@@ -12,25 +11,24 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
 
   useEffect(() => {
     if (!gaitAvgData || !canvasRef.current) return;
-
     const canvas = canvasRef.current;
 
     const sides = [
-      { data: gaitAvgData.left, label: 'Left Foot', color: '#3B82F6' },
-      { data: gaitAvgData.right, label: 'Right Foot', color: '#F59E0B' },
+      { data: gaitAvgData.left, label: 'Left Foot Average', color: '#3B82F6' },
+      { data: gaitAvgData.right, label: 'Right Foot Average', color: '#F59E0B' },
     ].filter(s => s.data && s.data.heatmap);
 
     if (sides.length === 0) return;
 
-    const padding = 24;
-    const labelH = 32;
-    const cellW = 200;
-    const cellH = 300;
-    const gap = 40;
-    const colorbarW = 16;
+    const padding = 20;
+    const labelH = 28;
+    const cellW = 240;
+    const cellH = 360;
+    const gap = 30;
+    const colorbarW = 20;
     const colorbarGap = 12;
 
-    const blockW = cellW + colorbarGap + colorbarW + 24;
+    const blockW = cellW + colorbarGap + colorbarW + 30;
     const totalW = padding * 2 + sides.length * blockW + (sides.length - 1) * gap;
     const totalH = padding + labelH + cellH + padding;
 
@@ -38,129 +36,121 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     canvas.height = totalH;
     const ctx = canvas.getContext('2d');
 
-    // Background
-    ctx.fillStyle = '#F8FAFC';
+    ctx.fillStyle = '#FAFAFA';
     ctx.fillRect(0, 0, totalW, totalH);
 
     sides.forEach((side, idx) => {
       const { data, label, color } = side;
       const heatmap = data.heatmap;
       const cops = data.copTrajectories || [];
+      const srcRows = heatmap.length;
+      const srcCols = heatmap[0].length;
 
-      // 使用 P95 百分位数做 vmax
-      const nonZeroVals = [];
-      for (const row of heatmap) {
-        for (const v of row) {
-          if (v > 0) nonZeroVals.push(v);
-        }
-      }
-      if (nonZeroVals.length === 0) return;
-      nonZeroVals.sort((a, b) => a - b);
-      const p95Idx = Math.floor(nonZeroVals.length * 0.95);
-      const vmax = nonZeroVals[p95Idx] || nonZeroVals[nonZeroVals.length - 1] || 1;
+      const vmax = calcP95Vmax(heatmap);
       const threshold = vmax * 0.005;
-
-      const rows = heatmap.length;
-      const cols = heatmap[0].length;
-      const { canvas: offCanvas } = renderMatrixToCanvas(heatmap, vmax, threshold, 'transparent');
 
       const baseX = padding + idx * (blockW + gap);
       const cardX = baseX;
       const cardY = padding + labelH;
 
-      // Label
+      // 标签
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(baseX + 4, padding + labelH / 2, 5, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#1F2937';
-      ctx.font = `bold 13px ${FONT}`;
+      ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, baseX + 16, padding + labelH / 2);
+      ctx.fillText(`${label} (${data.stepCount} steps)`, baseX + 16, padding + labelH / 2);
 
-      ctx.fillStyle = '#9CA3AF';
-      ctx.font = `11px ${FONT}`;
-      const labelEnd = baseX + 16 + ctx.measureText(label).width + 6;
-      ctx.fillText(`(${data.stepCount} steps)`, labelEnd, padding + labelH / 2);
-
-      // Card
-      roundRect(ctx, cardX, cardY, cellW, cellH, 6);
-      ctx.fillStyle = '#FFFFFF';
+      // 黑色背景卡片
+      roundRect(ctx, cardX, cardY, cellW, cellH, 4);
+      ctx.fillStyle = '#111122';
       ctx.fill();
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.lineWidth = 1;
-      roundRect(ctx, cardX, cardY, cellW, cellH, 6);
-      ctx.stroke();
 
-      // Heatmap
-      const innerPad = 8;
-      const innerW = cellW - innerPad * 2;
-      const innerH = cellH - innerPad * 2;
-      const scaleX = innerW / cols;
-      const scaleY = innerH / rows;
-      const scale = Math.min(scaleX, scaleY);
-      const drawW = cols * scale;
-      const drawH = rows * scale;
-      const offX = cardX + innerPad + (innerW - drawW) / 2;
-      const offY = cardY + innerPad + (innerH - drawH) / 2;
+      // 上采样渲染热力图
+      const innerPad = 6;
+      const renderW = cellW - innerPad * 2;
+      const renderH = cellH - innerPad * 2;
+
+      const { canvas: offCanvas, scaleX, scaleY } = renderMatrixToCanvas(
+        heatmap, vmax, threshold, '#000', renderW, renderH
+      );
+
+      // 保持宽高比
+      const srcAspect = srcRows / srcCols;
+      const dstAspect = renderH / renderW;
+      let drawW, drawH;
+      if (srcAspect > dstAspect) {
+        drawH = renderH;
+        drawW = renderH / srcAspect;
+      } else {
+        drawW = renderW;
+        drawH = renderW * srcAspect;
+      }
+      const offX = cardX + innerPad + (renderW - drawW) / 2;
+      const offY = cardY + innerPad + (renderH - drawH) / 2;
 
       ctx.save();
-      roundRect(ctx, cardX + 1, cardY + 1, cellW - 2, cellH - 2, 5);
+      roundRect(ctx, cardX + 1, cardY + 1, cellW - 2, cellH - 2, 3);
       ctx.clip();
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(offCanvas, offX, offY, drawW, drawH);
 
-      // COP trajectories
+      // COP 轨迹（白色渐变线）
+      const pixPerSrcCol = drawW / srcCols;
+      const pixPerSrcRow = drawH / srcRows;
+
       cops.forEach((trail) => {
         if (!trail || trail.length < 2) return;
 
-        for (let i = 1; i < trail.length; i++) {
-          const px0 = trail[i - 1][1] * scale + offX;
-          const py0 = trail[i - 1][0] * scale + offY;
-          const px1 = trail[i][1] * scale + offX;
-          const py1 = trail[i][0] * scale + offY;
-
-          const progress = i / trail.length;
-          const alpha = 0.3 + progress * 0.5;
-
-          ctx.beginPath();
-          ctx.moveTo(px0, py0);
-          ctx.lineTo(px1, py1);
-          ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-          ctx.lineWidth = 1.8;
-          ctx.stroke();
+        // 白色描边（粗线做底）
+        ctx.beginPath();
+        for (let i = 0; i < trail.length; i++) {
+          const px = trail[i][1] * pixPerSrcCol + offX;
+          const py = trail[i][0] * pixPerSrcRow + offY;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
         }
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-        // Start/end markers
+        // 细线
+        ctx.beginPath();
+        for (let i = 0; i < trail.length; i++) {
+          const px = trail[i][1] * pixPerSrcCol + offX;
+          const py = trail[i][0] * pixPerSrcRow + offY;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.strokeStyle = 'rgba(255,255,0,0.6)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // 起止点
         if (trail.length > 0) {
-          const sx = trail[0][1] * scale + offX;
-          const sy = trail[0][0] * scale + offY;
+          const sx = trail[0][1] * pixPerSrcCol + offX;
+          const sy = trail[0][0] * pixPerSrcRow + offY;
           ctx.beginPath();
           ctx.arc(sx, sy, 3, 0, Math.PI * 2);
-          ctx.fillStyle = '#22D3EE';
+          ctx.fillStyle = '#00FFFF';
           ctx.fill();
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
 
-          const ex = trail[trail.length - 1][1] * scale + offX;
-          const ey = trail[trail.length - 1][0] * scale + offY;
+          const ex = trail[trail.length - 1][1] * pixPerSrcCol + offX;
+          const ey = trail[trail.length - 1][0] * pixPerSrcRow + offY;
           ctx.beginPath();
           ctx.arc(ex, ey, 3, 0, Math.PI * 2);
-          ctx.fillStyle = '#F43F5E';
+          ctx.fillStyle = '#FF4444';
           ctx.fill();
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
         }
       });
 
       ctx.restore();
 
-      // Colorbar
+      // 色条
       const cbX = cardX + cellW + colorbarGap;
       const cbY = cardY + innerPad;
       const cbH = cellH - innerPad * 2;
@@ -172,10 +162,7 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
 
   return (
     <div className={`flex justify-center ${className}`}>
-      <canvas
-        ref={canvasRef}
-        style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
-      />
+      <canvas ref={canvasRef} style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
     </div>
   );
 }

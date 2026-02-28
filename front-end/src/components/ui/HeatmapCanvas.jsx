@@ -3,7 +3,7 @@ import { renderMatrixToCanvas } from './heatmapUtils';
 
 /**
  * HeatmapCanvas - 通用 Canvas 热力图渲染组件
- * 直接大像素 Canvas，不使用 DPR 缩放
+ * 使用双线性上采样插值保证清晰度
  */
 
 export default function HeatmapCanvas({
@@ -37,40 +37,21 @@ export default function HeatmapCanvas({
     if (maxVal <= 0) maxVal = 1;
 
     const threshold = maxVal * maskThreshold;
-    const { canvas: offCanvas } = renderMatrixToCanvas(data, maxVal, threshold, bgColor);
+    const { canvas: offCanvas } = renderMatrixToCanvas(data, maxVal, threshold, bgColor, width, height);
 
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
 
-    const scaleX = width / cols;
-    const scaleY = height / rows;
-    const scale = Math.min(scaleX, scaleY);
-    const drawW = cols * scale;
-    const drawH = rows * scale;
-    const offsetX = (width - drawW) / 2;
-    const offsetY = (height - drawH) / 2;
-
-    ctx.fillStyle = '#F8FAFC';
+    ctx.fillStyle = '#FAFAFA';
     ctx.fillRect(0, 0, width, height);
-
-    if (smooth) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-    } else {
-      ctx.imageSmoothingEnabled = false;
-    }
-
-    ctx.drawImage(offCanvas, offsetX, offsetY, drawW, drawH);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(offCanvas, 0, 0, width, height);
   }, [data, vmax, width, height, maskThreshold, smooth, bgColor]);
 
   if (!data || data.length === 0) return null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={className}
-      style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
-    />
+    <canvas ref={canvasRef} className={className} style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
   );
 }
