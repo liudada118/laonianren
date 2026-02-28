@@ -2539,13 +2539,42 @@ function safeParseJSON(str) {
 // ==================== 历史记录模块结束 ====================
 
 
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
   process.send?.({ type: 'ready', port });
   console.log(`Example app listening on port ${port}`)
 })
 
 
 const server = new WebSocket.Server({ port: 19999 });
+
+// 进程退出时清理所有端口和连接
+function cleanupAndExit() {
+  console.log('[cleanup] 正在关闭所有服务...')
+  // 关闭所有串口
+  Object.keys(parserArr).forEach((path) => {
+    const item = parserArr[path]
+    if (item && item.port && item.port.isOpen) {
+      try { item.port.close() } catch (e) { /* ignore */ }
+    }
+  })
+  // 关闭 WebSocket 服务器 (端口 19999)
+  try {
+    server.clients.forEach((ws) => ws.terminate())
+    server.close()
+  } catch (e) { /* ignore */ }
+  // 关闭 Express HTTP 服务器 (端口 19245)
+  try { httpServer.close() } catch (e) { /* ignore */ }
+  // 清除定时器
+  if (playtimer) clearInterval(playtimer)
+  console.log('[cleanup] 清理完成')
+  process.exit(0)
+}
+
+// 监听父进程发送的退出信号
+process.on('SIGTERM', cleanupAndExit)
+process.on('SIGINT', cleanupAndExit)
+// 父进程断开时自动退出（防止孤儿进程）
+process.on('disconnect', cleanupAndExit)
 
 server.on("open", function open() {
   console.log("connected");

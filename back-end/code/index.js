@@ -15,6 +15,7 @@ const webRoot = isPackaged ? prodWebRoot : devWebRoot
 const defaultDevPort = process.env.VITE_DEV_PORT || '5173'
 let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaultDevPort}`
 let viteProcess = null
+let apiChild = null  // serialServer 子进程引用
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
@@ -295,6 +296,7 @@ function startApiChild() {
         resourcesPath: process.resourcesPath
       }
     })
+    apiChild = child  // 保存引用以便退出时清理
 
     const readyTimer = setTimeout(() => {
       reject(new Error('API child not ready in time'));
@@ -561,9 +563,31 @@ app.whenReady().then(async () => {
   // }
 })
 
+app.on('window-all-closed', () => {
+  app.quit()
+})
+
 app.on('before-quit', () => {
+  // 清理 Vite 开发服务器子进程
   if (viteProcess) {
     viteProcess.kill()
+    viteProcess = null
+  }
+  // 清理 serialServer 子进程（占用端口 19245 + 19999）
+  if (apiChild) {
+    apiChild.kill()
+    apiChild = null
+  }
+})
+
+// 兜底：确保进程退出时强制清理所有子进程
+app.on('will-quit', () => {
+  if (apiChild && !apiChild.killed) {
+    apiChild.kill('SIGKILL')
+    apiChild = null
+  }
+  if (viteProcess && !viteProcess.killed) {
+    viteProcess.kill('SIGKILL')
     viteProcess = null
   }
 })
