@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>握力可视化 - Web Serial</title>
+  <script type="module" crossorigin src="/assets/index-DxRiCowd.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Di7rfrsW.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部工具栏 -->
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <h1 class="title">握力可视化</h1>
+        <span class="status-badge" id="statusBadge">未连接</span>
+      </div>
+      <div class="toolbar-center">
+        <div class="hand-tabs">
+          <button class="tab-btn active" id="tabLeft" data-hand="left">左手</button>
+          <button class="tab-btn" id="tabRight" data-hand="right">右手</button>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-primary" id="btnConnect">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+          连接手套
+        </button>
+        <button class="btn btn-secondary" id="btnSimulate">模拟数据</button>
+        <button class="btn btn-outline" id="btnRecord">
+          <span class="record-dot" id="recordDot"></span>
+          开始采集
+        </button>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+      <!-- 左侧面板 -->
+      <aside class="side-panel">
+        <!-- 压力统计 -->
+        <div class="panel-card">
+          <h3 class="panel-title" id="panelHandTitle">左手 · 压力数据</h3>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <span class="stat-label">平均压力</span>
+              <span class="stat-value" id="avgPressure">0.00 <small>mmHg</small></span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">最大压力</span>
+              <span class="stat-value" id="maxPressure">0.00 <small>mmHg</small></span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">压力总和</span>
+              <span class="stat-value" id="sumPressure">0.00 <small>mmHg</small></span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">帧率</span>
+              <span class="stat-value" id="fpsValue">0 <small>fps</small></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 压力曲线 -->
+        <div class="panel-card">
+          <h3 class="panel-title">实时压力曲线</h3>
+          <canvas id="chartCanvas" width="280" height="120"></canvas>
+        </div>
+
+        <!-- 采集时间 -->
+        <div class="panel-card" id="recordPanel" style="display:none;">
+          <h3 class="panel-title">采集信息</h3>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <span class="stat-label">采集时间</span>
+              <span class="stat-value" id="recordTime">00:00:00</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">数据帧数</span>
+              <span class="stat-value" id="frameCount">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 日志 -->
+        <div class="panel-card log-card">
+          <h3 class="panel-title">通信日志</h3>
+          <div class="log-container" id="logContainer"></div>
+        </div>
+      </aside>
+
+      <!-- 3D 视图 -->
+      <div class="model-viewport" id="modelViewport"></div>
+    </div>
+  </div>
+
+</body>
+</html>
