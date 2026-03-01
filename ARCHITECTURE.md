@@ -1,0 +1,182 @@
+# 老年人筛查系统MAC 架构文档
+
+**版本**: 1.0
+**最后更新**: 2026-03-01
+**作者**: Manus AI
+
+## 1. 概述
+
+本项目是一个基于 Electron 的桌面应用程序，用于老年人肌少症、步态、平衡等能力的筛查与评估。系统通过连接多种压力传感器硬件（握力计、坐垫、步道等），实时采集数据，进行算法分析，并生成详细的评估报告。
+
+### 1.1. 整体架构图
+
+![系统架构图](docs/architecture_diagram.png)
+
+### 1.2. 技术栈
+
+| 层次 | 技术 | 主要库/框架 | 职责 |
+|---|---|---|---|
+| **桌面应用容器** | Electron | `electron`, `electron-builder` | 提供跨平台（Windows, macOS）的桌面应用外壳，管理窗口和主进程。 |
+| **前端/UI** | React | `react`, `vite`, `tailwindcss`, `echarts`, `three.js` | 构建用户界面，包括数据可视化（图表、3D模型）、设备连接、评估流程控制。 |
+| **后端/主服务** | Node.js | `express`, `ws`, `serialport`, `sqlite3` | 核心业务逻辑，包括：HTTP API 服务、WebSocket 实时通信、串口设备数据采集、数据库管理。 |
+| **算法/数据处理** | JavaScript (Node.js) & Python | `numpy`, `scipy`, `matplotlib` | 执行核心算法，包括信号处理、峰值检测、COP计算、报告数据生成等。 |
+| **数据库** | SQLite | `sqlite3` | 存储历史评估数据、用户配置等。 |
+
+### 1.3. 项目目录结构
+
+项目分为两个主要部分：`front-end` 和 `back-end`。
+
+- **`back-end/code`**: Electron 主进程和后端 Node.js 服务代码。
+  - `index.js`: Electron 主进程入口。
+  - `server/serialServer.js`: 核心后端服务，处理硬件通信和 API 请求。
+  - `algorithms/`: 算法模块，包含 JS 实现和 Python 桥接。
+  - `python/`: Python 算法的原始脚本。
+  - `db/`: SQLite 数据库文件存放目录。
+- **`front-end`**: React 前端应用代码。
+  - `src/`: 前端源码目录。
+  - `pages/`: 各个页面组件。
+  - `components/`: 可复用的 UI 组件。
+  - `lib/`: 前端核心逻辑，如与后端的通信桥 `BackendBridge.js`。
+  - `contexts/`: React Context，用于全局状态管理。
+
+## 2. 核心模块详解
+
+### 2.1. Electron 主进程 (`back-end/code/index.js`)
+
+主进程是应用的入口点，负责：
+
+1.  **窗口管理**: 创建和管理浏览器窗口 (`BrowserWindow`)。
+2.  **生命周期管理**: 处理应用的启动、关闭、激活等事件。通过 `before-quit` 和 `will-quit` 事件确保所有子进程（Vite, serialServer）在应用退出时被正确清理，防止端口占用。
+3.  **子进程管理**: 
+    - 在开发模式下，启动 Vite 开发服务器。
+    - 启动核心后端服务 `serialServer.js` 作为一个独立的 Node.js 子进程 (`child_process.fork`)。这种隔离可以防止后端服务的崩溃影响到整个应用的稳定性。
+4.  **预加载脚本 (`preload.js`)**: 通过 `contextBridge` 安全地向渲染进程暴露 Node.js API（目前较少使用）。
+
+### 2.2. 前端架构 (`front-end`)
+
+前端采用 `Vite` + `React` 构建，实现了清晰的组件化和状态管理。
+
+#### 2.2.1. 路由
+
+使用 `react-router-dom` 进行页面路由管理，主要页面包括：
+
+- `/`: 登录页
+- `/dashboard`: 主面板，评估项目入口
+- `/assessment/*`: 各个评估项目（握力、起坐、站立、步态）的实时采集页面
+- `/history`: 历史记录列表
+- `/history/report`: 历史报告查看页
+
+#### 2.2.2. 状态管理
+
+- **`AssessmentContext`**: 全局状态管理中心，负责维护：
+  - 用户登录信息。
+  - 当前评估对象（患者信息）。
+  - 各评估项目的完成状态和报告数据。
+  - 全局设备连接状态 (`deviceConnStatus`) 和各传感器的在线状态 (`deviceOnlineMap`)。
+- **`useWebSocket` / `BackendBridge.js`**: 封装了与后端 `serialServer.js` 的通信逻辑。
+
+#### 2.2.3. 与后端通信 (`lib/BackendBridge.js`)
+
+`BackendBridge.js` 是前端与后端通信的**唯一入口**，它统一管理了两种通信方式：
+
+- **HTTP API (Express)**: 用于请求-响应模式的操作，如获取历史记录、生成报告、开始/结束采集等。通过 `fetch` 调用 `http://localhost:19245` 上的接口。
+- **WebSocket**: 用于从后端接收实时的、推送性质的数据，如传感器实时压力数据、设备连接状态等。连接到 `ws://localhost:19999`。
+
+这种设计将所有后端交互逻辑集中在一个地方，便于管理和调试。
+
+#### 2.2.4. 数据可视化
+
+- **`ECharts`**: 用于绘制 2D 图表，如压力曲线、柱状图等 (`components/ui/EChart.jsx`)。
+- **`Three.js` / `@react-three/fiber`**: 用于渲染 3D 模型，如手部模型、足底压力热力图等 (`components/three/`)。
+  - **热力图渲染 (`lib/heatmap.js`)**: 一个核心的自定义模块，实现了将离散的压力点数据通过高斯模糊、颜色映射等技术渲染成平滑的热力图纹理，并应用到 3D 模型上。
+
+### 2.3. 后端服务 (`back-end/code/server/serialServer.js`)
+
+这是整个系统的核心，一个常驻的 Node.js 服务，负责所有与硬件和数据处理相关的任务。
+
+#### 2.3.1. API 服务 (Express)
+
+在端口 `19245` 上提供一个 HTTP/RESTful API 服务，处理前端的请求。主要接口包括：
+
+- `/connPort`: 连接所有串口设备。
+- `/startCol`, `/endCol`: 开始和结束数据采集。
+- `/getHandPdf`, `/getFootPdf`, ...: 请求生成各项评估报告。
+- `/api/history/*`: 增删查改历史评估记录。
+
+#### 2.3.2. 实时通信 (WebSocket)
+
+在端口 `19999` 上运行一个 WebSocket 服务器，用于向所有连接的前端客户端**广播**实时数据：
+
+- **传感器实时数据**: 将从串口收到的原始数据处理后，以固定频率推送给前端，用于实时显示压力变化。
+- **设备状态**: 当传感器连接或断开时，立即推送更新后的设备状态。
+
+#### 2.3.3. 硬件交互 (`serialport`)
+
+- 使用 `serialport` 库扫描和连接所有可用的串口设备。
+- 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
+- 对原始数据进行解析、分包、校验，转换为数字矩阵。
+
+#### 2.3.4. 数据库交互 (`sqlite3`)
+
+- 使用 `sqlite3` 库操作 `back-end/code/db/` 目录下的数据库文件。
+- `init.db`: 可能用于存储配置信息。
+- `foot.db`: 主要数据库，包含 `matrix` 表，用于存储采集的原始数据帧、时间戳、评估ID等。
+
+### 2.4. 算法架构 (`back-end/code/algorithms`)
+
+算法是系统的另一个核心，分为 JS 实现和 Python 实现两部分，以平衡性能和开发效率。
+
+#### 2.4.1. JavaScript 算法
+
+- **位置**: `back-end/code/algorithms/{grip,sitstand,...}`
+- **目的**: 对性能要求不是极致，但与 Node.js 服务端逻辑紧密相关的部分，使用 JS 实现可以避免跨语言调用的开销。
+- **示例**: `sitstandReportAlgorithm.js` 中包含了起坐周期的峰值检测、时长计算等逻辑。
+- **共享模块**: `shared/mathUtils.js` 提供了如 `sum`, `mean`, `std`, `findPeaks` 等通用的数学和信号处理函数。
+
+#### 2.4.2. Python 算法桥 (`pythonBridge.js` & `bridge.py`)
+
+当需要利用 Python 强大的科学计算生态（如 `numpy`, `scipy`）时，通过一个桥接机制来调用 Python 脚本。
+
+- **调用流程**:
+  1. `serialServer.js` 调用 `pythonBridge.js` 中的 `callPython(functionName, params)`。
+  2. `pythonBridge.js` `fork` 一个 `bridge.py` 子进程。
+  3. 通过 `stdin` 将函数名和参数以 JSON 格式发送给 `bridge.py`。
+  4. `bridge.py` 解析输入，根据函数名在注册表中查找并执行对应的 Python 函数（这些函数通常位于 `back-end/code/python/app/frontendReport/` 目录下）。
+  5. Python 函数执行完毕，将结果以 JSON 格式通过 `stdout` 返回。
+  6. `pythonBridge.js` 捕获输出，解析 JSON 并返回结果。
+
+- **优点**: 充分利用了 Python 的算法能力，同时保持了 Node.js 作为主服务的架构。
+- **缺点**: 存在进程创建和数据序列化的开销，不适合高频率的实时调用。
+
+## 3. 数据流
+
+### 3.1. 实时数据显示流程
+
+1.  **硬件 -> Node.js**: 传感器通过串口将二进制数据发送给 `serialServer.js`。
+2.  **数据解析**: `serialServer.js` 解析数据包，得到压力矩阵。
+3.  **广播**: `serialServer.js` 通过 WebSocket (`19999`) 将压力矩阵广播给所有前端客户端。
+4.  **前端接收**: `BackendBridge.js` 接收到 WebSocket 消息，触发 `data` 事件。
+5.  **UI 更新**: React 组件（如 `GripAssessment.jsx`）监听到事件，更新状态，触发 `Three.js` 或 `ECharts` 重新渲染，展示实时压力变化。
+
+### 3.2. 报告生成流程
+
+1.  **前端触发**: 用户在评估结束后，前端页面调用 `BackendBridge.js` 的报告生成函数（如 `getGripReport`）。
+2.  **API 请求**: `BackendBridge.js` 向 `serialServer.js` 的相应 API endpoint (`/getHandPdf`) 发送 HTTP 请求，参数中包含本次评估的数据库记录 ID。
+3.  **数据查询**: `serialServer.js` 从 SQLite 数据库中查询出本次评估的所有原始数据帧。
+4.  **算法调用**: `serialServer.js` 调用 `pythonBridge.js`，将查询到的数据传递给相应的 Python 报告生成算法（如 `generate_grip_render_report`）。
+5.  **Python 计算**: Python 脚本进行复杂的计算（如峰值力、平均力、COP轨迹等），生成结构化的报告数据。
+6.  **返回结果**: 结构化数据以 JSON 格式通过 `pythonBridge` -> `serialServer.js` -> HTTP 响应返回给前端。
+7.  **前端渲染**: 前端报告页面 (`GripReport.jsx`) 接收到 JSON 数据，将其渲染成用户可见的图表和统计数据。
+
+## 4. 未来维护与更新
+
+根据用户要求，本文档将作为项目核心参考，并在每次功能优化或架构调整后进行同步更新。
+
+**更新流程**:
+
+1.  完成代码的合并与推送。
+2.  **阅读本文档 (`ARCHITECTURE.md`)**。
+3.  根据代码变更，修改文档中受影响的部分（如新增API、修改数据流、调整组件等）。
+4.  提交并推送更新后的文档。
+
+---
