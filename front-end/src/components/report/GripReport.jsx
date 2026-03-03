@@ -346,7 +346,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     { l: '测试手类型', v: data.handType || handLabel },
                     { l: '总帧数', v: data.totalFrames },
                     { l: '时间范围', v: data.timeRange },
-                    { l: '峰值力', v: data.peakInfo ? `${(data.peakInfo.peak_force ?? 0).toFixed(1)}N` : '-' }
+                    { l: '峰值力', v: data.peakInfo ? `${parseFloat((data.peakInfo.peak_force ?? 0).toFixed(2))}N` : '-' }
                   ].map((item, i) => (
                     <div key={i} className="zeiss-card-inner p-3 text-center">
                       <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
@@ -374,18 +374,18 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                       <div className="flex-1">
                         <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</div>
                         <div className="flex gap-3 text-[11px]">
-                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? 0)}N</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? 0)}N</span></span>
                           <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area ?? 0}mm²</span></span>
                           <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points ?? 0}</span></span>
                         </div>
                       </div>
-                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? ((f.force ?? 0) / data.totalForce * 100).toFixed(1) : 0}%</div>
+                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? parseFloat(((f.force ?? 0) / data.totalForce * 100).toFixed(1)) : 0}%</div>
                     </div>
                   ))}
                   <div className="zeiss-card p-3 flex justify-between items-center" style={{ background: 'var(--zeiss-blue-light)', borderColor: 'rgba(0,102,204,0.15)' }}>
                     <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>合计</span>
                     <div className="flex gap-5 text-sm">
-                      <span style={{ color: 'var(--text-tertiary)' }}>总力: <b style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? data.totalForce.toFixed(1) : data.totalForce}N</b></span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>总力: <b style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? parseFloat(data.totalForce.toFixed(2)) : data.totalForce}N</b></span>
                       <span style={{ color: 'var(--text-tertiary)' }}>总面积: <b style={{ color: '#0891B2' }}>{data.totalArea}mm²</b></span>
                     </div>
                   </div>
@@ -432,7 +432,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</span>
                         </td>
                         <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc ?? '-'}</td>
-                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? '-')}</td>
+                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? '-')}</td>
                         <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area ?? '-'}</td>
                         <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points ?? '-'}</td>
                       </tr>
@@ -440,7 +440,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     <tr style={{ borderTop: '2px solid var(--border-medium)', background: 'var(--bg-tertiary)' }}>
                       <td className="px-4 py-2.5 font-bold" style={{ color: 'var(--text-primary)' }}>合计</td>
                       <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
-                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? data.totalForce.toFixed(1) : data.totalForce}</td>
+                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? parseFloat(data.totalForce.toFixed(2)) : data.totalForce}</td>
                       <td className="px-4 py-2.5 text-center font-bold" style={{ color: '#0891B2' }}>{data.totalArea}</td>
                       <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
                     </tr>

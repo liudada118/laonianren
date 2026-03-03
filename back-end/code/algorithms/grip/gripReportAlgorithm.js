@@ -96,7 +96,7 @@ function adcToForceSinglePoint(adc) {
   } else {
     force = 150.0; // 饱和
   }
-  return force / CALIBRATION_POINTS;
+  return parseFloat((force / CALIBRATION_POINTS).toFixed(4));
 }
 
 /**
@@ -349,11 +349,11 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
   }
 
   for (let i = 0; i < n; i += step) {
-    sampledT.push(t[i]);
+    sampledT.push(parseFloat(t[i].toFixed(3)));
     for (const key of PART_KEYS) {
-      sampledForce[key].push(forceTimeSeries[key][i]);
+      sampledForce[key].push(parseFloat(forceTimeSeries[key][i].toFixed(2)));
     }
-    sampledForce.total.push(totalForceSeries[i]);
+    sampledForce.total.push(parseFloat(totalForceSeries[i].toFixed(2)));
   }
 
   const sampledEulerRoll = [];
@@ -361,10 +361,10 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
   const sampledEulerYaw = [];
   const sampledAngVel = [];
   for (let i = 0; i < n; i += step) {
-    sampledEulerRoll.push(eulerRoll[i]);
-    sampledEulerPitch.push(eulerPitch[i]);
-    sampledEulerYaw.push(eulerYaw[i]);
-    sampledAngVel.push(angularVelocity[i]);
+    sampledEulerRoll.push(parseFloat(eulerRoll[i].toFixed(2)));
+    sampledEulerPitch.push(parseFloat(eulerPitch[i].toFixed(2)));
+    sampledEulerYaw.push(parseFloat(eulerYaw[i].toFixed(2)));
+    sampledAngVel.push(parseFloat(angularVelocity[i].toFixed(2)));
   }
 
   // ---- 8. 组装结果 ----
@@ -374,8 +374,8 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
     totalFrames: n,
     timeRange: `${t[0].toFixed(3)}s ~ ${t[n - 1].toFixed(3)}s`,
     peakInfo: {
-      peak_force: peakForce,
-      peak_time: peakTime,
+      peak_force: parseFloat(peakForce.toFixed(2)),
+      peak_time: parseFloat(peakTime.toFixed(3)),
     },
     timeAnalysis: [
       { label: 'Grip Start', value: `${gripStartTime.toFixed(3)} s` },
@@ -388,7 +388,7 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
       { label: 'Max Angular Velocity', value: `${Math.max(...angularVelocity).toFixed(2)} deg/s` },
     ],
     fingers: fingers,
-    totalForce: Math.round(totalForce * 100) / 100,
+    totalForce: parseFloat(totalForce.toFixed(2)),
     totalArea: Math.round(totalArea),
     times: sampledT,
     forceTimeSeries: sampledForce,
@@ -410,9 +410,9 @@ function getOverview(result) {
     handType: result.handType,
     totalFrames: result.totalFrames,
     timeRange: result.timeRange,
-    peakForce: result.peakInfo?.peak_force ?? 0,
-    peakTime: result.peakInfo?.peak_time ?? 0,
-    totalForce: result.totalForce,
+    peakForce: parseFloat((result.peakInfo?.peak_force ?? 0).toFixed(2)),
+    peakTime: parseFloat((result.peakInfo?.peak_time ?? 0).toFixed(3)),
+    totalForce: parseFloat((result.totalForce ?? 0).toFixed(2)),
     totalArea: result.totalArea,
     fingers: result.fingers,
   };

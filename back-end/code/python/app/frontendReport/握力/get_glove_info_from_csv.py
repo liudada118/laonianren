@@ -920,18 +920,18 @@ def _process_glove_data_core(input_csv, output_csv, hand_type, generate_pdf=True
 
     # 鏃跺簭鏁版嵁锛堥檷閲囨牱鍒版渶澶?500 鐐癸級
     step = max(1, len(times) // 500)
-    sampled_times = times[::step].tolist()
+    sampled_times = [round(float(x), 3) for x in times[::step]]
     force_time_series = {}
     for pk in part_keys:
-        force_time_series[pk] = force_data[pk][::step].tolist()
-    force_time_series['total'] = force_data['total'][::step].tolist()
+        force_time_series[pk] = [round(float(x), 2) for x in force_data[pk][::step]]
+    force_time_series['total'] = [round(float(x), 2) for x in force_data['total'][::step]]
 
     sampled_euler = {
-        'roll': euler_data['roll'][::step].tolist(),
-        'pitch': euler_data['pitch'][::step].tolist(),
-        'yaw': euler_data['yaw'][::step].tolist(),
+        'roll': [round(float(x), 2) for x in euler_data['roll'][::step]],
+        'pitch': [round(float(x), 2) for x in euler_data['pitch'][::step]],
+        'yaw': [round(float(x), 2) for x in euler_data['yaw'][::step]],
     }
-    sampled_angular = angular_velocities[::step].tolist()
+    sampled_angular = [round(float(x), 2) for x in angular_velocities[::step]]
 
     return {
         'handType': hand_type,
@@ -939,8 +939,8 @@ def _process_glove_data_core(input_csv, output_csv, hand_type, generate_pdf=True
         'totalFrames': len(times),
         'timeRange': f'{times[0]:.3f}s ~ {times[-1]:.3f}s',
         'peakInfo': {
-            'peak_force': peak_info['peak_force'],
-            'peak_time': peak_info['peak_time'],
+            'peak_force': round(float(peak_info['peak_force']), 2),
+            'peak_time': round(float(peak_info['peak_time']), 3),
         } if peak_info else None,
         'timeAnalysis': time_analysis,
         'fingers': fingers,

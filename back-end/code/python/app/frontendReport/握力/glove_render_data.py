@@ -233,9 +233,9 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         )
 
     step = max(1, n // 500)
-    sampled_t = t[::step].tolist()
-    sampled_force = {k: force_time_series[k][::step].tolist() for k in part_keys}
-    sampled_force['total'] = force_time_series['total'][::step].tolist()
+    sampled_t = [round(float(x), 3) for x in t[::step]]
+    sampled_force = {k: [round(float(x), 2) for x in force_time_series[k][::step]] for k in part_keys}
+    sampled_force['total'] = [round(float(x), 2) for x in force_time_series['total'][::step]]
 
     return {
         'handType': hand_type,
@@ -243,8 +243,8 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         'totalFrames': n,
         'timeRange': f'{float(t[0]):.3f}s ~ {float(t[-1]):.3f}s',
         'peakInfo': {
-            'peak_force': peak_force,
-            'peak_time': peak_time,
+            'peak_force': round(peak_force, 2),
+            'peak_time': round(peak_time, 3),
         },
         'timeAnalysis': [
             {'label': 'Grip Start', 'value': f'{grip_start_time:.3f} s'},
@@ -262,11 +262,11 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         'times': sampled_t,
         'forceTimeSeries': sampled_force,
         'eulerData': {
-            'roll': euler_roll[::step].tolist(),
-            'pitch': euler_pitch[::step].tolist(),
-            'yaw': euler_yaw[::step].tolist(),
+            'roll': [round(float(x), 2) for x in euler_roll[::step]],
+            'pitch': [round(float(x), 2) for x in euler_pitch[::step]],
+            'yaw': [round(float(x), 2) for x in euler_yaw[::step]],
         },
-        'angularVelocity': angular_velocity[::step].tolist(),
+        'angularVelocity': [round(float(x), 2) for x in angular_velocity[::step]],
     }
 
 
