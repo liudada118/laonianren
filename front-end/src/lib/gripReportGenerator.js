@@ -57,7 +57,7 @@ function extractFingerData(sensorData, isLeft = true) {
     result[key] = {
       name: FINGER_NAMES[key],
       adc: Math.round(sum),
-      force: parseFloat((sum * 0.1).toFixed(1)),
+      force: parseFloat((sum * 0.1).toFixed(2)),
       area: activeCount * 24,
       points: `${activeCount}/${indices.length}`,
       activeCount,
@@ -152,7 +152,7 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
       });
     });
   }
-  forceTimeSeries.total = chartPressure.map(v => parseFloat(v.toFixed(2)));
+  forceTimeSeries.total = chartPressure.map(v => parseFloat(Number(v).toFixed(2)));
 
   // 峰值帧手指数据
   let peakFingerData;
@@ -171,18 +171,18 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
   }
 
   const fingers = fingerKeys.map(key => peakFingerData[key]);
-  const totalForce = parseFloat(fingers.reduce((s, f) => s + f.force, 0).toFixed(1));
+  const totalForce = parseFloat(fingers.reduce((s, f) => s + f.force, 0).toFixed(2));
   const totalArea = fingers.reduce((s, f) => s + f.area, 0);
 
   // 欧拉角
   const eulerData = {
-    roll:  chartTimes.map(t => parseFloat((Math.sin(t * 0.5) * 5 + (Math.random() - 0.5) * 2).toFixed(2))),
-    pitch: chartTimes.map(t => parseFloat((Math.cos(t * 0.3) * 8 + (Math.random() - 0.5) * 3).toFixed(2))),
-    yaw:   chartTimes.map(t => parseFloat((Math.sin(t * 0.2) * 3 + (Math.random() - 0.5) * 1.5).toFixed(2))),
+    roll:  chartTimes.map(ct => parseFloat((Math.sin(ct * 0.5) * 5 + (Math.random() - 0.5) * 2).toFixed(2))),
+    pitch: chartTimes.map(ct => parseFloat((Math.cos(ct * 0.3) * 8 + (Math.random() - 0.5) * 3).toFixed(2))),
+    yaw:   chartTimes.map(ct => parseFloat((Math.sin(ct * 0.2) * 3 + (Math.random() - 0.5) * 1.5).toFixed(2))),
   };
 
   // 角速度
-  const angularVelocity = chartTimes.map((t, i) => {
+  const angularVelocity = chartTimes.map((ct, i) => {
     if (i === 0) return 0;
     const dt = chartTimes[i] - chartTimes[i - 1];
     if (dt <= 0) return 0;
@@ -226,10 +226,10 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
     totalForce,
     totalArea,
     peakInfo: {
-      peak_idx: peakIdx, peak_force: peakValue, peak_time: peakTime,
+      peak_idx: peakIdx, peak_force: parseFloat(Number(peakValue).toFixed(2)), peak_time: parseFloat(Number(peakTime).toFixed(3)),
       start_idx: peakStartIdx, end_idx: peakEndIdx,
-      start_time: times[peakStartIdx] || 0, end_time: times[peakEndIdx] || 0,
-      duration: (times[peakEndIdx] || 0) - (times[peakStartIdx] || 0),
+      start_time: parseFloat(Number(times[peakStartIdx] || 0).toFixed(3)), end_time: parseFloat(Number(times[peakEndIdx] || 0).toFixed(3)),
+      duration: parseFloat(((times[peakEndIdx] || 0) - (times[peakStartIdx] || 0)).toFixed(3)),
     },
     gripStartTime,
     shakeCount: shakeTimesArr.length,
