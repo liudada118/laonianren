@@ -5,6 +5,8 @@ import { renderMatrixToCanvas, drawColorbar, roundRect } from './heatmapUtils';
  * PressureEvolutionChart - 动态压力演变
  * 2行×10列热力图网格，黑色背景，jet色谱
  * 使用双线性上采样插值保证清晰度
+ * 
+ * 修复: 统一左右脚的宽高比，确保对齐
  */
 
 export default function PressureEvolutionChart({ evolutionData, className = '' }) {
@@ -45,6 +47,25 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
     // 整体背景
     ctx.fillStyle = '#FAFAFA';
     ctx.fillRect(0, 0, totalW, totalH);
+
+    // ── 修复：计算统一的宽高比 ──
+    // 收集左右脚所有帧的原始尺寸，取最大宽高比作为统一标准
+    let unifiedAspect = null;
+    rows.forEach((row) => {
+      if (!row.data || !row.data.frames) return;
+      const frames = row.data.frames;
+      for (let col = 0; col < Math.min(frames.length, numCols); col++) {
+        const frameData = frames[col];
+        if (frameData && frameData.length > 0) {
+          const aspect = frameData.length / frameData[0].length;
+          if (unifiedAspect === null || aspect > unifiedAspect) {
+            unifiedAspect = aspect;
+          }
+        }
+      }
+    });
+    // 如果没有有效帧，使用默认宽高比
+    if (unifiedAspect === null) unifiedAspect = 1.4;
 
     rows.forEach((row, rowIdx) => {
       const yBase = padTop + rowIdx * (cellH + titleH + rowGap);
@@ -88,16 +109,15 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
             frameData, vmax, threshold, '#000', renderW, renderH
           );
 
-          // 保持宽高比居中
-          const srcAspect = frameData.length / frameData[0].length;
+          // ── 修复：使用统一宽高比计算绘制尺寸 ──
           const dstAspect = renderH / renderW;
           let drawW, drawH;
-          if (srcAspect > dstAspect) {
+          if (unifiedAspect > dstAspect) {
             drawH = renderH;
-            drawW = renderH / srcAspect;
+            drawW = renderH / unifiedAspect;
           } else {
             drawW = renderW;
-            drawH = renderW * srcAspect;
+            drawH = renderW * unifiedAspect;
           }
           const offX = x + pad + (renderW - drawW) / 2;
           const offY = y + pad + (renderH - drawH) / 2;

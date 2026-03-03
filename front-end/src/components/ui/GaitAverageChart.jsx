@@ -4,6 +4,8 @@ import { renderMatrixToCanvas, drawColorbar, roundRect, calcP95Vmax } from './he
 /**
  * GaitAverageChart - 步态平均热力图 + COP轨迹
  * 黑色背景，jet色谱，白色COP轨迹，使用双线性上采样插值
+ * 
+ * 修复: 统一左右脚的宽高比和绘制尺寸，确保对齐
  */
 
 export default function GaitAverageChart({ gaitAvgData, className = '' }) {
@@ -39,6 +41,33 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     ctx.fillStyle = '#FAFAFA';
     ctx.fillRect(0, 0, totalW, totalH);
 
+    // ── 修复：计算统一的宽高比 ──
+    // 收集所有脚的原始矩阵尺寸，取最大宽高比作为统一标准
+    let maxSrcAspect = 0;
+    sides.forEach(({ data }) => {
+      const heatmap = data.heatmap;
+      const srcRows = heatmap.length;
+      const srcCols = heatmap[0].length;
+      const aspect = srcRows / srcCols;
+      if (aspect > maxSrcAspect) maxSrcAspect = aspect;
+    });
+    if (maxSrcAspect === 0) maxSrcAspect = 1.4;
+
+    // ── 修复：预计算统一的绘制尺寸 ──
+    const innerPad = 6;
+    const renderW = cellW - innerPad * 2;
+    const renderH = cellH - innerPad * 2;
+    const dstAspect = renderH / renderW;
+
+    let unifiedDrawW, unifiedDrawH;
+    if (maxSrcAspect > dstAspect) {
+      unifiedDrawH = renderH;
+      unifiedDrawW = renderH / maxSrcAspect;
+    } else {
+      unifiedDrawW = renderW;
+      unifiedDrawH = renderW * maxSrcAspect;
+    }
+
     sides.forEach((side, idx) => {
       const { data, label, color } = side;
       const heatmap = data.heatmap;
@@ -71,25 +100,13 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
       ctx.fill();
 
       // 上采样渲染热力图
-      const innerPad = 6;
-      const renderW = cellW - innerPad * 2;
-      const renderH = cellH - innerPad * 2;
-
       const { canvas: offCanvas, scaleX, scaleY } = renderMatrixToCanvas(
         heatmap, vmax, threshold, '#000', renderW, renderH
       );
 
-      // 保持宽高比
-      const srcAspect = srcRows / srcCols;
-      const dstAspect = renderH / renderW;
-      let drawW, drawH;
-      if (srcAspect > dstAspect) {
-        drawH = renderH;
-        drawW = renderH / srcAspect;
-      } else {
-        drawW = renderW;
-        drawH = renderW * srcAspect;
-      }
+      // ── 修复：使用统一的绘制尺寸 ──
+      const drawW = unifiedDrawW;
+      const drawH = unifiedDrawH;
       const offX = cardX + innerPad + (renderW - drawW) / 2;
       const offY = cardY + innerPad + (renderH - drawH) / 2;
 
