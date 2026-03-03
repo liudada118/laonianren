@@ -1,6 +1,6 @@
 # 老年人筛查系统MAC 架构文档
 
-**版本**: 1.1
+**版本**: 1.2
 **最后更新**: 2026-03-03
 **作者**: Manus AI
 
@@ -8,6 +8,11 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-03 | 修复缺陷 | 修复 GripAssessment、StandingAssessment 缺少 viewReport state 处理导致 Dashboard "查看报告"跳转后不显示报告的 Bug。 |
+| 2026-03-03 | 修复缺陷 | 修复所有评估页面（握力/起坐/站立/步态）采集按钮与文字标签分离导致点击无响应的 UX Bug。 |
+| 2026-03-03 | 修复缺陷 | 修复 GripAssessment handleClose 中 gloveService.disconnect() 未 await 的异步问题。 |
+| 2026-03-03 | 修复缺陷 | 修复 HistoryReportView 中 SitStandReport 和 GaitReportContent 缺少 onClose 回调导致报告页面无法返回的问题。 |
+| 2026-03-03 | 新增功能 | 添加完全模拟用户点击操作的端到端测试脚本和串口模拟器。 |
 | 2026-03-03 | 新增功能 | 在 test 分支中添加了基于 electron-ui 的端到端测试架构。 |
 | 2026-03-01 | 初始化 | 创建初始架构文档。 |
 
@@ -47,8 +52,11 @@
   - `contexts/`: React Context，用于全局状态管理。
 - **`test`**: 端到端测试目录。
   - `analysis.md`: 项目结构分析报告。
-  - `e2e_test.js`: Playwright 端到端测试脚本。
-  - `screenshots/`: 测试过程中生成的截图。
+  - `e2e_test.js`: Playwright 端到端测试脚本（脚本模式）。
+  - `e2e_full_click_test.js`: 完全模拟用户点击操作的端到端测试脚本。
+  - `serial_simulator.js`: 虚拟串口模拟器，使用 socat 创建虚拟串口对并发送真实传感器数据。
+  - `serial_protocol_analysis.md`: 串口通信协议分析文档。
+  - `screenshots*/`: 各版本测试过程中生成的截图。
 
 ## 2. 核心模块详解
 
@@ -69,11 +77,14 @@
 
 #### 2.2.1. 路由
 
-使用 `react-router-dom` 进行页面路由管理，主要页面包括：
+使用 `react-router-dom`（BrowserRouter 模式）进行页面路由管理，主要页面包括：
 
 - `/`: 登录页
 - `/dashboard`: 主面板，评估项目入口
-- `/assessment/*`: 各个评估项目（握力、起坐、站立、步态）的实时采集页面
+- `/assessment/grip`: 握力评估（支持 `viewReport` state 参数直接显示报告）
+- `/assessment/sitstand`: 起坐评估（支持 `viewReport` state 参数直接显示报告）
+- `/assessment/standing`: 站立评估（支持 `viewReport` state 参数直接显示报告）
+- `/assessment/gait`: 步态评估（支持 `viewReport` state 参数直接显示报告）
 - `/history`: 历史记录列表
 - `/history/report`: 历史报告查看页
 
@@ -202,7 +213,17 @@
     - **UI 导航**: 遍历所有前端路由，并进行截图，确保页面能正常加载。
 4.  **执行与报告**: 测试在 `Xvfb` 虚拟桌面中运行，并将截图和结果输出到 `test/screenshots` 目录。
 
-## 5. 未来维护与更新
+## 5. 项目进度
+
+| 完成日期 | 完成的功能/工作 | 简要说明 |
+|---|---|---|
+| 2026-03-03 | viewReport 路由 state 支持 | GripAssessment 和 StandingAssessment 现在支持从 Dashboard "查看报告"按钮直接跳转到报告页面，与 SitStandAssessment 和 GaitAssessment 保持一致。 |
+| 2026-03-03 | 采集按钮 UX 修复 | 所有 4 个评估页面的采集按钮（开始/结束采集）已将 onClick 事件从 button 移至外层 div 容器，确保点击文字标签也能触发操作。 |
+| 2026-03-03 | HistoryReportView onClose 修复 | SitStandReport 和 GaitReportContent 组件在历史报告查看页面中现在有正确的 onClose 回调，支持返回历史记录列表。 |
+| 2026-03-03 | 串口模拟测试框架 | 基于 socat 虚拟串口对和真实传感器数据，实现了完整的串口模拟测试框架，支持左右手（921600 baud）、坐垫（1000000 baud）、脚垫（3000000 baud）。 |
+| 2026-03-03 | 完全点击测试脚本 | 编写了 23 个完全模拟用户点击操作的端到端测试用例，覆盖登录、设备连接、评估采集、报告查看、历史记录等完整用户流程。 |
+
+## 6. 未来维护与更新
 
 根据用户要求，本文档将作为项目核心参考，并在每次功能优化或架构调整后进行同步更新。
 

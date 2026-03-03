@@ -502,8 +502,8 @@ export default function SitStandAssessment() {
             {phase !== 'processing' && (
               <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4">
                 {phase === 'idle' && deviceConnected && (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <button onClick={start} className="w-14 h-14 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform shadow-lg" style={{ borderColor: 'var(--border-medium)', background: 'rgba(255,255,255,0.9)' }}>
+                  <div onClick={start} className="flex flex-col items-center gap-1.5 cursor-pointer">
+                    <button className="w-14 h-14 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform shadow-lg" style={{ borderColor: 'var(--border-medium)', background: 'rgba(255,255,255,0.9)' }}>
                       <div className="w-10 h-10 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
                     </button>
                     <span className="text-xs font-medium px-3 py-1 rounded-full" style={{ color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)' }}>开始采集</span>
@@ -527,8 +527,8 @@ export default function SitStandAssessment() {
                   </div>
                 )}
                 {phase === 'recording' && (
-                  <div className="flex items-center gap-4 px-5 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-                    <button onClick={stop} className="w-12 h-12 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: C.blue, background: 'rgba(0,102,204,0.05)' }}>
+                  <div onClick={stop} className="flex items-center gap-4 px-5 py-3 rounded-xl cursor-pointer" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
+                    <button className="w-12 h-12 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: C.blue, background: 'rgba(0,102,204,0.05)' }}>
                       <div className="w-5 h-5 rounded-sm" style={{ background: C.blue }} />
                     </button>
                     <div className="flex flex-col gap-0.5">

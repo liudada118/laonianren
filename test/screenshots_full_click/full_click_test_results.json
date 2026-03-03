@@ -1,0 +1,138 @@
+{
+  "timestamp": "2026-03-03T07:19:31.970Z",
+  "summary": {
+    "total": 20,
+    "pass": 13,
+    "fail": 7,
+    "passRate": "65.0%"
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录系统",
+      "status": "PASS",
+      "ms": 3273
+    },
+    {
+      "id": "T02",
+      "name": "启动串口模拟器并连接设备",
+      "status": "PASS",
+      "ms": 5188
+    },
+    {
+      "id": "T03",
+      "name": "填写患者信息并进入握力评估",
+      "status": "PASS",
+      "ms": 4106
+    },
+    {
+      "id": "T04",
+      "name": "握力评估 - 验证设备连接状态",
+      "status": "PASS",
+      "ms": 2393
+    },
+    {
+      "id": "T05",
+      "name": "握力评估 - 开始采集左手",
+      "status": "PASS",
+      "ms": 3638
+    },
+    {
+      "id": "T06",
+      "name": "握力评估 - 结束采集左手",
+      "status": "FAIL",
+      "ms": 30002,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('span:has-text(\"结束采集左手\")')\u001b[22m\n"
+    },
+    {
+      "id": "T07",
+      "name": "握力评估 - 开始采集右手",
+      "status": "FAIL",
+      "ms": 30002,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('span:has-text(\"开始采集右手\")')\u001b[22m\n"
+    },
+    {
+      "id": "T08",
+      "name": "握力评估 - 结束采集右手",
+      "status": "FAIL",
+      "ms": 30002,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('span:has-text(\"结束采集右手\")')\u001b[22m\n"
+    },
+    {
+      "id": "T09",
+      "name": "握力评估 - 查看报告",
+      "status": "PASS",
+      "ms": 3333
+    },
+    {
+      "id": "T10",
+      "name": "握力评估 - 返回首页",
+      "status": "FAIL",
+      "ms": 30000,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('button:has-text(\"返回首页\")')\u001b[22m\n"
+    },
+    {
+      "id": "T11",
+      "name": "起坐评估 - 进入页面",
+      "status": "FAIL",
+      "ms": 30008,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('text=评估从坐到站的运动能力')\u001b[22m\n"
+    },
+    {
+      "id": "T12",
+      "name": "起坐评估 - 验证设备状态并开始采集",
+      "status": "PASS",
+      "ms": 7894
+    },
+    {
+      "id": "T13",
+      "name": "起坐评估 - 结束采集并查看报告",
+      "status": "PASS",
+      "ms": 342
+    },
+    {
+      "id": "T14",
+      "name": "起坐评估 - 返回首页",
+      "status": "FAIL",
+      "ms": 30001,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('button:has-text(\"返回首页\")')\u001b[22m\n"
+    },
+    {
+      "id": "T15",
+      "name": "验证 Dashboard 评估完成状态",
+      "status": "PASS",
+      "ms": 320
+    },
+    {
+      "id": "T16",
+      "name": "从 Dashboard 查看已完成评估的报告",
+      "status": "PASS",
+      "ms": 48
+    },
+    {
+      "id": "T17",
+      "name": "进入历史记录页面",
+      "status": "FAIL",
+      "ms": 30004,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('button:has-text(\"历史记录\")')\u001b[22m\n\u001b[2m    - locator resolved to <button class=\"zeiss-btn-ghost text-xs hidden lg:inline-flex\">历史记录</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    48 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m       - element is not visible\u001b[22m\n\u001b[2m     - retrying click action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n"
+    },
+    {
+      "id": "T18",
+      "name": "展开历史详情",
+      "status": "PASS",
+      "ms": 2702
+    },
+    {
+      "id": "T19",
+      "name": "查看历史中的握力报告",
+      "status": "PASS",
+      "ms": 36
+    },
+    {
+      "id": "T20",
+      "name": "返回历史记录页面",
+      "status": "PASS",
+      "ms": 2116
+    }
+  ]
+}
