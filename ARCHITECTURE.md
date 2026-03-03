@@ -1,6 +1,6 @@
 # 老年人筛查系统MAC 架构文档
 
-**版本**: 1.3
+**版本**: 1.4
 **最后更新**: 2026-03-03
 **作者**: Manus AI
 
@@ -8,6 +8,8 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-03 | 优化重构 | 移除所有报告组件中的假数据 fallback（generateMockReport、静态 JSON 文件加载），确保报告数据全部来自真实采集；删除 public 下 gait_report_data、grip_report_data、sitstand_report_data 假数据目录（含 60 个文件）。 |
+| 2026-03-03 | 修复缺陷 | 修复 serialServer.js 第 3151 行语法错误（130 帧块与 1024 帧块括号不匹配），由旧设备类型清理时嵌套结构处理不当导致。 |
 | 2026-03-03 | 优化重构 | 清理旧设备类型（BODY/bed/car/endi 等），移除 CH340 直接标记逻辑，统一通过波特率探测识别设备（921600→HL/HR, 1000000→sit, 3000000→foot1-4）。 |
 | 2026-03-03 | 修复缺陷 | 修复握力评估报告中超长小数问题（合并 handReport 分支）。 |
 | 2026-03-03 | 新增功能 | 补充 Python 后端起坐报告输出字段，对齐前端 SitStandReport 所需数据（合并 sitStandReport 分支）。 |
@@ -201,6 +203,8 @@
 6.  **返回结果**: 结构化数据以 JSON 格式通过 `pythonBridge` -> `serialServer.js` -> HTTP 响应返回给前端。
 7.  **前端渲染**: 前端报告页面 (`GripReport.jsx`) 接收到 JSON 数据，将其渲染成用户可见的图表和统计数据。
 
+> **注意**: 所有报告组件（GripReport、SitStandReport、StandingReport、GaitReportContent）在未收到真实采集数据时，会显示"暂无报告数据，请先完成XX评估采集"的提示，不再加载任何假数据或 mock 数据。
+
 ## 4. 测试架构
 
 为了确保应用的稳定性和代码质量，项目引入了基于 `Playwright` 的 `electron-ui` 端到端测试框架。测试流程在 `test` 分支中实现，并计划在未来集成到主开发流程中。
@@ -238,6 +242,8 @@
 | 2026-03-03 | 起坐报告字段补充 | 补充 Python 后端起坐报告输出字段（generate_sit_stand_pdf_v3.py、sit_stand_render_data.py），对齐前端 SitStandReport 组件所需数据。 |
 | 2026-03-03 | 握力报告小数修复 | 修复握力评估报告中超长小数显示问题（get_glove_info_from_csv.py、glove_render_data.py、GripReport.jsx）。 |
 | 2026-03-03 | 串口设备识别重构 | 移除 CH340 芯片直接标记逻辑，统一通过波特率探测识别设备大类（921600→手套, 1000000→起坐垫, 3000000→脚垫），删除所有旧设备类型（BODY/bed/car/endi/carAir 等）的代码。 |
+| 2026-03-03 | 报告假数据清理 | 移除四个报告组件中的假数据 fallback 逻辑和 public 下的静态假数据文件，确保所有报告数据必须来自真实采集。 |
+| 2026-03-03 | serialServer.js 语法修复 | 修复 130 帧块与 1024 帧块之间的括号不匹配问题，恢复应用正常启动。 |
 
 ## 6. 未来维护与更新
 
