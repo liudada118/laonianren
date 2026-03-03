@@ -1,0 +1,160 @@
+{
+  "timestamp": "2026-03-03T07:27:02.250Z",
+  "testMode": "完全模拟用户点击操作",
+  "summary": {
+    "total": 23,
+    "pass": 23,
+    "fail": 0,
+    "passRate": "100.0%"
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录系统",
+      "status": "PASS",
+      "ms": 3302
+    },
+    {
+      "id": "T02",
+      "name": "一键连接设备",
+      "status": "PASS",
+      "ms": 8163
+    },
+    {
+      "id": "T03",
+      "name": "验证连接后 Dashboard 状态",
+      "status": "PASS",
+      "ms": 121
+    },
+    {
+      "id": "T04",
+      "name": "点击开始评估 - 弹出患者信息",
+      "status": "PASS",
+      "ms": 2183
+    },
+    {
+      "id": "T05",
+      "name": "填写患者信息并确认",
+      "status": "PASS",
+      "ms": 3967
+    },
+    {
+      "id": "T06",
+      "name": "握力评估 - 验证设备连接状态",
+      "status": "PASS",
+      "ms": 2359
+    },
+    {
+      "id": "T07",
+      "name": "握力评估 - 点击开始采集左手",
+      "status": "PASS",
+      "ms": 3859
+    },
+    {
+      "id": "T08",
+      "name": "握力评估 - 等待采集并结束左手",
+      "status": "PASS",
+      "ms": 9176
+    },
+    {
+      "id": "T09",
+      "name": "握力评估 - 开始采集右手",
+      "status": "PASS",
+      "ms": 5983
+    },
+    {
+      "id": "T10",
+      "name": "握力评估 - 结束采集右手",
+      "status": "PASS",
+      "ms": 11008
+    },
+    {
+      "id": "T11",
+      "name": "握力评估 - 查看报告或完成弹窗",
+      "status": "PASS",
+      "ms": 6192
+    },
+    {
+      "id": "T12",
+      "name": "握力评估 - 返回首页",
+      "status": "PASS",
+      "ms": 2204
+    },
+    {
+      "id": "T13",
+      "name": "起坐评估 - 进入页面",
+      "status": "PASS",
+      "ms": 8898
+    },
+    {
+      "id": "T14",
+      "name": "起坐评估 - 验证设备状态并开始采集",
+      "status": "PASS",
+      "ms": 17523
+    },
+    {
+      "id": "T15",
+      "name": "起坐评估 - 结束采集",
+      "status": "PASS",
+      "ms": 13204
+    },
+    {
+      "id": "T16",
+      "name": "起坐评估 - 查看报告并返回",
+      "status": "PASS",
+      "ms": 11686
+    },
+    {
+      "id": "T17",
+      "name": "验证 Dashboard 评估完成状态",
+      "status": "PASS",
+      "ms": 5739
+    },
+    {
+      "id": "T18",
+      "name": "从 Dashboard 查看已完成评估的报告",
+      "status": "PASS",
+      "ms": 365
+    },
+    {
+      "id": "T19",
+      "name": "进入历史记录页面",
+      "status": "PASS",
+      "ms": 7306
+    },
+    {
+      "id": "T20",
+      "name": "验证历史记录列表",
+      "status": "PASS",
+      "ms": 69
+    },
+    {
+      "id": "T21",
+      "name": "展开历史详情",
+      "status": "PASS",
+      "ms": 2127
+    },
+    {
+      "id": "T22",
+      "name": "查看历史中的评估报告",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T23",
+      "name": "返回 Dashboard 最终状态",
+      "status": "PASS",
+      "ms": 2094
+    }
+  ],
+  "uxBugs": [
+    {
+      "id": "T17",
+      "desc": "完成评估后 Dashboard 没有显示\"查看报告\"按钮"
+    },
+    {
+      "id": "T22",
+      "desc": "历史详情中没有\"查看报告\"按钮"
+    }
+  ]
+}

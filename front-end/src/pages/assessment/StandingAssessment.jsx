@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
@@ -146,12 +146,15 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 /* ─── 主组件 ─── */
 export default function StandingAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus } = useAssessment();
+  const location = useLocation();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus, assessments } = useAssessment();
+  // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
+  const viewReportMode = location.state?.viewReport && assessments.standing?.completed;
   const isGlobalConnected = deviceConnStatus === 'connected';
 
   // 设备与连接状态
   const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
-  const [phase, setPhase] = useState('idle'); // idle | recording | processing | report
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle'); // idle | recording | processing | report
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
@@ -728,12 +731,12 @@ export default function StandingAssessment() {
           {phase !== 'processing' && (
             <div className="absolute bottom-10 z-20 flex flex-col items-center gap-3">
               {phase === 'idle' && deviceStatus === 'connected' && (
-                <>
-                  <button onClick={startRecording} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
+                <div onClick={startRecording} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
                   </button>
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集</span>
-                </>
+                </div>
               )}
               {phase === 'idle' && deviceStatus !== 'connected' && (
                 <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
@@ -741,15 +744,15 @@ export default function StandingAssessment() {
                 </span>
               )}
               {phase === 'recording' && (
-                <>
-                  <button onClick={stopRecording} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--zeiss-blue)', background: 'rgba(0,102,204,0.05)' }}>
+                <div onClick={stopRecording} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--zeiss-blue)', background: 'rgba(0,102,204,0.05)' }}>
                     <div className="w-7 h-7 rounded-sm" style={{ background: 'var(--zeiss-blue)' }} />
                   </button>
                   <div className="flex items-center gap-3 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
                     <span>结束采集</span>
                     <span className="font-mono px-3 py-1 rounded-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-light)', color: 'var(--zeiss-blue)' }}>{fmtTime(timer)}</span>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}

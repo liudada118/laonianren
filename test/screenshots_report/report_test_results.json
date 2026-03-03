@@ -1,0 +1,234 @@
+{
+  "project": "老年人筛查系统MAC - 报告与历史记录专项测试",
+  "timestamp": "2026-03-03T08:45:46.119Z",
+  "patientName": "测试患者_548199",
+  "summary": {
+    "total": 24,
+    "passed": 22,
+    "failed": 2,
+    "skipped": 0,
+    "passRate": "91.7%"
+  },
+  "categories": {
+    "登录": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "Dashboard": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "数据准备": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "历史记录": {
+      "passed": 2,
+      "failed": 2,
+      "skipped": 0
+    },
+    "报告查看": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "不完整记录": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "无报告数据": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "Dashboard报告": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "导航": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "清理": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "results": [
+    {
+      "category": "登录",
+      "name": "T01 - 登录系统并进入 Dashboard",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 5264
+    },
+    {
+      "category": "Dashboard",
+      "name": "T02 - Dashboard 显示 4 个评估卡片",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 6
+    },
+    {
+      "category": "Dashboard",
+      "name": "T03 - 未完成评估时应显示'开始评估'按钮",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 4
+    },
+    {
+      "category": "数据准备",
+      "name": "T04 - 通过 API 创建包含全部 4 项评估的历史记录",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 15
+    },
+    {
+      "category": "数据准备",
+      "name": "T05 - 验证 API 返回的记录包含完整的 4 项评估",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 4
+    },
+    {
+      "category": "数据准备",
+      "name": "T06 - 创建只有握力和步态的不完整记录",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 5
+    },
+    {
+      "category": "数据准备",
+      "name": "T07 - 创建已完成但无报告数据的记录",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 4
+    },
+    {
+      "category": "历史记录",
+      "name": "T08 - 导航到历史记录页面",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3095
+    },
+    {
+      "category": "历史记录",
+      "name": "T09 - 历史记录中能找到完整评估的患者",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1007
+    },
+    {
+      "category": "历史记录",
+      "name": "T10 - 点击展开完整记录，显示 4 项已完成",
+      "status": "❌ 失败",
+      "detail": "应显示至少 4 个'已完成'标签，实际: 3",
+      "duration": 1677
+    },
+    {
+      "category": "历史记录",
+      "name": "T11 - 完整记录中 4 个'查看报告'按钮均可点击",
+      "status": "❌ 失败",
+      "detail": "应有至少 4 个'查看报告'按钮，实际: 3",
+      "duration": 67
+    },
+    {
+      "category": "报告查看",
+      "name": "T12 - 从历史记录查看 握力评估 报告",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3109
+    },
+    {
+      "category": "报告查看",
+      "name": "T13 - 从历史记录查看 起坐能力评估 报告",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3089
+    },
+    {
+      "category": "报告查看",
+      "name": "T14 - 从历史记录查看 静态站立评估 报告",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3103
+    },
+    {
+      "category": "报告查看",
+      "name": "T15 - 从历史记录查看 行走步态评估 报告",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3104
+    },
+    {
+      "category": "不完整记录",
+      "name": "T16 - 不完整记录中未完成的评估显示'暂无报告'",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3657
+    },
+    {
+      "category": "不完整记录",
+      "name": "T17 - 不完整记录中已完成的评估可查看报告",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3094
+    },
+    {
+      "category": "不完整记录",
+      "name": "T18 - 不完整记录中未完成的评估显示无报告提示",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3075
+    },
+    {
+      "category": "无报告数据",
+      "name": "T19 - 已完成但无 reportData 的握力评估显示无报告提示",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3084
+    },
+    {
+      "category": "无报告数据",
+      "name": "T20 - 已完成但 report=null 的起坐评估显示无报告提示",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3083
+    },
+    {
+      "category": "无报告数据",
+      "name": "T21 - 已完成但无 report 字段的站立评估显示无报告提示",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3082
+    },
+    {
+      "category": "Dashboard报告",
+      "name": "T22 - 模拟评估完成后 Dashboard 显示'查看报告'按钮",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2115
+    },
+    {
+      "category": "导航",
+      "name": "T23 - 报告页面返回按钮可正常工作",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 5152
+    },
+    {
+      "category": "清理",
+      "name": "T24 - 清理测试创建的历史记录",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 11
+    }
+  ]
+}

@@ -1,0 +1,239 @@
+{
+  "timestamp": "2026-03-03T04:07:43.558Z",
+  "summary": {
+    "total": 36,
+    "pass": 33,
+    "fail": 3,
+    "passRate": "91.7%"
+  },
+  "environment": {
+    "devices": [
+      "leftHand (921600)",
+      "rightHand (921600)",
+      "seat (1000000)"
+    ],
+    "virtualSerial": true,
+    "devTools": false
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录页面加载与截图",
+      "status": "PASS",
+      "ms": 138
+    },
+    {
+      "id": "T02",
+      "name": "填写信息并登录",
+      "status": "PASS",
+      "ms": 2504
+    },
+    {
+      "id": "T03",
+      "name": "Dashboard 页面正常显示",
+      "status": "PASS",
+      "ms": 70
+    },
+    {
+      "id": "T04",
+      "name": "后端 API 健康检查",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T05",
+      "name": "获取系统信息 (getSystem)",
+      "status": "PASS",
+      "ms": 3
+    },
+    {
+      "id": "T06",
+      "name": "获取虚拟串口列表 (getPort)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T07",
+      "name": "启动串口模拟器发送传感器数据",
+      "status": "PASS",
+      "ms": 501
+    },
+    {
+      "id": "T08",
+      "name": "一键连接串口 (connPort)",
+      "status": "PASS",
+      "ms": 5070
+    },
+    {
+      "id": "T09",
+      "name": "验证设备在线状态 (通过 Dashboard UI)",
+      "status": "PASS",
+      "ms": 70
+    },
+    {
+      "id": "T10",
+      "name": "导航到握力评估页面",
+      "status": "FAIL",
+      "ms": 30012,
+      "error": "elementHandle.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - element is outside of the viewport\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - element is outside of the viewport\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    58 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m       - element is visible, enabled and stable\u001b[22m\n\u001b[2m       - scrolling into view if needed\u001b[22m\n\u001b[2m       - done scrolling\u001b[22m\n\u001b[2m       - element is outside of the viewport\u001b[22m\n\u001b[2m     - retrying click action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n"
+    },
+    {
+      "id": "T11",
+      "name": "设置握力评估模式 (mode=1)",
+      "status": "PASS",
+      "ms": 1089
+    },
+    {
+      "id": "T12",
+      "name": "开始左手握力采集 (mode=11)",
+      "status": "PASS",
+      "ms": 3077
+    },
+    {
+      "id": "T13",
+      "name": "停止左手握力采集",
+      "status": "PASS",
+      "ms": 503
+    },
+    {
+      "id": "T14",
+      "name": "开始右手握力采集 (mode=12)",
+      "status": "PASS",
+      "ms": 3084
+    },
+    {
+      "id": "T15",
+      "name": "停止右手握力采集",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T16",
+      "name": "握力评估完成后页面状态",
+      "status": "PASS",
+      "ms": 1079
+    },
+    {
+      "id": "T17",
+      "name": "导航到起坐评估页面",
+      "status": "PASS",
+      "ms": 6147
+    },
+    {
+      "id": "T18",
+      "name": "起坐评估模式设置与数据采集",
+      "status": "PASS",
+      "ms": 8655
+    },
+    {
+      "id": "T19",
+      "name": "导航到静态站立评估页面",
+      "status": "PASS",
+      "ms": 3425
+    },
+    {
+      "id": "T20",
+      "name": "站立评估模式设置 (mode=4)",
+      "status": "PASS",
+      "ms": 2154
+    },
+    {
+      "id": "T21",
+      "name": "导航到步态评估页面",
+      "status": "PASS",
+      "ms": 2601
+    },
+    {
+      "id": "T22",
+      "name": "步态评估模式设置 (mode=5)",
+      "status": "PASS",
+      "ms": 1359
+    },
+    {
+      "id": "T23",
+      "name": "保存评估历史记录 (history/save)",
+      "status": "PASS",
+      "ms": 4
+    },
+    {
+      "id": "T24",
+      "name": "导航到历史记录页面",
+      "status": "PASS",
+      "ms": 3106
+    },
+    {
+      "id": "T25",
+      "name": "历史记录列表展示验证",
+      "status": "PASS",
+      "ms": 87
+    },
+    {
+      "id": "T26",
+      "name": "展开历史记录详情",
+      "status": "PASS",
+      "ms": 1095
+    },
+    {
+      "id": "T27",
+      "name": "导航到历史报告查看页面",
+      "status": "PASS",
+      "ms": 3047
+    },
+    {
+      "id": "T28",
+      "name": "返回 Dashboard 查看评估卡片状态",
+      "status": "PASS",
+      "ms": 3081
+    },
+    {
+      "id": "T29",
+      "name": "Dashboard 评估卡片内容检查",
+      "status": "PASS",
+      "ms": 84
+    },
+    {
+      "id": "T30",
+      "name": "读取 serialCache",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T31",
+      "name": "写入 serialCache (MAC->类型映射)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T32",
+      "name": "验证 serialCache 已保存",
+      "status": "PASS",
+      "ms": 1
+    },
+    {
+      "id": "T33",
+      "name": "重置评估模式 (mode=null)",
+      "status": "PASS",
+      "ms": 1
+    },
+    {
+      "id": "T34",
+      "name": "获取采集历史 (getColHistory)",
+      "status": "FAIL",
+      "ms": 10001,
+      "error": "timeout"
+    },
+    {
+      "id": "T35",
+      "name": "获取评估历史 (history/get)",
+      "status": "FAIL",
+      "ms": 3,
+      "error": "history/get 失败"
+    },
+    {
+      "id": "T36",
+      "name": "所有页面导航与截图 (7个页面)",
+      "status": "PASS",
+      "ms": 23998
+    }
+  ]
+}

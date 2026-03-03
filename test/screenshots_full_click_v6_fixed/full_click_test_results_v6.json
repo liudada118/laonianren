@@ -1,0 +1,157 @@
+{
+  "timestamp": "2026-03-03T09:08:13.013Z",
+  "testMode": "完全模拟用户点击操作",
+  "summary": {
+    "total": 23,
+    "pass": 22,
+    "fail": 1,
+    "passRate": "95.7%"
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录系统",
+      "status": "PASS",
+      "ms": 3319
+    },
+    {
+      "id": "T02",
+      "name": "一键连接设备",
+      "status": "PASS",
+      "ms": 8176
+    },
+    {
+      "id": "T03",
+      "name": "验证连接后 Dashboard 状态",
+      "status": "PASS",
+      "ms": 143
+    },
+    {
+      "id": "T04",
+      "name": "点击开始评估 - 弹出患者信息",
+      "status": "PASS",
+      "ms": 2197
+    },
+    {
+      "id": "T05",
+      "name": "填写患者信息并确认",
+      "status": "PASS",
+      "ms": 4159
+    },
+    {
+      "id": "T06",
+      "name": "握力评估 - 验证设备连接状态",
+      "status": "PASS",
+      "ms": 2400
+    },
+    {
+      "id": "T07",
+      "name": "握力评估 - 点击开始采集左手",
+      "status": "PASS",
+      "ms": 4012
+    },
+    {
+      "id": "T08",
+      "name": "握力评估 - 等待采集并结束左手",
+      "status": "PASS",
+      "ms": 9523
+    },
+    {
+      "id": "T09",
+      "name": "握力评估 - 开始采集右手",
+      "status": "PASS",
+      "ms": 5885
+    },
+    {
+      "id": "T10",
+      "name": "握力评估 - 结束采集右手",
+      "status": "PASS",
+      "ms": 10943
+    },
+    {
+      "id": "T11",
+      "name": "握力评估 - 查看报告或完成弹窗",
+      "status": "PASS",
+      "ms": 6809
+    },
+    {
+      "id": "T12",
+      "name": "握力评估 - 返回首页",
+      "status": "PASS",
+      "ms": 2244
+    },
+    {
+      "id": "T13",
+      "name": "起坐评估 - 进入页面",
+      "status": "PASS",
+      "ms": 9960
+    },
+    {
+      "id": "T14",
+      "name": "起坐评估 - 验证设备状态并开始采集",
+      "status": "PASS",
+      "ms": 17583
+    },
+    {
+      "id": "T15",
+      "name": "起坐评估 - 结束采集",
+      "status": "PASS",
+      "ms": 12589
+    },
+    {
+      "id": "T16",
+      "name": "起坐评估 - 查看报告并返回",
+      "status": "PASS",
+      "ms": 14773
+    },
+    {
+      "id": "T17",
+      "name": "验证 Dashboard 评估完成状态",
+      "status": "PASS",
+      "ms": 2119
+    },
+    {
+      "id": "T18",
+      "name": "从 Dashboard 查看已完成评估的报告",
+      "status": "FAIL",
+      "ms": 30004,
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('button:has-text(\"查看报告\")').first()\u001b[22m\n\u001b[2m    - locator resolved to <button class=\"flex-1 py-2.5 rounded-[10px] text-xs font-semibold transition-all\">查看报告</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - performing click action\u001b[22m\n"
+    },
+    {
+      "id": "T19",
+      "name": "进入历史记录页面",
+      "status": "PASS",
+      "ms": 32839
+    },
+    {
+      "id": "T20",
+      "name": "验证历史记录列表",
+      "status": "PASS",
+      "ms": 87
+    },
+    {
+      "id": "T21",
+      "name": "展开历史详情",
+      "status": "PASS",
+      "ms": 2130
+    },
+    {
+      "id": "T22",
+      "name": "查看历史中的评估报告",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T23",
+      "name": "返回 Dashboard 最终状态",
+      "status": "PASS",
+      "ms": 2077
+    }
+  ],
+  "uxBugs": [
+    {
+      "id": "T22",
+      "desc": "历史详情中没有\"查看报告\"按钮"
+    }
+  ]
+}

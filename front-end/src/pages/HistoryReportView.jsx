@@ -97,9 +97,9 @@ export default function HistoryReportView() {
       case 'standing':
         return <StandingReport patientInfo={patientInfo} onClose={handleBack} reportData={reportData} />;
       case 'sitstand':
-        return <SitStandReport patientInfo={patientInfo} reportData={reportData} />;
+        return <SitStandReport patientInfo={patientInfo} reportData={reportData} onClose={handleBack} />;
       case 'gait':
-        return <GaitReportContent patientInfo={patientInfo} reportData={reportData} />;
+        return <GaitReportContent patientInfo={patientInfo} reportData={reportData} onClose={handleBack} />;
       default:
         return (
           <div className="flex-1 flex items-center justify-center">

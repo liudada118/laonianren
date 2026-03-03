@@ -1,0 +1,150 @@
+{
+  "timestamp": "2026-03-03T04:02:11.888Z",
+  "summary": {
+    "total": 23,
+    "pass": 21,
+    "fail": 2
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录系统并进入 Dashboard",
+      "status": "PASS",
+      "ms": 1134
+    },
+    {
+      "id": "T02",
+      "name": "Dashboard 页面正常显示",
+      "status": "PASS",
+      "ms": 81
+    },
+    {
+      "id": "T03",
+      "name": "后端 API 健康检查",
+      "status": "PASS",
+      "ms": 3
+    },
+    {
+      "id": "T04",
+      "name": "获取系统信息 (getSystem)",
+      "status": "PASS",
+      "ms": 3
+    },
+    {
+      "id": "T05",
+      "name": "获取串口列表 (getPort) - 应返回虚拟串口",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T06",
+      "name": "开始向虚拟串口发送模拟传感器数据",
+      "status": "PASS",
+      "ms": 500
+    },
+    {
+      "id": "T07",
+      "name": "一键连接串口 (connPort)",
+      "status": "PASS",
+      "ms": 3005
+    },
+    {
+      "id": "T08",
+      "name": "等待设备数据帧被识别",
+      "status": "PASS",
+      "ms": 3089
+    },
+    {
+      "id": "T09",
+      "name": "设置握力评估模式 (setActiveMode=1)",
+      "status": "PASS",
+      "ms": 10
+    },
+    {
+      "id": "T10",
+      "name": "开始握力数据采集 (startCol)",
+      "status": "PASS",
+      "ms": 3087
+    },
+    {
+      "id": "T11",
+      "name": "停止握力数据采集 (endCol)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T12",
+      "name": "设置起坐评估模式 (setActiveMode=3)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T13",
+      "name": "开始起坐数据采集 (startCol)",
+      "status": "PASS",
+      "ms": 3081
+    },
+    {
+      "id": "T14",
+      "name": "停止起坐数据采集 (endCol)",
+      "status": "PASS",
+      "ms": 1
+    },
+    {
+      "id": "T15",
+      "name": "设置静态站立评估模式 (setActiveMode=4)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T16",
+      "name": "开始站立数据采集 (startCol)",
+      "status": "PASS",
+      "ms": 3081
+    },
+    {
+      "id": "T17",
+      "name": "停止站立数据采集 (endCol)",
+      "status": "PASS",
+      "ms": 2
+    },
+    {
+      "id": "T18",
+      "name": "查询采集历史 (getColHistory)",
+      "status": "FAIL",
+      "ms": 10001,
+      "error": "timeout"
+    },
+    {
+      "id": "T19",
+      "name": "通过 UI 导航到握力评估页面",
+      "status": "PASS",
+      "ms": 110
+    },
+    {
+      "id": "T20",
+      "name": "返回 Dashboard",
+      "status": "PASS",
+      "ms": 121
+    },
+    {
+      "id": "T21",
+      "name": "重置评估模式 (setActiveMode=0)",
+      "status": "FAIL",
+      "ms": 2,
+      "error": "setActiveMode 失败: {\"code\":1,\"message\":\"invalid mode\",\"data\":{}}"
+    },
+    {
+      "id": "T22",
+      "name": "验证 WebSocket 连接和数据推送",
+      "status": "PASS",
+      "ms": 78
+    },
+    {
+      "id": "T23",
+      "name": "截图当前应用状态",
+      "status": "PASS",
+      "ms": 82
+    }
+  ]
+}
