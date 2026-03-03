@@ -137,18 +137,18 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
-      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
+      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: [...fingerNames, '总力'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
       xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
+      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
         ...fingerKeys.map((key, i) => ({
           name: fingerNames[i], type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 1.5 },
-          data: (data.forceTimeSeries[key] || []).filter((_, j) => j % step === 0), itemStyle: { color: colors[i] }
+          data: (data.forceTimeSeries[key] || []).filter((_, j) => j % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: colors[i] }
         })),
         { name: '总力', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2.5, type: 'dashed', color: '#1A2332' },
-          data: (data.forceTimeSeries.total || []).filter((_, j) => j % step === 0) }
+          data: (data.forceTimeSeries.total || []).filter((_, j) => j % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v) }
       ]
     };
   }, [data]);
@@ -158,15 +158,15 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
-      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
+      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: fingerNames, top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
       xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
+      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: fingerKeys.map((key, i) => ({
         name: fingerNames[i], type: 'line', stack: 'total', areaStyle: { opacity: 0.35 },
         smooth: true, symbol: 'none', lineStyle: { width: 1 },
-        data: (data.forceTimeSeries[key] || []).filter((_, j) => j % step === 0), itemStyle: { color: colors[i] }
+        data: (data.forceTimeSeries[key] || []).filter((_, j) => j % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: colors[i] }
       }))
     };
   }, [data]);
@@ -174,14 +174,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   const barOption = useMemo(() => {
     if (!data?.fingers?.length) return {};
     return {
-      tooltip: tooltipStyle,
+      tooltip: { ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       grid: { top: 30, bottom: 35, left: 55, right: 20 },
       xAxis: { type: 'category', data: data.fingers.map(f => f.name), axisLabel: { fontSize: 11, color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
+      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [{
         type: 'bar', barWidth: '45%', itemStyle: { borderRadius: [6, 6, 0, 0] },
-        data: data.fingers.map((f, i) => ({ value: f.force, itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: colors[i] }, { offset: 1, color: colors[i] + '30' }]) } })),
-        label: { show: true, position: 'top', formatter: '{c}N', fontSize: 11, fontWeight: 'bold', color: chartTextColor }
+        data: data.fingers.map((f, i) => ({ value: typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : f.force, itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: colors[i] }, { offset: 1, color: colors[i] + '30' }]) } })),
+        label: { show: true, position: 'top', formatter: (params) => `${parseFloat(Number(params.value).toFixed(2))}N`, fontSize: 11, fontWeight: 'bold', color: chartTextColor }
       }]
     };
   }, [data]);
@@ -191,15 +191,15 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
-      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
+      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}°` },
       legend: { data: ['横滚(Roll)', '俯仰(Pitch)', '偏航(Yaw)'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
       xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '角度(°)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
+      yAxis: { type: 'value', name: '角度(°)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
-        { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
-        { name: '俯仰(Pitch)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.pitch || []).filter((_, i) => i % step === 0), itemStyle: { color: '#0066CC' }, lineStyle: { width: 2 } },
-        { name: '偏航(Yaw)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.yaw || []).filter((_, i) => i % step === 0), itemStyle: { color: '#059669' }, lineStyle: { width: 2 } }
+        { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
+        { name: '俯仰(Pitch)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.pitch || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#0066CC' }, lineStyle: { width: 2 } },
+        { name: '偏航(Yaw)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.yaw || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#059669' }, lineStyle: { width: 2 } }
       ]
     };
   }, [data]);
@@ -209,13 +209,13 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
-      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
+      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}°/s` },
       legend: { data: ['角速度', '检测阈值'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
       xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '角速度(°/s)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
+      yAxis: { type: 'value', name: '角速度(°/s)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
-        { name: '角速度', type: 'line', smooth: true, symbol: 'none', data: (data.angularVelocity || []).filter((_, i) => i % step === 0), itemStyle: { color: '#9333EA' }, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2 } },
+        { name: '角速度', type: 'line', smooth: true, symbol: 'none', data: (data.angularVelocity || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#9333EA' }, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2 } },
         { name: '检测阈值', type: 'line', symbol: 'none', lineStyle: { type: 'dashed', color: '#DC2626', width: 1.5 }, data: sampledTimes.map(() => 30) }
       ]
     };
@@ -224,12 +224,12 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   const pieOption = useMemo(() => {
     if (!data?.fingers?.length) return {};
     return {
-      tooltip: { formatter: '{b}: {c}N ({d}%)', ...tooltipStyle },
+      tooltip: { formatter: (params) => `${params.name}: ${parseFloat(Number(params.value).toFixed(2))}N (${params.percent}%)`, ...tooltipStyle },
       legend: { orient: 'vertical', right: 15, top: 'center', textStyle: { fontSize: 11, color: chartTextColor } },
       series: [{
         type: 'pie', radius: ['35%', '68%'], center: ['40%', '50%'],
         itemStyle: { borderRadius: 6, borderColor: '#FFFFFF', borderWidth: 3 },
-        data: data.fingers.map((f, i) => ({ value: f.force, name: f.name, itemStyle: { color: colors[i] } }))
+        data: data.fingers.map((f, i) => ({ value: typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : f.force, name: f.name, itemStyle: { color: colors[i] } }))
       }]
     };
   }, [data]);

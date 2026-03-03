@@ -256,7 +256,7 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
               count++;
             }
           }
-          if (count > 0) for (let j = 0; j < 256; j++) avg[j] /= count;
+          if (count > 0) for (let j = 0; j < 256; j++) avg[j] = parseFloat((avg[j] / count).toFixed(2));
           return Array.from(avg);
         })()
       : null,
