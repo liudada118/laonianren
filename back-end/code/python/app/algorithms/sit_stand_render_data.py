@@ -95,7 +95,7 @@ def _array_to_pressure_csv(data_array, fps=None):
     """
     from datetime import datetime, timedelta
 
-    lines = ['time,data']
+    lines = [',time,max,area,press,data']
     base_time = datetime(2024, 1, 1)
     dt = 1.0 / fps if fps else 0.08  # 默认12.5Hz
 
@@ -104,8 +104,12 @@ def _array_to_pressure_csv(data_array, fps=None):
             row = row.tolist()
         t = base_time + timedelta(seconds=i * dt)
         time_str = t.strftime('%Y/%m/%d %H:%M:%S:') + f'{t.microsecond:06d}'
-        data_str = '[' + ','.join(str(v) for v in row) + ']'
-        lines.append(f'{time_str},{data_str}')
+        # 计算 max, area(非零点数), press(总压力) 以匹配原始CSV格式
+        row_max = max(row) if row else 0
+        row_area = sum(1 for v in row if v > 0)
+        row_press = sum(row)
+        data_str = '"[' + ','.join(str(v) for v in row) + ']"'
+        lines.append(f'{i:.2f},{time_str},{row_max},{row_area},{row_press},{data_str}')
 
     return '\n'.join(lines)
 
