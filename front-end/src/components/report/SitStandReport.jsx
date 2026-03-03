@@ -530,10 +530,9 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
   useEffect(() => {
     if (propsReportData) { setReportData(propsReportData); setLoading(false); return; }
-    fetch('/sitstand_report_data/sitstand_report.json')
-      .then(r => r.json())
-      .then(data => { setReportData(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    // 无 props 传入的报告数据时，直接显示无数据提示
+    setReportData(null);
+    setLoading(false);
   }, [propsReportData]);
 
   /* ─── 滚动监听自动高亮导航 ─── */
@@ -569,7 +568,11 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
   if (!d) return (
     <div className="flex items-center justify-center h-full">
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>报告数据加载失败</p>
+      <div className="text-center">
+        <p className="text-base font-medium" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
+        <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>请先完成起坐评估采集</p>
+        {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--zeiss-blue)', color: '#fff' }}>返回</button>}
+      </div>
     </div>
   );
 

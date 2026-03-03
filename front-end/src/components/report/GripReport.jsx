@@ -62,11 +62,9 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
       setLoading(false);
       return;
     }
-    setLoading(true);
-    fetch('/grip_report_data/grip_report.json')
-      .then(r => r.json())
-      .then(d => { setRawReport(d); setLoading(false); })
-      .catch(() => { setRawReport(null); setLoading(false); });
+    // 无 props 传入的报告数据时，直接显示无数据提示
+    setRawReport(null);
+    setLoading(false);
   }, [propsReportData]);
 
   // 解析当前手的数据，并确保关键字段有默认值
@@ -249,8 +247,8 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     return (
       <div className="h-full w-full flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
         <div className="text-center">
-          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>报告数据加载失败</p>
-          <p style={{ color: 'var(--text-muted)' }}>请确保已生成握力报告数据</p>
+          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>暂无报告数据</p>
+          <p style={{ color: 'var(--text-muted)' }}>请先完成握力评估采集</p>
           <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-white" style={{ background: 'var(--zeiss-blue)' }}>返回</button>
         </div>
       </div>

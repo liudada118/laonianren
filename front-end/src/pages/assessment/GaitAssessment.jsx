@@ -139,17 +139,16 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
   const [realData, setRealData] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
 
-  // 优先使用 props 传入的报告数据（采集数据生成），否则从 JSON 文件加载
+  // 使用 props 传入的报告数据（采集数据生成）
   useEffect(() => {
     if (propsReportData) {
       setRealData(propsReportData);
       setLoading(false);
       return;
     }
-    fetch('/gait_report_data/report_data.json')
-      .then(res => res.json())
-      .then(data => { setRealData(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    // 无 props 传入的报告数据时，直接显示无数据提示
+    setRealData(null);
+    setLoading(false);
   }, [propsReportData]);
 
   const sections = [
@@ -294,6 +293,17 @@ export function GaitReportContent({ patientInfo, reportData: propsReportData }) 
 
   if (loading) {
     return <div className="flex items-center justify-center h-full"><div className="text-sm" style={{ color: 'var(--text-muted)' }}>正在加载报告数据...</div></div>;
+  }
+
+  if (!realData) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <p className="text-base font-medium" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
+          <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>请先完成步态评估采集</p>
+        </div>
+      </div>
+    );
   }
 
   const walkSpeed = parseFloat(gp.walkingSpeed) || 0;

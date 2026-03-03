@@ -41,7 +41,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
   const [activeSection, setActiveSection] = useState('overview');
   const contentRef = useRef(null);
   const data = useMemo(() => {
-    if (!reportData) return generateMockReport();
+    if (!reportData) return null;
     const r = reportData;
 
     // ---- 检测数据来源：后端 Python render_data 还是前端 generateFootReport ----
@@ -573,6 +573,22 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     { name: '压力中心前后方向标准差', desc: '前后方向位置离散度。数值越大说明前后摆动越不规律。' },
   ];
 
+  // 无数据时显示提示
+  if (!data) {
+    return (
+      <div className="h-full w-full flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
+        <div className="text-center">
+          <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--text-muted)' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p className="text-base font-medium" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
+          <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>请先完成静态站立评估采集</p>
+          {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--zeiss-blue)', color: '#fff' }}>返回</button>}
+        </div>
+      </div>
+    );
+  }
+
   /* ─── 综合评估 ─── */
   const diff = Math.abs(data.bilateral.leftPressureRatio - data.bilateral.rightPressureRatio);
   const balanceStatus = diff < 5 ? '优秀' : diff < 10 ? '良好' : diff < 20 ? '一般' : '较差';
@@ -935,63 +951,4 @@ function AssessmentSummary({ data, diff }) {
   );
 }
 
-/* ═══════════ 模拟报告数据 ═══════════ */
-function generateMockReport() {
-  // 模拟COP轨迹
-  const leftCop = [], rightCop = [];
-  for (let i = 0; i < 300; i++) {
-    leftCop.push([29 + Math.sin(i * 0.08) * 2 + (Math.random() - 0.5) * 1.5, 49 + Math.cos(i * 0.12) * 1.5 + (Math.random() - 0.5) * 1]);
-    rightCop.push([30 + Math.sin(i * 0.06) * 1.8 + (Math.random() - 0.5) * 1.2, 20 + Math.cos(i * 0.1) * 1.2 + (Math.random() - 0.5) * 0.8]);
-  }
 
-  // 模拟速度序列
-  const velocitySeries = [];
-  const timePoints = [];
-  for (let i = 0; i < 300; i++) {
-    timePoints.push(i * 0.024);
-    velocitySeries.push(Math.abs(Math.sin(i * 0.05) * 20 + Math.random() * 15));
-  }
-
-  return {
-    left: {
-      archIndex: 0.235, length: 24.60, width: 20.40,
-      totalArea: 142.59, forefootArea: 87.71, midfootArea: 26.95, hindfootArea: 27.93,
-      forefootPressure: 64.8, midfootPressure: 14.8, hindfootPressure: 20.5,
-      regionPressure: { forefoot: 64.8, midfoot: 14.8, hindfoot: 20.5 },
-    },
-    right: {
-      archIndex: 0.265, length: 25.30, width: 14.80,
-      totalArea: 147.00, forefootArea: 72.03, midfootArea: 32.34, hindfootArea: 42.63,
-      forefootPressure: 45.5, midfootPressure: 16.3, hindfootPressure: 38.2,
-      regionPressure: { forefoot: 45.5, midfoot: 16.3, hindfoot: 38.2 },
-    },
-    bilateral: {
-      leftPressureRatio: 48.6, rightPressureRatio: 51.4,
-    },
-    copData: { leftCop, rightCop },
-    ellipseData: {
-      left: { center: [29, 49], width: 4.5, height: 2.8, angle: 35, area_cm2: 1.0187 },
-      right: { center: [30, 20], width: 2.1, height: 1.5, angle: -20, area_cm2: 0.0103 },
-    },
-    copTimeSeries: {
-      velocitySeries, timePoints,
-      pathLength: 628.31, contactArea: 54.23,
-      lsRatio: 36.33, eccentricity: 1.00,
-      deltaY: 3.04, deltaX: 43.20,
-      majorAxis: 2.18, minorAxis: 0.06,
-      maxDisplacement: 2.46, minDisplacement: 0.01,
-      avgVelocity: 9.34, rmsDisplacement: 1.09,
-      stdY: 0.68, stdX: 10.87,
-    },
-    rawData: {
-      leftSectionCoords: null,
-      rightSectionCoords: null,
-      leftCopTrajectory: [],
-      rightCopTrajectory: [],
-      peakFrameFlat: [],
-    },
-    additionalData: {
-      copResults: { distLeftToBoth: 9.95, distRightToBoth: 10.49, leftForward: 2.37 }
-    }
-  };
-}
