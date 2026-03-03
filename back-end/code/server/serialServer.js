@@ -9,11 +9,11 @@ const WebSocket = require("ws");
 const HttpResult = require('./HttpResult')
 const { SerialPort, DelimiterParser } = require('serialport')
 const { getPort } = require('../util/serialport')
-const { blue, splitArr } = require('../util/config');
+const { splitArr, BAUD_DEVICE_MAP } = require('../util/config');
 const constantObj = require('../util/config');
 const { bytes4ToInt10 } = require('../util/parseData');
 const { initDb, dbLoadCsv, deleteDbData, dbGetData, getCsvData, changeDbName, changeDbDataName } = require('../util/db');
-const { hand, jqbed, endiSit, endiBack } = require('../util/line');
+const { hand } = require('../util/line');
 // const { callPy } = require('../pyWorker');  // [已迁移到JS算法] Python子进程不再需要
 const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
@@ -1404,11 +1404,8 @@ app.post('/selectSystem', (req, res) => {
   currentDb = db
   ensureMatrixNameColumn(currentDb)
   ensureHistoryTable(currentDb)
-  if (blue.includes(file)) {
-    baudRate = 921600
-  } else {
-    baudRate = 1000000
-  }
+  // 波特率由 detectBaudRate 自动探测，默认保持 1000000
+  baudRate = 1000000
 })
 
 // 鏌ヨ绯荤粺鍒楄〃鍜屽綋鍓嶇郴缁?
@@ -1422,7 +1419,8 @@ app.get('/getSystem', async (req, res) => {
   //   value: "bed",
   //   typeArr: ["bed", "hand", 'foot', 'bigHand']
   // }
-  baudRate = constantObj.baudRateObj[result.value] ? constantObj.baudRateObj[result.value] : 1000000
+  // 波特率由 detectBaudRate 自动探测
+  baudRate = 1000000
 
   const { db } = initDb(file, dbPath)
   currentDb = db
@@ -2059,7 +2057,8 @@ app.post('/changeDbplaySpeed', async (req, res) => {
 app.post('/changeSystemType', async (req, res) => {
   const { system } = req.body
   file = system
-  baudRate = constantObj.baudRateObj[system] ? constantObj.baudRateObj[system] : 1000000
+  // 波特率由 detectBaudRate 自动探测
+  baudRate = 1000000
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
@@ -2711,15 +2710,7 @@ function parseData(parserArr, objs, type) {
           blueArr = [...lastData, ...nextData]
         }
       }
-      else if (type == 'blue') {
-        const { order } = constantObj
-        const lastData = data[order[1]]
-        const nextData = data[order[2]]
-
-        if (lastData && lastData.length && nextData && nextData.length) {
-          blueArr = [...lastData, ...nextData]
-        }
-      } else if (type == 'highHZ') {
+      else if (type == 'highHZ') {
         blueArr = data.arr
       }
       // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
@@ -2791,20 +2782,10 @@ async function connectPort() {
 
 
       const { path } = portInfo
-      const manufacturer = (portInfo.manufacturer || '').toLowerCase()
-      const friendlyName = (portInfo.friendlyName || '').toLowerCase()
-      const isCh340 = friendlyName.includes('ch340')
       let portBaudRate = baudRate
-      if (manufacturer.includes('wch.cn')) {
-        portBaudRate = 921600
-      }
     // parserArr[path]
       const parserItem = parserArr[path] = parserArr[path] ? parserArr[path] : {}
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
-      if (isCh340) {
-        dataItem.type = 'sit'
-        parserItem.typeLocked = true
-      }
       parserItem.baudRate = portBaudRate
       // parserItem 
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
@@ -2830,6 +2811,19 @@ async function connectPort() {
         }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
         parserItem.baudRate = portBaudRate
+        // 根据探测到的波特率自动设置设备大类
+        const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
+        if (deviceCategory) {
+          if (deviceCategory === 'sit') {
+            dataItem.type = 'sit'
+            dataItem.premission = true
+          } else if (deviceCategory === 'foot') {
+            // 脚垫类型需要通过 AT 指令获取 MAC 地址后再细分 foot1-4
+            dataItem.type = 'foot'
+          }
+          // hand 类型由帧内类型位（130字节帧）动态设置为 HL/HR
+          console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
+        }
         const port = newSerialPortLink({ path, parser: parserItem.parser, baudRate: portBaudRate })
 
       // linkIngPort.push(port)
@@ -2940,33 +2934,35 @@ async function connectPort() {
               version
             }
 
-            if (parserItem.typeLocked) {
+            // 根据波特率确定的设备大类进行处理
+            const deviceCat = BAUD_DEVICE_MAP[parserItem.baudRate]
+            if (deviceCat === 'hand' || deviceCat === 'sit') {
+              // 手套和起坐垫：获取到 MAC 即确认授权
               dataItem.premission = true
-            } else {
-              const mappedType = parserItem.baudRate === 921600 ? null : getTypeFromSerialCache(uniqueId)
+            } else if (deviceCat === 'foot') {
+              // 脚垫：通过 MAC 地址查映射表确定 foot1-4
+              const mappedType = getTypeFromSerialCache(uniqueId)
               if (mappedType) {
                 dataItem.type = String(mappedType).trim()
                 dataItem.premission = true
+                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type}`)
               } else {
+                // MAC 未在本地缓存中，尝试从服务器查询
                 try {
                   const response = await axios.get(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
-                  const time = await axios.get(`http://sensor.bodyta.com:8080/rcv/login/getSystemTime`)
-
-                  // ??????
-                  if (!response.data.data) {
-                    dataItem.premission = false
-                  } else {
-                    const expireTime = response.data.data.expireTime
-                    const nowTime = time.data.time
-                    if (nowTime < expireTime) {
-                      dataItem.premission = true
-                    }
+                  if (response.data.data) {
                     dataItem.type = JSON.parse(response.data.data.typeInfo)[0]
+                    dataItem.premission = true
+                  } else {
+                    dataItem.premission = false
                   }
                 } catch (err) {
-                  console.log(err, 'err')
+                  console.log('[foot] 服务器查询失败:', err.message)
+                  dataItem.premission = false
                 }
               }
+            } else {
+              dataItem.premission = true
             }
             if (Object.keys(macInfo).length == ports.length) {
               // console.log(macInfo)
@@ -2998,48 +2994,13 @@ async function connectPort() {
             dataItem.type = constantObj.type[type]
             dataItem.stamp = new Date().getTime()
           } else if (pointArr.length == 1024) {
-          // ret
-          // if (!dataItem.premission) return
-          // dataItem.type = 'hand'
-          // dataItem[path]
+            // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
             if (!dataItem.type) {
               dataItem.type = 'sit'
             }
-            let matrix
-          if (dataItem.type == 'hand' || dataItem.type == 'sit') {
-            matrix = hand(pointArr)
-          } else if (dataItem.type == 'bed') {
-            matrix = jqbed(pointArr)
-          } else if (dataItem.type == 'car-back') {
-            matrix = jqbed(pointArr)
-          } else {
-            matrix = pointArr
-          }
-
-          // 璁惧鍨嬪彿璺熶紶鎰熷櫒绫诲瀷鍖归厤涓?
+            const matrix = hand(pointArr)
 
           dataItem.arr = matrix
-
-
-
-          // 濡傛灉鏄剼鍨? 娣诲姞绠楁硶鍖匔OP鏁版嵁
-          if (file == 'foot') {
-            // console.log(matrix)
-            if (!dataItem.arrList) {
-              dataItem.arrList = []
-            } else {
-              if (dataItem.arrList.length < 60) {
-                dataItem.arrList.push(matrix)
-              } else {
-                dataItem.arrList.shift()
-                dataItem.arrList.push(matrix)
-              }
-
-              // dataItem.cop = await callPy('cal_cop_fromData', { data: dataItem.arrList })
-            }
-
-            // console.log(dataItem.cop)
-          }
 
 
           const stamp = new Date().getTime()
@@ -3081,57 +3042,7 @@ async function connectPort() {
           // }
 
 
-        } else if (pointArr.length == 1025) {
-          const type = pointArr.shift()
-          dataItem.premission = true
-
-          if (!Object.keys(constantObj.typeConfig).includes(String(type))) {
-            dataItem.premission = false
-            return
-          }
-          let matrix
-            dataItem.type = constantObj.typeConfig[type]
-
-          if (constantObj.typeConfig[type] == 'car-back') {
-            matrix = jqbed(pointArr)
-          } else if (constantObj.typeConfig[type] == 'car-sit') {
-            matrix = jqbed(pointArr)
-          } else if (constantObj.typeConfig[type] == 'bed') {
-            matrix = jqbed(pointArr)
-          }
-          dataItem.arr = matrix
-
-          const stamp = new Date().getTime()
-          dataItem.stamp = stamp
-
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            if (dataItem.HZ < 50) {
-              return
-            }
-            if (!MaxHZ && oldTimeObj[dataItem.type]) {
-              MaxHZ = Math.floor(1000 / dataItem.HZ)
-              HZ = MaxHZ
-              console.log('playtimer', HZ)
-              if (!activeSendTypes || !activeSendTypes.length) {
-                if (playtimer) {
-                  clearInterval(playtimer)
-                }
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 80)
-              }
-            }
-          }
-
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
-
-
-        }
+        // 1025字节帧已删除（旧设备类型 car-back/car-sit/bed 不再使用）
 
         else if (pointArr.length == 146) {
           const length = pointArr.length
@@ -3176,35 +3087,18 @@ async function connectPort() {
           dataItem.stamp = stamp
           dataItem.rotate = bytes4ToInt10(arr)
         } else if (pointArr.length == 4096) {
-          // if (!dataItem.premission) return
+          // 4096字节帧 = 脚垫 (foot/foot1-4)，64x64 矩阵
           dataItem.premission = true
-            if (!dataItem.type) {
-              dataItem.type = 'foot'
-            }
-          if (!dataItem.premission) {
-            dataItem.status = 'expired'
-          } else {
-            if (parserItem.baudRate === 3000000) {
-              zeroBelowThreshold(pointArr, 8)
-              removeSmallIslands64x64(pointArr, 12)
-            }
-            if (dataItem.type == 'endi-sit') {
-              dataItem.arr = endiSit(pointArr)
-            } else if (dataItem.type == 'endi-back') {
-              dataItem.arr = endiBack(pointArr)
-            } else if (dataItem.type == 'foot') {
-              dataItem.arr = pointArr
-              if (lastFootPointArr.length) {
-                dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
-              }
-
-            } else if (dataItem.type === 'foot1' || dataItem.type === 'foot2' || dataItem.type === 'foot3' || dataItem.type === 'foot4') {
-              dataItem.arr = pointArr
-            } else {
-              dataItem.arr = pointArr
-            }
-            lastFootPointArr = pointArr
+          if (!dataItem.type) {
+            dataItem.type = 'foot'
           }
+          zeroBelowThreshold(pointArr, 8)
+          removeSmallIslands64x64(pointArr, 12)
+          dataItem.arr = pointArr
+          if (dataItem.type === 'foot' && lastFootPointArr.length) {
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
+          }
+          lastFootPointArr = pointArr
           // console.log(444)
           const stamp = new Date().getTime()
 
@@ -3252,176 +3146,7 @@ async function connectPort() {
           //   // console.log(dataItem.arrList, pointArr.length, dataItem.cop)
           // }
 
-        } else if (pointArr.length == 4097) {
-          // if (!dataItem.premission) return
-          // dataItem.type = 'sit'
-
-          const type = pointArr.shift()
-          dataItem.premission = true
-
-          if (!Object.keys(constantObj.typeConfig).includes(String(type))) {
-            dataItem.premission = false
-            return
-          }
-
-          dataItem.type = constantObj.typeConfig[type]
-
-          if (parserItem.baudRate === 3000000) {
-            zeroBelowThreshold(pointArr, 5)
-            removeSmallIslands64x64(pointArr, 9)
-          }
-
-          if (dataItem.type == 'endi-sit') {
-            dataItem.arr = endiSit(pointArr)
-          } else if (dataItem.type == 'endi-back') {
-            dataItem.arr = endiBack(pointArr)
-          } else {
-            dataItem.arr = pointArr
-          }
-
-          const stamp = new Date().getTime()
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            if (!MaxHZ) {
-              MaxHZ = Math.floor(1000 / dataItem.HZ)
-              HZ = MaxHZ
-              if (!activeSendTypes || !activeSendTypes.length) {
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 1000 / HZ)
-              }
-            }
-          }
-          dataItem.stamp = stamp
-          // if (!oldTimeObj[dataItem.type]) {
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
-          // } else {
-
-          // }
-
-          if (!dataItem.arrList) {
-            dataItem.arrList = []
-          } else {
-            if (dataItem.arrList.length < 3) {
-              dataItem.arrList.push(pointArr)
-            } else {
-              dataItem.arrList.shift()
-              dataItem.arrList.push(pointArr)
-            }
-
-            // dataItem.cop = await callPy('cal_cop_fromData', { data_array: dataItem.arrList })
-            // console.log(dataItem.arrList, pointArr.length, dataItem.cop)
-          }
-
-        } else if (pointArr.length == 144) {
-
-          const stamp = new Date().getTime()
-          dataItem.stamp = stamp
-          dataItem.type = 'carAir'
-          // if (!dataItem.premission) {
-          //   dataItem.status = 'expired'
-          // } else {
-          dataItem.arr = pointArr
-          // }
-
-
-
-
-          // console.log(444)
-
-          if (sendDataLength < 1) {
-            sendDataLength++
-          }
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = parseInt(1000 / (stamp - oldTimeObj[dataItem.type]))
-            if (!MaxHZ && sendDataLength == 1) {
-              MaxHZ = dataItem.HZ
-              HZ = MaxHZ
-              if (!activeSendTypes || !activeSendTypes.length) {
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 87)
-              }
-              sendDataLength = 0
-            }
-          }
-
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
-          algorData = await callAlgorithm('server', { sensor_data: pointArr })
-          if (algorData.control_command) {
-            control_command = algorData.control_command
-          }
-          // console.log(algorData?.frame_count)
-
-        } else if (pointArr.length == 51) {
-          // 鏀跺埌ecu鍙戦€佹暟鎹?
-          console.log('pointArr', pointArr)
-          console.log('buffer', buffer)
-          if (pointArr[50] == 1) {
-
-            // 鎵嬪姩妯″紡
-            if (pointArr[49] == 1) {
-
-              controlMode = HANDLE
-
-              let max = 24, controlArr = []
-              for (let i = 0; i < max; i++) {
-                controlArr.push(pointArr[2 * i + 2])
-              }
-
-
-              server.clients.forEach(function each(client) {
-                if (port?.isOpen) {
-
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ handle: controlArr }));
-                  }
-                }
-              });
-
-            }
-            // 鑷姩妯″紡
-            else {
-
-
-
-              controlMode = ALGOR
-
-              if (oldControlMode == HANDLE && controlMode == ALGOR) {
-                await callAlgorithm('resetMessage')
-              }
-
-              let max = 24, controlArr = []
-              for (let i = 0; i < max; i++) {
-                controlArr.push(pointArr[2 * i + 2])
-              }
-
-
-              server.clients.forEach(function each(client) {
-                if (port?.isOpen) {
-
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ algorFeed: controlArr }));
-                  }
-                }
-              });
-            }
-
-            oldControlMode = controlMode
-          }
-        }
-
-
-        else if (![18, 1024, 130].includes(pointArr.length)) {
-
+        // 4097/144/51字节帧已删除（旧设备类型 endi/carAir/ECU 不再使用）
         }
       })
     }

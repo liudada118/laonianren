@@ -4,7 +4,7 @@ const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const fs = require('fs');
 const { timeStampTo_Date } = require("./time");
 const constantObj = require("./config");
-const { sitYToX, backYToX } = require("./line");
+// const { sitYToX, backYToX } = require("./line"); // 旧设备类型已移除
 
 /**
  * 输入当前系统名  返回可执行数据库
@@ -108,18 +108,6 @@ function dbload(db, param, file, isPackaged, byAssessmentId = false) {
             newData[`${key}min`] = min
             newData[`${key}aver`] = aver
             newData[`${key}realData`] = JSON.stringify(data)
-
-            if (key == 'car-back') {
-              newData[`${key}max`] = backYToX(max)
-              newData[`${key}min`] = backYToX(min)
-              newData[`${key}aver`] = backYToX(aver)
-            }
-
-            if(key == 'car-sit'){
-              newData[`${key}max`] = sitYToX(max)
-              newData[`${key}min`] = sitYToX(min)
-              newData[`${key}aver`] = sitYToX(aver)
-            }
           }
 
 
