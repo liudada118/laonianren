@@ -3,7 +3,7 @@
 Python 算法统一桥接脚本
 =========================
 被 Node.js 子进程调用，通过 stdin 接收 JSON 输入，stdout 输出 JSON 结果。
-直接调用 frontendReport/ 下已有的 Python 算法模块。
+直接调用 algorithms/ 目录下的算法模块。
 
 输入 JSON 格式:
 {
@@ -27,19 +27,20 @@ import traceback
 # ============================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# frontendReport 目录: back-end/code/python/app/frontendReport/
-FRONTEND_REPORT_DIR = os.path.normpath(
-    os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app', 'frontendReport')
+# algorithms 目录: back-end/code/python/app/algorithms/
+ALGORITHMS_DIR = os.path.normpath(
+    os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app', 'algorithms')
 )
 # python/app 目录: 包含 heatmap_renderer.py 等共享模块
 PYTHON_APP_DIR = os.path.normpath(
     os.path.join(SCRIPT_DIR, '..', '..', 'python', 'app')
 )
+# 将 algorithms 目录加入 sys.path（确保算法模块可被 import）
+if ALGORITHMS_DIR not in sys.path:
+    sys.path.insert(0, ALGORITHMS_DIR)
 # 将共享模块目录加入 sys.path（确保 heatmap_renderer 等可被 import）
 if PYTHON_APP_DIR not in sys.path:
     sys.path.insert(0, PYTHON_APP_DIR)
-if FRONTEND_REPORT_DIR not in sys.path:
-    sys.path.insert(0, FRONTEND_REPORT_DIR)
 
 # 尝试设置 matplotlib 后端（不在顶层 import，避免启动失败）
 try:
@@ -65,14 +66,11 @@ def register(name):
 
 
 # ============================================================
-# 握力报告
+# 握力报告 - 使用 algorithms/ 目录下的算法
 # ============================================================
 
 @register('generate_grip_render_report')
 def _grip_report(params):
-    grip_dir = os.path.join(FRONTEND_REPORT_DIR, '握力')
-    if grip_dir not in sys.path:
-        sys.path.insert(0, grip_dir)
     from glove_render_data import generate_grip_report
     return generate_grip_report(
         sensor_data=params.get('sensor_data', []),
@@ -83,14 +81,11 @@ def _grip_report(params):
 
 
 # ============================================================
-# 步道报告（新版）
+# 步道报告 - 使用 algorithms/ 目录下的算法
 # ============================================================
 
 @register('generate_gait_render_report')
 def _gait_report(params):
-    gait_dir = os.path.join(FRONTEND_REPORT_DIR, '步态')
-    if gait_dir not in sys.path:
-        sys.path.insert(0, gait_dir)
     from gait_render_data import generate_gait_report
     return generate_gait_report(
         board_data=params.get('board_data', [[], [], [], []]),
@@ -99,14 +94,11 @@ def _gait_report(params):
 
 
 # ============================================================
-# 起坐报告
+# 起坐报告 - 使用 algorithms/ 目录下的算法
 # ============================================================
 
 @register('generate_sit_stand_render_report')
 def _sitstand_report(params):
-    sitstand_dir = os.path.join(FRONTEND_REPORT_DIR, '起坐')
-    if sitstand_dir not in sys.path:
-        sys.path.insert(0, sitstand_dir)
     from sit_stand_render_data import generate_sit_stand_report
     return generate_sit_stand_report(
         stand_data=params.get('stand_data', []),
@@ -116,14 +108,11 @@ def _sitstand_report(params):
 
 
 # ============================================================
-# 站立报告
+# 站立报告 - 使用 algorithms/ 目录下的算法
 # ============================================================
 
 @register('generate_standing_render_report')
 def _standing_report(params):
-    standing_dir = os.path.join(FRONTEND_REPORT_DIR, '站立')
-    if standing_dir not in sys.path:
-        sys.path.insert(0, standing_dir)
     from one_step_render_data import generate_standing_report
     return generate_standing_report(
         data_array=params.get('data_array', []),
@@ -196,8 +185,8 @@ def main():
     try:
         # 打印诊断信息到 stderr（不影响 stdout 的 JSON 输出）
         print(f"[bridge.py] Python {sys.version}", file=sys.stderr)
-        print(f"[bridge.py] FRONTEND_REPORT_DIR: {FRONTEND_REPORT_DIR}", file=sys.stderr)
-        print(f"[bridge.py] FRONTEND_REPORT_DIR exists: {os.path.isdir(FRONTEND_REPORT_DIR)}", file=sys.stderr)
+        print(f"[bridge.py] ALGORITHMS_DIR: {ALGORITHMS_DIR}", file=sys.stderr)
+        print(f"[bridge.py] ALGORITHMS_DIR exists: {os.path.isdir(ALGORITHMS_DIR)}", file=sys.stderr)
         print(f"[bridge.py] PYTHON_APP_DIR: {PYTHON_APP_DIR}", file=sys.stderr)
         print(f"[bridge.py] PYTHON_APP_DIR exists: {os.path.isdir(PYTHON_APP_DIR)}", file=sys.stderr)
 
