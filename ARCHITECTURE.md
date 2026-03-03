@@ -1,6 +1,6 @@
 # 老年人筛查系统MAC 架构文档
 
-**版本**: 1.2
+**版本**: 1.3
 **最后更新**: 2026-03-03
 **作者**: Manus AI
 
@@ -8,6 +8,11 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-03 | 优化重构 | 清理旧设备类型（BODY/bed/car/endi 等），移除 CH340 直接标记逻辑，统一通过波特率探测识别设备（921600→HL/HR, 1000000→sit, 3000000→foot1-4）。 |
+| 2026-03-03 | 修复缺陷 | 修复握力评估报告中超长小数问题（合并 handReport 分支）。 |
+| 2026-03-03 | 新增功能 | 补充 Python 后端起坐报告输出字段，对齐前端 SitStandReport 所需数据（合并 sitStandReport 分支）。 |
+| 2026-03-03 | 修复缺陷 | 将外部 HDR 环境贴图（studio_small_03_1k.hdr）下载到本地，消除 3D 场景对外部网络的依赖。 |
+| 2026-03-03 | 优化重构 | 将评估报告算法从 frontendReport 目录替换为 algorithms 目录，统一算法调用路径。 |
 | 2026-03-03 | 修复缺陷 | 修复 GripAssessment、StandingAssessment 缺少 viewReport state 处理导致 Dashboard "查看报告"跳转后不显示报告的 Bug。 |
 | 2026-03-03 | 修复缺陷 | 修复所有评估页面（握力/起坐/站立/步态）采集按钮与文字标签分离导致点击无响应的 UX Bug。 |
 | 2026-03-03 | 修复缺陷 | 修复 GripAssessment handleClose 中 gloveService.disconnect() 未 await 的异步问题。 |
@@ -135,8 +140,14 @@
 #### 2.3.3. 硬件交互 (`serialport`)
 
 - 使用 `serialport` 库扫描和连接所有可用的串口设备。
+- **设备识别**：统一通过波特率探测（`detectBaudRate`）识别设备类型，不再依赖 CH340 芯片标记。
+- **波特率 → 设备映射**（`BAUD_DEVICE_MAP`）：
+  - `921600` → 手套（HL/HR），通过 130/146 字节帧内类型位区分左右手
+  - `1000000` → 起坐垫（sit），1024 字节帧
+  - `3000000` → 脚垫（foot1-4），4096 字节帧，通过 AT 指令获取 MAC 地址查映射表细分
 - 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
 - 对原始数据进行解析、分包、校验，转换为数字矩阵。
+- **支持的帧类型**：18 字节（陀螺仪）、130 字节（手套分包矩阵）、146 字节（手套分包+四元数）、1024 字节（起坐垫 32×32）、4096 字节（脚垫 64×64）。
 
 #### 2.3.4. 数据库交互 (`sqlite3`)
 
@@ -163,7 +174,7 @@
   1. `serialServer.js` 调用 `pythonBridge.js` 中的 `callPython(functionName, params)`。
   2. `pythonBridge.js` `fork` 一个 `bridge.py` 子进程。
   3. 通过 `stdin` 将函数名和参数以 JSON 格式发送给 `bridge.py`。
-  4. `bridge.py` 解析输入，根据函数名在注册表中查找并执行对应的 Python 函数（这些函数通常位于 `back-end/code/python/app/frontendReport/` 目录下）。
+  4. `bridge.py` 解析输入，根据函数名在注册表中查找并执行对应的 Python 函数（这些函数位于 `back-end/code/python/app/algorithms/` 目录下）。
   5. Python 函数执行完毕，将结果以 JSON 格式通过 `stdout` 返回。
   6. `pythonBridge.js` 捕获输出，解析 JSON 并返回结果。
 
@@ -222,6 +233,11 @@
 | 2026-03-03 | HistoryReportView onClose 修复 | SitStandReport 和 GaitReportContent 组件在历史报告查看页面中现在有正确的 onClose 回调，支持返回历史记录列表。 |
 | 2026-03-03 | 串口模拟测试框架 | 基于 socat 虚拟串口对和真实传感器数据，实现了完整的串口模拟测试框架，支持左右手（921600 baud）、坐垫（1000000 baud）、脚垫（3000000 baud）。 |
 | 2026-03-03 | 完全点击测试脚本 | 编写了 23 个完全模拟用户点击操作的端到端测试用例，覆盖登录、设备连接、评估采集、报告查看、历史记录等完整用户流程。 |
+| 2026-03-03 | 算法目录统一 | 将四个评估模块（握力/起坐/站立/步态）的报告生成算法从 frontendReport 迁移到 algorithms 目录，统一 server.py 和 bridge.py 的调用路径。 |
+| 2026-03-03 | 外部资源本地化 | 将 3D 场景依赖的 HDR 环境贴图从外部 CDN 下载到 public/assets/hdri/ 本地目录，消除网络依赖。 |
+| 2026-03-03 | 起坐报告字段补充 | 补充 Python 后端起坐报告输出字段（generate_sit_stand_pdf_v3.py、sit_stand_render_data.py），对齐前端 SitStandReport 组件所需数据。 |
+| 2026-03-03 | 握力报告小数修复 | 修复握力评估报告中超长小数显示问题（get_glove_info_from_csv.py、glove_render_data.py、GripReport.jsx）。 |
+| 2026-03-03 | 串口设备识别重构 | 移除 CH340 芯片直接标记逻辑，统一通过波特率探测识别设备大类（921600→手套, 1000000→起坐垫, 3000000→脚垫），删除所有旧设备类型（BODY/bed/car/endi/carAir 等）的代码。 |
 
 ## 6. 未来维护与更新
 
