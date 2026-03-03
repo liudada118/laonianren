@@ -1,0 +1,365 @@
+{
+  "project": "老年人筛查系统MAC",
+  "timestamp": "2026-03-03T02:56:27.784Z",
+  "summary": {
+    "total": 40,
+    "passed": 38,
+    "failed": 2,
+    "skipped": 0,
+    "passRate": "95.0%"
+  },
+  "categories": {
+    "生命周期": {
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0
+    },
+    "后端 API": {
+      "passed": 10,
+      "failed": 1,
+      "skipped": 0
+    },
+    "WebSocket": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "数据库": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "UI 界面": {
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "性能": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "results": [
+    {
+      "category": "生命周期",
+      "name": "T01 - Electron 主进程启动",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "T02 - 主窗口成功创建",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "T03 - 窗口尺寸正常",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 11,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "T04 - 页面无白屏（DOM 节点数 > 10）",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T05 - GET / 服务状态检查",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T06 - GET /getSystem 获取系统配置",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T07 - GET /getPort 获取串口列表",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 23,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T08 - GET /serialCache 获取缓存",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T09 - GET /getPyConfig 获取 Python 配置",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T10 - POST /startCol 无效参数不崩溃",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 8,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T11 - GET /endCol 结束采集",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T12 - GET /getColHistory 获取采集历史",
+      "status": "❌ 失败",
+      "detail": "HTTP GET 超时: http://127.0.0.1:19245/getColHistory",
+      "duration": 8131,
+      "screenshot": "/home/ubuntu/laonianren/test/screenshots/T12_-_GET__getColHistory_______.png"
+    },
+    {
+      "category": "后端 API",
+      "name": "T13 - GET /sendMac 获取 MAC 信息",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T14 - POST /bindKey 空参数不崩溃",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "后端 API",
+      "name": "T15 - POST /getSysconfig 获取系统配置",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "T16 - 成功建立 WS 连接",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 4,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "T17 - 接收初始状态消息",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "T18 - 发送 clearActiveTypes 消息",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1002,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "T19 - 发送 activeMode 消息",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1003,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T20 - 创建历史记录 (save)",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 6,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T21 - 查询历史记录 (list)",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 3,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T22 - 获取单条记录 (get)",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T23 - 更新历史记录 (save 同名覆盖)",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 5,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T24 - 删除历史记录 (delete)",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 5,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T25 - 空参数查询不崩溃",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "T26 - 删除不存在的记录",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T27 - 登录页渲染正确",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2020,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T28 - 登录按钮初始状态为禁用",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 7,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T29 - 输入密钥后按钮启用",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 325,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T30 - 登录并跳转到 Dashboard",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2185,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T31 - Dashboard 显示 4 个评估卡片",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1006,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T32 - 导航到握力评估页",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2008,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T33 - 导航到起坐评估页",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2007,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T34 - 导航到静态站立评估页",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2007,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T35 - 导航到步态评估页",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2006,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T36 - 导航到历史记录页",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 2008,
+      "screenshot": null
+    },
+    {
+      "category": "UI 界面",
+      "name": "T37 - 导航到不存在页面",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 1508,
+      "screenshot": null
+    },
+    {
+      "category": "性能",
+      "name": "T38 - 页面切换无严重内存泄漏",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 4028,
+      "screenshot": null
+    },
+    {
+      "category": "性能",
+      "name": "T39 - 控制台无致命 JS 错误",
+      "status": "✅ 通过",
+      "detail": "",
+      "duration": 0,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "T40 - 应用正常关闭",
+      "status": "❌ 失败",
+      "detail": "测试超时 15000ms",
+      "duration": 15005,
+      "screenshot": "/home/ubuntu/laonianren/test/screenshots/T40_-_______.png"
+    }
+  ]
+}

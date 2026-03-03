@@ -1142,12 +1142,12 @@ export default function GaitAssessment() {
           {phase !== 'processing' && (
             <div className="absolute bottom-6 z-20 flex flex-col items-center gap-3">
               {phase === 'idle' && deviceStatus === 'connected' && (
-                <>
-                  <button onClick={start} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
+                <div onClick={start} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
                   </button>
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集</span>
-                </>
+                </div>
               )}
               {phase === 'idle' && deviceStatus !== 'connected' && (
                 <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
@@ -1155,15 +1155,15 @@ export default function GaitAssessment() {
                 </span>
               )}
               {phase === 'recording' && (
-                <>
-                  <button onClick={stop} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--zeiss-blue)', background: 'rgba(0,102,204,0.05)' }}>
+                <div onClick={stop} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--zeiss-blue)', background: 'rgba(0,102,204,0.05)' }}>
                     <div className="w-7 h-7 rounded-sm" style={{ background: 'var(--zeiss-blue)' }} />
                   </button>
                   <div className="flex items-center gap-3 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
                     <span>结束采集</span>
                     <span className="font-mono px-3 py-1 rounded-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-light)', color: 'var(--zeiss-blue)' }}>{fmtTime(timer)}</span>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}

@@ -1,0 +1,106 @@
+{
+  "timestamp": "2026-03-03T04:14:15.099Z",
+  "summary": {
+    "total": 15,
+    "pass": 10,
+    "fail": 5,
+    "passRate": "66.7%"
+  },
+  "results": [
+    {
+      "id": "T01",
+      "name": "登录系统",
+      "status": "PASS",
+      "ms": 240
+    },
+    {
+      "id": "T02",
+      "name": "启动串口模拟器",
+      "status": "PASS",
+      "ms": 501
+    },
+    {
+      "id": "T03",
+      "name": "一键连接设备",
+      "status": "PASS",
+      "ms": 196
+    },
+    {
+      "id": "T04",
+      "name": "验证 Dashboard 连接状态反馈",
+      "status": "FAIL",
+      "ms": 18,
+      "error": "应有3个设备在线，实际: 0/7"
+    },
+    {
+      "id": "T05",
+      "name": "进入握力评估页面并验证设备状态",
+      "status": "FAIL",
+      "ms": 3379,
+      "error": "左手套未显示已连接"
+    },
+    {
+      "id": "T06",
+      "name": "执行握力评估采集",
+      "status": "PASS",
+      "ms": 4143
+    },
+    {
+      "id": "T07",
+      "name": "进入起坐评估页面并验证设备状态",
+      "status": "FAIL",
+      "ms": 6742,
+      "error": "坐垫未显示已连接"
+    },
+    {
+      "id": "T08",
+      "name": "执行起坐评估采集",
+      "status": "PASS",
+      "ms": 5091
+    },
+    {
+      "id": "T09",
+      "name": "[C] 创建一条完整的评估历史",
+      "status": "PASS",
+      "ms": 6
+    },
+    {
+      "id": "T10",
+      "name": "[R] 导航到历史记录页面并验证列表",
+      "status": "PASS",
+      "ms": 4487
+    },
+    {
+      "id": "T11",
+      "name": "[R] 展开历史详情并验证完整性",
+      "status": "FAIL",
+      "ms": 1128,
+      "error": "展开的详情不完整"
+    },
+    {
+      "id": "T12",
+      "name": "[R] 查看历史报告",
+      "status": "FAIL",
+      "ms": 2104,
+      "error": "报告页面标题不正确"
+    },
+    {
+      "id": "T13",
+      "name": "[U] 更新评估历史 (增加一条)",
+      "status": "PASS",
+      "ms": 4
+    },
+    {
+      "id": "T14",
+      "name": "[D] 删除评估历史",
+      "status": "PASS",
+      "ms": 5629
+    },
+    {
+      "id": "T15",
+      "name": "[UX Bug] 验证连接后 Dashboard 状态反馈",
+      "status": "PASS",
+      "ms": 2092
+    }
+  ]
+}

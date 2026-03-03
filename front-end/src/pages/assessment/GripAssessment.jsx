@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import HandModel from '../../components/three/HandModel';
 import GripReport from '../../components/report/GripReport';
@@ -188,7 +188,10 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 /* ─── 主组件 ─── */
 export default function GripAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge } = useAssessment();
+  const location = useLocation();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
+  // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
+  const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   const videoRef = useRef(null);
 
   // 如果首页已一键连接，自动进入后端模式
@@ -199,7 +202,7 @@ export default function GripAssessment() {
   const backendCleanupRef = useRef(null);
   const [leftGloveConnected, setLeftGloveConnected] = useState(false);
   const [rightGloveConnected, setRightGloveConnected] = useState(false);
-  const [phase, setPhase] = useState('left-idle');
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'left-idle');
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [pressure, setPressure] = useState(0);
@@ -674,10 +677,10 @@ export default function GripAssessment() {
     completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData });
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     // 断开串口
     if (gloveService.connected) {
-      gloveService.disconnect();
+      await gloveService.disconnect();
     }
     navigate('/dashboard');
   };
@@ -946,14 +949,14 @@ export default function GripAssessment() {
           {phase !== 'processing' && (
             <div className="absolute bottom-10 z-20 flex flex-col items-center gap-3">
               {phase.includes('idle') && deviceStatus === 'connected' && (
-                <>
-                  <button onClick={startRecording}
+                <div onClick={startRecording} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button
                     className="w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-transform"
                     style={{ border: '3px solid var(--border-medium)', background: 'transparent' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F0F4F8, #FFFFFF)', boxShadow: 'var(--shadow-sm)' }} />
                   </button>
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集{phase === 'left-idle' ? '左手' : '右手'}</span>
-                </>
+                </div>
               )}
               {phase.includes('idle') && deviceStatus !== 'connected' && (
                 <div className="flex flex-col items-center gap-3">
@@ -973,8 +976,8 @@ export default function GripAssessment() {
                 </div>
               )}
               {phase.includes('recording') && (
-                <>
-                  <button onClick={stopRecording}
+                <div onClick={stopRecording} className="flex flex-col items-center gap-3 cursor-pointer">
+                  <button
                     className="w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-transform"
                     style={{ border: '3px solid var(--zeiss-blue)', background: 'rgba(0,102,204,0.05)' }}>
                     <div className="w-7 h-7 rounded-sm" style={{ background: 'var(--zeiss-blue)' }} />
@@ -983,7 +986,7 @@ export default function GripAssessment() {
                     <span>结束采集{phase === 'left-recording' ? '左手' : '右手'}</span>
                     <span className="font-mono px-3 py-1 rounded-md" style={{ background: 'var(--zeiss-blue-light)', color: 'var(--zeiss-blue)' }}>{fmtTime(timer)}</span>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}
