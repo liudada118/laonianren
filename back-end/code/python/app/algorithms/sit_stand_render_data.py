@@ -35,7 +35,7 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
     Returns:
         dict: 包含所有分析指标和base64图片的完整结果，结构如下:
             {
-                'duration_stats': { 'total_duration', 'num_cycles', 'avg_duration' },
+                'duration_stats': { 'total_duration', 'num_cycles', 'avg_duration', 'cycle_durations': [float] },
                 'stand_frames': int,
                 'sit_frames': int,
                 'stand_peaks': int,
@@ -47,6 +47,18 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
                     'sit_evolution': [{'label', 'image'}],
                     'sit_cop': base64_png,
                 },
+                'heatmap_data': {
+                    'stand_evolution': [{'label', 'sublabel', 'matrix': [[float]]}],
+                    'sit_evolution': [{'label', 'matrix': [[float]]}],
+                },
+                'cop_data': {
+                    'stand_left': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] },
+                    'stand_right': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] },
+                    'sit': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] },
+                },
+                'symmetry': { 'left_right_ratio': float, 'left_total': float, 'right_total': float },
+                'pressure_stats': { 'foot_max', 'foot_avg', 'sit_max', 'sit_avg', 'max_foot_change_rate', 'max_sit_change_rate' },
+                'cycle_peak_forces': [float],
                 'force_curves': {
                     'stand_times': [float],
                     'stand_force': [float],
@@ -339,3 +351,87 @@ if __name__ == '__main__':
     print(f"  sit_times length: {len(fc.get('sit_times', []))}")
     print(f"  sit_force length: {len(fc.get('sit_force', []))}")
     print(f"  stand_peaks_idx: {fc.get('stand_peaks_idx', [])}")
+
+
+# ============================================================
+# 新增拆分方法 - 对应前端 SitStandReport.jsx 的额外可视化区域
+# ============================================================
+
+
+def get_heatmap_data(result):
+    """
+    【渲染区域】热力图矩阵数据（供前端 Canvas 渲染）
+    与 images 中的 base64 图片不同，这里返回原始矩阵数据，
+    前端可以用 Canvas 自行渲染热力图。
+
+    返回: {
+        'stand_evolution': [{'label', 'sublabel', 'matrix': [[float]]}],
+        'sit_evolution': [{'label', 'matrix': [[float]]}],
+    }
+    """
+    return result.get('heatmap_data', {})
+
+
+def get_cop_data(result):
+    """
+    【渲染区域】COP 轨迹数据（供前端 Canvas 渲染）
+    包含背景热力图矩阵和各周期的 COP 轨迹坐标。
+
+    返回: {
+        'stand_left': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] } | None,
+        'stand_right': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] } | None,
+        'sit': { 'bg_matrix': [[float]], 'trajectories': [[[x,y]]] } | None,
+    }
+    """
+    return result.get('cop_data', {})
+
+
+def get_symmetry(result):
+    """
+    【渲染区域】左右脚对称性分析
+    计算站立过程中左右脚的总压力比值。
+
+    返回: {
+        'left_right_ratio': float,  # 对称性比值 (0~100%)
+        'left_total': float,        # 左脚总压力
+        'right_total': float,       # 右脚总压力
+    }
+    """
+    return result.get('symmetry', {})
+
+
+def get_pressure_stats(result):
+    """
+    【渲染区域】压力统计
+    脚垫和坐垫的压力统计指标。
+
+    返回: {
+        'foot_max': float,              # 脚垫最大总压力
+        'foot_avg': float,              # 脚垫平均总压力
+        'sit_max': float,               # 坐垫最大总压力
+        'sit_avg': float,               # 坐垫平均总压力
+        'max_foot_change_rate': float,   # 脚垫最大变化率
+        'max_sit_change_rate': float,    # 坐垫最大变化率
+    }
+    """
+    return result.get('pressure_stats', {})
+
+
+def get_cycle_peak_forces(result):
+    """
+    【渲染区域】各周期峰值力柱状图
+    每个起坐周期中脚垫总压力的峰值。
+
+    返回: [float]  # 各周期的峰值力
+    """
+    return result.get('cycle_peak_forces', [])
+
+
+def get_cycle_durations(result):
+    """
+    【渲染区域】各周期时长明细
+    每个起坐周期的时长（秒）。
+
+    返回: [float]  # 各周期的时长
+    """
+    return result.get('duration_stats', {}).get('cycle_durations', [])

@@ -1368,12 +1368,188 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     }
 
     # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
-    stand_force = np.sum(stand_data, axis=(1, 2)).tolist()
-    sit_force = np.sum(sit_data, axis=(1, 2)).tolist()
+    stand_force_arr = np.sum(stand_data, axis=(1, 2))
+    sit_force_arr = np.sum(sit_data, axis=(1, 2))
+    stand_force = stand_force_arr.tolist()
+    sit_force = sit_force_arr.tolist()
     t0_stand = stand_times.iloc[0] if len(stand_times) > 0 else None
     t0_sit = sit_times.iloc[0] if len(sit_times) > 0 else None
     stand_time_list = [(t - t0_stand).total_seconds() for t in stand_times] if t0_stand is not None else []
     sit_time_list = [(t - t0_sit).total_seconds() for t in sit_times] if t0_sit is not None else []
+
+    # ====== 4.6 补充前端所需的额外字段 ======
+
+    # --- 4.6.1 heatmap_data: 热力图矩阵数据（供前端 Canvas 渲染） ---
+    print(" 生成热力图矩阵数据 (heatmap_data)...")
+    stand_evo_matrix = []
+    if len(stand_peaks) >= 2:
+        # l_mask, r_mask, l_bbox, r_bbox 在前面已计算
+        start_idx, end_idx = stand_peaks[0], stand_peaks[1]
+        cycle_data = stand_data[start_idx : end_idx+1]
+        indices = [int(p * (len(cycle_data)-1)) for p in np.linspace(0, 1, 11)]
+        for col_idx, frame_idx in enumerate(indices):
+            frame = cycle_data[frame_idx]
+            for row_idx, (mask, bbox, label) in enumerate([
+                (l_mask, l_bbox, "left"), (r_mask, r_bbox, "right")
+            ]):
+                crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+                stand_evo_matrix.append({
+                    'label': row_idx,
+                    'sublabel': col_idx,
+                    'matrix': crop.tolist(),
+                })
+
+    sit_evo_matrix = []
+    if len(stand_peaks) >= 2:
+        stand_times_val = stand_times.values
+        sit_times_val = sit_times.values
+        best_cycle_idx = 0
+        if len(stand_peaks) > 2:
+            best_cycle_idx = len(stand_peaks) // 2 - 1
+        rep_t_start = stand_times_val[stand_peaks[best_cycle_idx]]
+        rep_t_end = stand_times_val[stand_peaks[best_cycle_idx+1]]
+        rep_idx_start = np.searchsorted(sit_times_val, rep_t_start)
+        rep_idx_end = np.searchsorted(sit_times_val, rep_t_end)
+        rep_segment = sit_data[rep_idx_start:rep_idx_end]
+        sit_indices = [int(p * (len(rep_segment)-1)) for p in np.linspace(0, 1, 11)]
+        for col_idx, frame_idx in enumerate(sit_indices):
+            if frame_idx < len(rep_segment):
+                frame = rep_segment[frame_idx]
+                sit_evo_matrix.append({
+                    'label': col_idx,
+                    'matrix': frame.tolist(),
+                })
+
+    heatmap_data = {
+        'stand_evolution': stand_evo_matrix,
+        'sit_evolution': sit_evo_matrix,
+    }
+
+    # --- 4.6.2 cop_data: COP 轨迹数据（供前端 Canvas 渲染） ---
+    print(" 生成COP轨迹数据 (cop_data)...")
+    cop_data = {'stand_left': None, 'stand_right': None, 'sit': None}
+    if len(stand_peaks) >= 2:
+        # 站立 COP：背景矩阵 + 轨迹坐标
+        peak_frames = stand_data[stand_peaks]
+        avg_peak = np.mean(peak_frames, axis=0)
+        for foot_name, mask, bbox in [("left", l_mask, l_bbox), ("right", r_mask, r_bbox)]:
+            bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+            trajectories = []
+            for i in range(len(stand_peaks) - 1):
+                seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
+                l_cops, r_cops = calculate_split_cop(seg, l_mask, r_mask)
+                cops = l_cops if foot_name == "left" else r_cops
+                pts = []
+                for c_pt in cops:
+                    x = c_pt[0] - bbox[2]
+                    y = c_pt[1] - bbox[0]
+                    if not (np.isnan(x) or np.isnan(y)):
+                        pts.append([float(x), float(y)])
+                if len(pts) > 1:
+                    trajectories.append(pts)
+            cop_data_key = 'stand_left' if foot_name == 'left' else 'stand_right'
+            cop_data[cop_data_key] = {
+                'bg_matrix': bg.tolist(),
+                'trajectories': trajectories,
+            }
+
+        # 坐姿 COP
+        sit_force_curve = np.sum(sit_data, axis=(1, 2))
+        global_max_val = np.max(sit_force_curve) if len(sit_force_curve) > 0 else 1
+        THRESHOLD = max(global_max_val * 0.03, 50)
+        all_cycles_cops = []
+        valid_frames_accumulator = []
+        stand_times_val = stand_times.values
+        sit_times_val = sit_times.values
+        for i in range(len(stand_peaks) - 1):
+            t_start = stand_times_val[stand_peaks[i]]
+            t_end = stand_times_val[stand_peaks[i+1]]
+            idx_start = np.searchsorted(sit_times_val, t_start)
+            idx_end = np.searchsorted(sit_times_val, t_end)
+            if idx_end <= idx_start:
+                continue
+            segment_data = sit_data[idx_start:idx_end]
+            segment_force = sit_force_curve[idx_start:idx_end]
+            cycle_pts = []
+            has_valid = False
+            for fi, frame in enumerate(segment_data):
+                if segment_force[fi] > THRESHOLD:
+                    cx, cy = calculate_sit_cop(frame)
+                    if not np.isnan(cx):
+                        cycle_pts.append([float(cx), float(cy)])
+                        valid_frames_accumulator.append(frame)
+                        has_valid = True
+            if has_valid and len(cycle_pts) > 1:
+                all_cycles_cops.append(cycle_pts)
+        if len(all_cycles_cops) > 0 and len(valid_frames_accumulator) > 0:
+            avg_frame = np.mean(valid_frames_accumulator, axis=0)
+            cop_data['sit'] = {
+                'bg_matrix': avg_frame.tolist(),
+                'trajectories': all_cycles_cops,
+            }
+
+    # --- 4.6.3 cycle_durations: 各周期时长明细 ---
+    print(" 计算各周期时长明细...")
+    cycle_durations = []
+    if len(stand_peaks) >= 2:
+        for i in range(len(stand_peaks) - 1):
+            t_start = stand_times.iloc[stand_peaks[i]]
+            t_end = stand_times.iloc[stand_peaks[i+1]]
+            dur = (t_end - t_start).total_seconds()
+            cycle_durations.append(round(dur, 2))
+
+    # --- 4.6.4 symmetry: 左右脚对称性 ---
+    print(" 计算左右脚对称性...")
+    symmetry = {}
+    if len(stand_peaks) >= 2:
+        left_total_force = 0.0
+        right_total_force = 0.0
+        for i in range(len(stand_peaks) - 1):
+            seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
+            for frame in seg:
+                left_total_force += float(np.sum(frame * l_mask))
+                right_total_force += float(np.sum(frame * r_mask))
+        max_force = max(left_total_force, right_total_force)
+        min_force = min(left_total_force, right_total_force)
+        ratio = (min_force / max_force * 100) if max_force > 0 else 0
+        symmetry = {
+            'left_right_ratio': round(ratio, 1),
+            'left_total': round(left_total_force, 0),
+            'right_total': round(right_total_force, 0),
+        }
+
+    # --- 4.6.5 pressure_stats: 压力统计 ---
+    print(" 计算压力统计...")
+    foot_max = float(np.max(stand_force_arr)) if len(stand_force_arr) > 0 else 0
+    foot_avg = float(np.mean(stand_force_arr)) if len(stand_force_arr) > 0 else 0
+    sit_max = float(np.max(sit_force_arr)) if len(sit_force_arr) > 0 else 0
+    sit_avg = float(np.mean(sit_force_arr)) if len(sit_force_arr) > 0 else 0
+    # 最大变化率（相邻帧之间的最大差值）
+    max_foot_change_rate = 0
+    if len(stand_force_arr) > 1:
+        foot_diff = np.abs(np.diff(stand_force_arr))
+        max_foot_change_rate = float(np.max(foot_diff))
+    max_sit_change_rate = 0
+    if len(sit_force_arr) > 1:
+        sit_diff = np.abs(np.diff(sit_force_arr))
+        max_sit_change_rate = float(np.max(sit_diff))
+    pressure_stats = {
+        'foot_max': round(foot_max, 0),
+        'foot_avg': round(foot_avg, 0),
+        'sit_max': round(sit_max, 0),
+        'sit_avg': round(sit_avg, 0),
+        'max_foot_change_rate': round(max_foot_change_rate, 0),
+        'max_sit_change_rate': round(max_sit_change_rate, 0),
+    }
+
+    # --- 4.6.6 cycle_peak_forces: 各周期峰值力 ---
+    print(" 计算各周期峰值力...")
+    cycle_peak_forces = []
+    if len(stand_peaks) >= 2:
+        for i in range(len(stand_peaks) - 1):
+            seg_force = stand_force_arr[stand_peaks[i]:stand_peaks[i+1]+1]
+            if len(seg_force) > 0:
+                cycle_peak_forces.append(round(float(np.max(seg_force)), 0))
 
     # 5. 构建返回结果
     return {
@@ -1381,12 +1557,18 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             'total_duration': round(duration_stats['total_duration'], 2),
             'num_cycles': duration_stats['num_cycles'],
             'avg_duration': round(duration_stats['avg_duration'], 2),
+            'cycle_durations': cycle_durations,
         },
         'stand_frames': len(stand_data),
         'sit_frames': len(sit_data),
         'stand_peaks': len(stand_peaks) if stand_peaks is not None else 0,
         'username': username,
         'images': images,
+        'heatmap_data': heatmap_data,
+        'cop_data': cop_data,
+        'symmetry': symmetry,
+        'pressure_stats': pressure_stats,
+        'cycle_peak_forces': cycle_peak_forces,
         'force_curves': {
             'stand_times': stand_time_list,
             'stand_force': stand_force,
