@@ -2991,14 +2991,14 @@ async function connectPort() {
           const orderName = constantObj.order[order]
           // 鍓嶅悗甯ц祴鍊?绫诲瀷璧嬪€?
           dataItem[orderName] = arr
-            dataItem.type = constantObj.type[type]
-            dataItem.stamp = new Date().getTime()
-          } else if (pointArr.length == 1024) {
-            // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
-            if (!dataItem.type) {
-              dataItem.type = 'sit'
-            }
-            const matrix = hand(pointArr)
+          dataItem.type = constantObj.type[type]
+          dataItem.stamp = new Date().getTime()
+        } else if (pointArr.length == 1024) {
+          // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
+          if (!dataItem.type) {
+            dataItem.type = 'sit'
+          }
+          const matrix = hand(pointArr)
 
           dataItem.arr = matrix
 
@@ -3044,7 +3044,7 @@ async function connectPort() {
 
         // 1025字节帧已删除（旧设备类型 car-back/car-sit/bed 不再使用）
 
-        else if (pointArr.length == 146) {
+        } else if (pointArr.length == 146) {
           const length = pointArr.length
           const arr = pointArr.splice(length - 16, length)
           // console.log(pointArr[0], pointArr[1])
