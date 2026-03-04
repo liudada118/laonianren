@@ -79,8 +79,23 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       const leftEllipseArea = leftCopM['置信椭圆面积'] || 0;
       const rightEllipseArea = rightCopM['置信椭圆面积'] || 0;
 
-      // 从后端轨迹计算置信椭圆参数
-      const calcEllipseFromTraj = (pts, areaCm2) => {
+      // 后端返回的椭圆参数（Python scipy 计算，更准确）
+      const backendLeftEllipse = r.left_ellipse_params || {};
+      const backendRightEllipse = r.right_ellipse_params || {};
+
+      // 从后端轨迹计算置信椭圆参数（作为 fallback）
+      const calcEllipseFromTraj = (pts, areaCm2, backendEllipse) => {
+        // 优先使用后端计算的椭圆参数
+        if (backendEllipse && backendEllipse.width) {
+          return {
+            center: backendEllipse.center || [0, 0],
+            width: backendEllipse.width || 0,
+            height: backendEllipse.height || 0,
+            angle: backendEllipse.angle || 0,
+            area_cm2: backendEllipse.area_cm2 || areaCm2 || 0,
+          };
+        }
+        // fallback: 前端自行计算
         if (!pts || pts.length < 3) return { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: areaCm2 };
         const cx = pts.reduce((s,p) => s+p[0], 0) / pts.length;
         const cy = pts.reduce((s,p) => s+p[1], 0) / pts.length;
@@ -137,13 +152,13 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
           },
         },
         bilateral: {
-          leftPressureRatio: 50,
-          rightPressureRatio: 50,
+          leftPressureRatio: (r.bilateral_pressure && r.bilateral_pressure.leftRatio) || 50,
+          rightPressureRatio: (r.bilateral_pressure && r.bilateral_pressure.rightRatio) || 50,
         },
         copData: { leftCop: leftCopTraj, rightCop: rightCopTraj },
         ellipseData: {
-          left: calcEllipseFromTraj(leftCopTraj, leftEllipseArea),
-          right: calcEllipseFromTraj(rightCopTraj, rightEllipseArea),
+          left: calcEllipseFromTraj(leftCopTraj, leftEllipseArea, backendLeftEllipse),
+          right: calcEllipseFromTraj(rightCopTraj, rightEllipseArea, backendRightEllipse),
         },
         copTimeSeries: {
           velocitySeries,

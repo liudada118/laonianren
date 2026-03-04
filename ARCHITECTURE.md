@@ -1,6 +1,6 @@
 # 老年人筛查系统MAC 架构文档
 
-**版本**: 1.9
+**版本**: 2.0
 **最后更新**: 2026-03-04
 **作者**: Manus AI
 
@@ -8,6 +8,7 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-04 | 修复缺陷 | 修复静态站立评估报告4个问题：(1)平衡分析左右脚压力比硬编码50/50→用峰值帧真实压力计算；(2)COP压力中心轨迹显示“暂无数据”→在one_step_render_data.py中额外调用calculate_cop_trajectories提取轨迹坐标；(3)COP置信椭圆宽度/高度全为0→后端通过scipy计算椭圆参数并返回前端；(4)COP轨迹图为空→同(2)。修改文件：one_step_render_data.py、StandingReport.jsx。 |
 | 2026-03-04 | 修复缺陷 | 修复步态报告Gait Average Summary左右脚热力图大小不一致。根因：analyze_gait_and_plot中左右脚的canvas大小独立计算，当左脚bounding box比右脚小时，导致imshow的extent不同，显示比例不一致。修复：统一左右脚的canvas大小为max(l_h,r_h)和max(l_w,r_w)。 |
 | 2026-03-04 | 性能优化 | 注释掉算法中前端未使用的base64图片生成，大幅减小render_data体积。起坐算法：注释全部5个images字段（前端已用heatmap_data+cop_data通过Canvas渲染）；步态算法：注释5个前端已用ECharts数值数据渲染的图片，保留3个必需的base64图片。同时跳过对应的matplotlib绘图函数调用，加速算法执行。 |
 | 2026-03-04 | 修复缺陷 | 修复历史记录413 Payload Too Large错误。根因：serialServer.js中存在两行express.json()中间件，第一行无limit（默认100KB）先执行，导致第二行的limit:'50mb'永远不生效。修复：删除无limit的express.json()，合并为一行limit:'200mb'。 |
@@ -256,6 +257,7 @@
 | 2026-03-04 | matrix表schema修复 | 修复 init.db/foot.db 中 matrix 表缺少 timestamp 和 select 列的严重 Bug，恢复采集数据写入、CSV导出、回放、报告生成功能。 |
 | 2026-03-04 | 综合端到端测试 | 新增 49 个用例的综合测试，覆盖4个评估采集、报告生成、CSV导出、数据库回放、历史记录CRUD、WebSocket验证等全流程。 |
 | 2026-03-04 | 4路脚垫数据模拟 | 从CVS原始数据提取foot1~foot4独立二进制帧文件，实现完整的4路脚垫虚拟串口模拟，测试通过率达到100%。 |
+| 2026-03-04 | 站立评估COP数据完善 | 在one_step_render_data.py中增加COP轨迹提取、置信椭圆参数计算、左右脚真实压力比例计算，前端StandingReport.jsx优先使用后端计算的椭圆参数和压力比例。 |
 
 ## 6. 未来维护与更新
 
