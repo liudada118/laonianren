@@ -180,7 +180,9 @@ export default function StandingAssessment() {
   const isRecordingRef = useRef(false);
 
   // 报告数据
-  const [reportData, setReportData] = useState(null);
+  const [reportData, setReportData] = useState(
+    viewReportMode ? (assessments.standing?.report?.reportData || null) : null
+  );
   const [csvExporting, setCsvExporting] = useState(false);
 
   // 后端模式

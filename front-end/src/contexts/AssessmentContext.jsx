@@ -120,8 +120,17 @@ export function AssessmentProvider({ children }) {
       assessments[type] = { completed: true, report, data };
 
       // 自动保存到后端数据库历史记录
+      // 注意：只发送 completed 和 report，过滤掉 data 字段（原始传感器数据可能非常大，会导致请求体超过限制）
       if (prev.patientInfo) {
-        saveAssessmentSession(prev.patientInfo, prev.institution, assessments)
+        const assessmentsForSave = {};
+        for (const [key, val] of Object.entries(assessments)) {
+          assessmentsForSave[key] = {
+            completed: val.completed,
+            report: val.report,
+            // 不发送 data 字段（原始传感器数据）
+          };
+        }
+        saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave)
           .catch(e => console.error('自动保存历史记录失败:', e));
       }
 

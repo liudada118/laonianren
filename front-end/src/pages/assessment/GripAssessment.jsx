@@ -210,7 +210,9 @@ export default function GripAssessment() {
   const [rightData, setRightData] = useState([]);
   const [showLeftToast, setShowLeftToast] = useState(false);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
-  const [gripReportData, setGripReportData] = useState(null);
+  const [gripReportData, setGripReportData] = useState(
+    viewReportMode ? (assessments.grip?.report?.reportData || null) : null
+  );
   const [csvExporting, setCsvExporting] = useState(false);
   const timerRef = useRef(null);
   const leftRawFramesRef = useRef([]);

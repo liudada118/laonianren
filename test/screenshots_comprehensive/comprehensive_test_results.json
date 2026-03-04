@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-04T02:59:55.833Z",
+  "timestamp": "2026-03-04T03:27:49.484Z",
   "testMode": "综合端到端测试 v1",
   "summary": {
     "total": 49,
@@ -13,163 +13,163 @@
       "id": "T01",
       "name": "登录系统",
       "status": "PASS",
-      "ms": 3321
+      "ms": 3299
     },
     {
       "id": "T02",
       "name": "一键连接设备",
       "status": "PASS",
-      "ms": 10165
+      "ms": 10167
     },
     {
       "id": "T03",
       "name": "验证Dashboard设备状态",
       "status": "PASS",
-      "ms": 117
+      "ms": 119
     },
     {
       "id": "T04",
       "name": "弹出患者信息并填写",
       "status": "PASS",
-      "ms": 6360
+      "ms": 6483
     },
     {
       "id": "T05",
       "name": "握力评估 - 检查设备连接状态",
       "status": "PASS",
-      "ms": 2613
+      "ms": 2723
     },
     {
       "id": "T06",
       "name": "握力评估 - 采集左手数据",
       "status": "PASS",
-      "ms": 12192
+      "ms": 12080
     },
     {
       "id": "T07",
       "name": "握力评估 - 采集右手数据",
       "status": "PASS",
-      "ms": 16213
+      "ms": 15846
     },
     {
       "id": "T08",
       "name": "握力评估 - 查看报告",
       "status": "PASS",
-      "ms": 9361
+      "ms": 9144
     },
     {
       "id": "T09",
       "name": "握力评估 - 返回首页",
       "status": "PASS",
-      "ms": 3250
+      "ms": 3239
     },
     {
       "id": "T10",
       "name": "起坐评估 - 进入页面",
       "status": "PASS",
-      "ms": 9136
+      "ms": 8838
     },
     {
       "id": "T11",
       "name": "起坐评估 - 采集数据",
       "status": "PASS",
-      "ms": 31406
+      "ms": 30003
     },
     {
       "id": "T12",
       "name": "起坐评估 - 查看报告并返回",
       "status": "PASS",
-      "ms": 8280
+      "ms": 8199
     },
     {
       "id": "T13",
       "name": "站立评估 - 进入页面",
       "status": "PASS",
-      "ms": 8372
+      "ms": 8341
     },
     {
       "id": "T14",
       "name": "站立评估 - 采集数据",
       "status": "PASS",
-      "ms": 29165
+      "ms": 29539
     },
     {
       "id": "T15",
       "name": "站立评估 - 查看报告并返回",
       "status": "PASS",
-      "ms": 5247
+      "ms": 5135
     },
     {
       "id": "T16",
       "name": "步态评估 - 进入页面",
       "status": "PASS",
-      "ms": 8175
+      "ms": 8295
     },
     {
       "id": "T17",
       "name": "步态评估 - 采集数据",
       "status": "PASS",
-      "ms": 23762
+      "ms": 23925
     },
     {
       "id": "T18",
       "name": "步态评估 - 查看报告并返回",
       "status": "PASS",
-      "ms": 4095
+      "ms": 4010
     },
     {
       "id": "T19",
       "name": "验证Dashboard显示已完成评估",
       "status": "PASS",
-      "ms": 2136
+      "ms": 2123
     },
     {
       "id": "T20",
       "name": "从Dashboard查看已完成评估报告",
       "status": "PASS",
-      "ms": 8224
+      "ms": 8223
     },
     {
       "id": "T21",
       "name": "进入历史记录页面",
       "status": "PASS",
-      "ms": 3132
+      "ms": 3137
     },
     {
       "id": "T22",
       "name": "验证历史记录列表包含测试患者",
       "status": "PASS",
-      "ms": 83
+      "ms": 79
     },
     {
       "id": "T23",
       "name": "展开历史详情",
       "status": "PASS",
-      "ms": 2097
+      "ms": 2114
     },
     {
       "id": "T24",
       "name": "查看历史中的握力评估报告",
       "status": "PASS",
-      "ms": 7588
+      "ms": 7212
     },
     {
       "id": "T25",
       "name": "查看历史中的其他评估报告",
       "status": "PASS",
-      "ms": 9196
+      "ms": 9192
     },
     {
       "id": "T26",
       "name": "API: 获取采集历史列表 (getColHistory)",
       "status": "PASS",
-      "ms": 14
+      "ms": 15
     },
     {
       "id": "T27",
       "name": "API: 历史记录列表 (history/list)",
       "status": "PASS",
-      "ms": 6
+      "ms": 5
     },
     {
       "id": "T28",
@@ -181,7 +181,7 @@
       "id": "T29",
       "name": "API: 获取单条历史记录 (history/get)",
       "status": "PASS",
-      "ms": 4
+      "ms": 3
     },
     {
       "id": "T30",
@@ -193,49 +193,49 @@
       "id": "T31",
       "name": "API: 导出起坐CSV数据",
       "status": "PASS",
-      "ms": 64
+      "ms": 62
     },
     {
       "id": "T32",
       "name": "API: 导出站立CSV数据",
       "status": "PASS",
-      "ms": 153
+      "ms": 151
     },
     {
       "id": "T33",
       "name": "API: 导出步态CSV数据",
       "status": "PASS",
-      "ms": 116
+      "ms": 106
     },
     {
       "id": "T34",
       "name": "API: 加载回放数据 (getDbHistory)",
       "status": "PASS",
-      "ms": 93
+      "ms": 86
     },
     {
       "id": "T35",
       "name": "API: 开始回放 (getDbHistoryPlay)",
       "status": "PASS",
-      "ms": 2009
+      "ms": 2007
     },
     {
       "id": "T36",
       "name": "API: 暂停回放 (getDbHistoryStop)",
       "status": "PASS",
-      "ms": 3
+      "ms": 2
     },
     {
       "id": "T37",
       "name": "API: 调整回放速度 (changeDbplaySpeed)",
       "status": "PASS",
-      "ms": 1506
+      "ms": 1508
     },
     {
       "id": "T38",
       "name": "API: 跳转到指定帧 (getDbHistoryIndex)",
       "status": "PASS",
-      "ms": 1
+      "ms": 2
     },
     {
       "id": "T39",
@@ -247,25 +247,25 @@
       "id": "T40",
       "name": "API: 生成握力报告 (getHandPdf)",
       "status": "PASS",
-      "ms": 5368
+      "ms": 5922
     },
     {
       "id": "T41",
       "name": "API: 生成站立报告 (getDbHeatmap)",
       "status": "PASS",
-      "ms": 1281
+      "ms": 1231
     },
     {
       "id": "T42",
       "name": "API: 生成起坐报告 (getSitAndFootPdf)",
       "status": "PASS",
-      "ms": 1946
+      "ms": 2042
     },
     {
       "id": "T43",
       "name": "API: 生成步态报告 (getFootPdf)",
       "status": "PASS",
-      "ms": 640
+      "ms": 597
     },
     {
       "id": "T44",
@@ -289,27 +289,27 @@
       "id": "T47",
       "name": "API: 删除历史记录 (history/delete)",
       "status": "PASS",
-      "ms": 8
+      "ms": 7
     },
     {
       "id": "T48",
       "name": "检查JS运行时错误",
       "status": "PASS",
-      "ms": 4
+      "ms": 3
     },
     {
       "id": "T49",
       "name": "返回Dashboard最终状态",
       "status": "PASS",
-      "ms": 2148
+      "ms": 2167
     }
   ],
   "uxBugs": [],
   "assessmentIds": {
-    "gripLeft": "grip_L_1772592975226",
-    "gripRight": "grip_R_1772592989514",
-    "sitstand": "sitstand_1772593030623",
-    "standing": "standing_1772593079092",
-    "gait": "gait_1772593120811"
+    "gripLeft": "grip_L_1772594650758",
+    "gripRight": "grip_R_1772594664672",
+    "sitstand": "sitstand_1772594704666",
+    "standing": "standing_1772594752226",
+    "gait": "gait_1772594794267"
   }
 }

@@ -166,7 +166,9 @@ export default function SitStandAssessment() {
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
   const [reportMode, setReportMode] = useState('static');
   const [showComplete, setShowComplete] = useState(false);
-  const [sitstandReportData, setSitstandReportData] = useState(null);
+  const [sitstandReportData, setSitstandReportData] = useState(
+    viewReportMode ? (assessments.sitstand?.report?.reportData || null) : null
+  );
   const [csvExporting, setCsvExporting] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
