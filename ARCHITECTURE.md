@@ -8,6 +8,7 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-04 | 性能优化 | 注释掉算法中前端未使用的base64图片生成，大幅减小render_data体积。起坐算法：注释全部5个images字段（前端已用heatmap_data+cop_data通过Canvas渲染）；步态算法：注释5个前端已用ECharts数值数据渲染的图片，保留3个必需的base64图片。同时跳过对应的matplotlib绘图函数调用，加速算法执行。 |
 | 2026-03-04 | 修复缺陷 | 修复历史记录413 Payload Too Large错误。根因：serialServer.js中存在两行express.json()中间件，第一行无limit（默认100KB）先执行，导致第二行的limit:'50mb'永远不生效。修复：删除无limit的express.json()，合并为一行limit:'200mb'。 |
 | 2026-03-04 | 修复缺陷 | 修复两个严重Bug：(1) completeAssessment中saveAssessmentSession发送的数据包含巨大的原始传感器data字段，导致第二个评估后请求体超限，历史记录只保存1/4；(2) 从Dashboard点击查看报告进入评估页面时，reportData状态变量初始化为null未从assessments恢复，导致显示"暂无报告数据"。修改5个文件：AssessmentContext.jsx + 4个评估页面。 |
 | 2026-03-04 | 数据升级 | 所有评估的串口模拟数据全部替换为用户提供的CSV原始采集数据：握力（左手2512帧/右手1982帧）、起坐（坐垫489帧/脚垫489帧）、站立（4路脚垫各341帧）、步态（4路脚垫各210帧）。新增统一转换工具 csv_to_all_bins.js。 |
