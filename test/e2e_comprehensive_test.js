@@ -140,7 +140,7 @@ async function main() {
     // 阶段1: 准备环境
     // ═══════════════════════════════════════════════════════
     console.log("\n[阶段1] 创建虚拟串口并加载传感器数据...");
-    const deviceNames = ["leftHand", "rightHand", "seat", "foot1"];
+    const deviceNames = ["leftHand", "rightHand", "seat", "foot1", "foot2", "foot3", "foot4"];
     await sim.init(deviceNames);
     const envVars = sim.getEnvVars(deviceNames);
     const leftFrames = parseHexDataToFrames(
@@ -152,11 +152,22 @@ async function main() {
     const seatFrames = parseHexDataToFrames(
       fs.readFileSync(path.join(__dirname, "../upload_data/seat.bin"), "utf-8")
     ).filter((f) => f.length === 1024);
-    const footFrames = parseHexDataToFrames(
-      fs.readFileSync(path.join(__dirname, "../upload_data/foot.bin"), "utf-8")
+    // 加载4路脚垫数据
+    const foot1Frames = parseHexDataToFrames(
+      fs.readFileSync(path.join(__dirname, "../upload_data/foot1.bin"), "utf-8")
+    ).filter((f) => f.length === 4096);
+    const foot2Frames = parseHexDataToFrames(
+      fs.readFileSync(path.join(__dirname, "../upload_data/foot2.bin"), "utf-8")
+    ).filter((f) => f.length === 4096);
+    const foot3Frames = parseHexDataToFrames(
+      fs.readFileSync(path.join(__dirname, "../upload_data/foot3.bin"), "utf-8")
+    ).filter((f) => f.length === 4096);
+    const foot4Frames = parseHexDataToFrames(
+      fs.readFileSync(path.join(__dirname, "../upload_data/foot4.bin"), "utf-8")
     ).filter((f) => f.length === 4096);
 
-    console.log(`  数据帧: 左手=${leftFrames.length}, 右手=${rightFrames.length}, 坐垫=${seatFrames.length}, 脚垫=${footFrames.length}`);
+    console.log(`  数据帧: 左手=${leftFrames.length}, 右手=${rightFrames.length}, 坐垫=${seatFrames.length}`);
+    console.log(`  脚垫帧: foot1=${foot1Frames.length}, foot2=${foot2Frames.length}, foot3=${foot3Frames.length}, foot4=${foot4Frames.length}`);
 
     // ═══════════════════════════════════════════════════════
     // 阶段2: 启动应用
@@ -208,7 +219,10 @@ async function main() {
       sim.startSending("leftHand", leftFrames, 80);
       sim.startSending("rightHand", rightFrames, 80);
       sim.startSending("seat", seatFrames, 80);
-      sim.startFootSending("foot1", footFrames, 80);
+      sim.startFootSending("foot1", foot1Frames, 80);
+      sim.startFootSending("foot2", foot2Frames, 80);
+      sim.startFootSending("foot3", foot3Frames, 80);
+      sim.startFootSending("foot4", foot4Frames, 80);
       // 点击一键连接
       await page.locator('button:has-text("一键连接")').click();
       await page.waitForTimeout(10000); // 等待设备连接
