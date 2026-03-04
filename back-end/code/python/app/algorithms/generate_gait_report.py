@@ -2948,20 +2948,26 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
                 return "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
         return None
 
-    img_ts = os.path.join(working_dir, "time_series.png")
-    plot_gait_time_series(left_series, right_series, img_ts)
+    # [已注释] 以下5张图片前端已通过 ECharts/Canvas 用数值数据渲染，不再需要 base64 图片
+    # img_ts = os.path.join(working_dir, "time_series.png")
+    # plot_gait_time_series(left_series, right_series, img_ts)
+    img_ts = None  # 前端用 timeSeries 数据 + ECharts 渲染
 
-    img_left_part = os.path.join(working_dir, "left_partitions.png")
-    plot_partition_curves(left_line, img_left_part, foot_name="Left")
-    img_right_part = os.path.join(working_dir, "right_partitions.png")
-    plot_partition_curves(right_line, img_right_part, foot_name="Right")
+    # img_left_part = os.path.join(working_dir, "left_partitions.png")
+    # plot_partition_curves(left_line, img_left_part, foot_name="Left")
+    # img_right_part = os.path.join(working_dir, "right_partitions.png")
+    # plot_partition_curves(right_line, img_right_part, foot_name="Right")
+    img_left_part = None   # 前端用 partitionCurves 数据 + ECharts 渲染
+    img_right_part = None  # 前端用 partitionCurves 数据 + ECharts 渲染
 
-    img_left_heatmap = os.path.join(working_dir, "left_pressure_heatmap.png")
-    if ls:
-        create_pressure_heatmap(divide_x_regions(left_max_area), *ls, img_left_heatmap)
-    img_right_heatmap = os.path.join(working_dir, "right_pressure_heatmap.png")
-    if rs:
-        create_pressure_heatmap(divide_x_regions(right_max_area), *rs, img_right_heatmap)
+    # img_left_heatmap = os.path.join(working_dir, "left_pressure_heatmap.png")
+    # if ls:
+    #     create_pressure_heatmap(divide_x_regions(left_max_area), *ls, img_left_heatmap)
+    # img_right_heatmap = os.path.join(working_dir, "right_pressure_heatmap.png")
+    # if rs:
+    #     create_pressure_heatmap(divide_x_regions(right_max_area), *rs, img_right_heatmap)
+    img_left_heatmap = None   # 前端用 regionCoords 数据 + RegionScatterChart 渲染
+    img_right_heatmap = None  # 前端用 regionCoords 数据 + RegionScatterChart 渲染
 
     left_regions, right_regions = extract_all_largest_regions_cv(raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r)
     img_all_footprints = os.path.join(working_dir, "all_footprints.png")
@@ -3154,11 +3160,12 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
             "pressureEvolution": img_to_base64(img_evolution),
             "gaitAverage": img_to_base64(os.path.join(working_dir, "gait_summary_average.png")),
             "footprintHeatmap": img_to_base64(img_all_footprints),
-            "timeSeries": img_to_base64(img_ts),
-            "leftPressureRegions": img_to_base64(img_left_heatmap),
-            "rightPressureRegions": img_to_base64(img_right_heatmap),
-            "leftPartitionCurves": img_to_base64(img_left_part),
-            "rightPartitionCurves": img_to_base64(img_right_part),
+            # [已注释] 以下5张图片前端已通过数值数据渲染，不再生成 base64
+            # "timeSeries": img_to_base64(img_ts),
+            # "leftPressureRegions": img_to_base64(img_left_heatmap),
+            # "rightPressureRegions": img_to_base64(img_right_heatmap),
+            # "leftPartitionCurves": img_to_base64(img_left_part),
+            # "rightPartitionCurves": img_to_base64(img_right_part),
         },
     }
 

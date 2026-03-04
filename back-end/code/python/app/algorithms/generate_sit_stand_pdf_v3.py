@@ -1211,160 +1211,162 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     if not duration_stats:
         raise ValueError("无法计算周期统计信息")
 
-    # 3. 用 PIL 快速生成热力图 base64 PNG（保留 scipy 上采样质量，跳过 matplotlib）
-    import base64
+    # [已注释] 3. base64 PNG 图片生成 — 前端已使用 heatmap_data + cop_data 通过 Canvas 渲染，不再需要 images
+    # import base64  # (下方 cop_data 段仍需要，移到那里)
     upf = LC.ImageConfig.UPSCALE_FACTOR
     sig = LC.ImageConfig.SIGMA
 
-    print(" 生成站立演变热力图 (PIL)...")
+    # print(" 生成站立演变热力图 (PIL)...")
     stand_evo_images = []
-    if len(stand_peaks) >= 2:
-        l_mask, r_mask, l_bbox, r_bbox = get_foot_masks_and_bbox(stand_data)
-        start_idx, end_idx = stand_peaks[0], stand_peaks[1]
-        cycle_data = stand_data[start_idx : end_idx+1]
-        indices = [int(p * (len(cycle_data)-1)) for p in np.linspace(0, 1, 11)]
-        for col_idx, frame_idx in enumerate(indices):
-            frame = cycle_data[frame_idx]
-            for row_idx, (mask, bbox, label) in enumerate([
-                (l_mask, l_bbox, "left"), (r_mask, r_bbox, "right")
-            ]):
-                crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
-                smooth = get_smooth_heatmap(crop, upscale_factor=upf, sigma=sig)
-                b64 = matrix_to_base64_png(smooth)
-                if b64:
-                    stand_evo_images.append({'label': row_idx, 'sublabel': col_idx, 'image': b64})
+    # if len(stand_peaks) >= 2:
+    #     l_mask, r_mask, l_bbox, r_bbox = get_foot_masks_and_bbox(stand_data)
+    #     start_idx, end_idx = stand_peaks[0], stand_peaks[1]
+    #     cycle_data = stand_data[start_idx : end_idx+1]
+    #     indices = [int(p * (len(cycle_data)-1)) for p in np.linspace(0, 1, 11)]
+    #     for col_idx, frame_idx in enumerate(indices):
+    #         frame = cycle_data[frame_idx]
+    #         for row_idx, (mask, bbox, label) in enumerate([
+    #             (l_mask, l_bbox, "left"), (r_mask, r_bbox, "right")
+    #         ]):
+    #             crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+    #             smooth = get_smooth_heatmap(crop, upscale_factor=upf, sigma=sig)
+    #             b64 = matrix_to_base64_png(smooth)
+    #             if b64:
+    #                 stand_evo_images.append({'label': row_idx, 'sublabel': col_idx, 'image': b64})
 
-    print(" 生成站立COP图 (PIL)...")
+    # [已注释] 站立COP base64 图片 — 前端使用 cop_data 通过 Canvas 渲染
+    # print(" 生成站立COP图 (PIL)...")
     stand_cop_left_b64 = None
     stand_cop_right_b64 = None
-    if len(stand_peaks) >= 2:
-        peak_frames = stand_data[stand_peaks]
-        avg_peak = np.mean(peak_frames, axis=0)
-        for foot_name, mask, bbox in [("left", l_mask, l_bbox), ("right", r_mask, r_bbox)]:
-            bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
-            bg_smooth = get_smooth_heatmap(bg, sigma=sig)
-            # 背景热力图
-            h_bg, w_bg = bg_smooth.shape
-            mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
-            norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
-            rgb = _JET_LUT[norm]
-            alpha = np.where(bg_smooth > 1, int(255*0.8), 0).astype(np.uint8)
-            rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
-            img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
-            # 绘制 COP 轨迹
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(img)
-            colors_arr = np.linspace(0, 1, max(len(stand_peaks)-1, 1))
-            for i in range(len(stand_peaks)-1):
-                seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
-                l_cops, r_cops = calculate_split_cop(seg, l_mask, r_mask)
-                cops = l_cops if foot_name == "left" else r_cops
-                pts = []
-                for c_pt in cops:
-                    x = (c_pt[0] - bbox[2]) * upf
-                    y = (c_pt[1] - bbox[0]) * upf
-                    if not (np.isnan(x) or np.isnan(y)):
-                        pts.append((x, y))
-                if len(pts) > 1:
-                    t = colors_arr[i]
-                    cr = 255
-                    cg = int(255 * (1 - t))
-                    cb = int(255 * t)
-                    draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 4))
-                    if pts:
-                        x0, y0 = pts[0]
-                        r = max(3, upf // 3)
-                        draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
-            buf = io.BytesIO()
-            img.save(buf, format='PNG', optimize=True)
-            b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
-            if foot_name == "left":
-                stand_cop_left_b64 = b64
-            else:
-                stand_cop_right_b64 = b64
+    # if len(stand_peaks) >= 2:
+    #     peak_frames = stand_data[stand_peaks]
+    #     avg_peak = np.mean(peak_frames, axis=0)
+    #     for foot_name, mask, bbox in [("left", l_mask, l_bbox), ("right", r_mask, r_bbox)]:
+    #         bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+    #         bg_smooth = get_smooth_heatmap(bg, sigma=sig)
+    #         h_bg, w_bg = bg_smooth.shape
+    #         mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
+    #         norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
+    #         rgb = _JET_LUT[norm]
+    #         alpha = np.where(bg_smooth > 1, int(255*0.8), 0).astype(np.uint8)
+    #         rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
+    #         img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
+    #         from PIL import ImageDraw
+    #         draw = ImageDraw.Draw(img)
+    #         colors_arr = np.linspace(0, 1, max(len(stand_peaks)-1, 1))
+    #         for i in range(len(stand_peaks)-1):
+    #             seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
+    #             l_cops, r_cops = calculate_split_cop(seg, l_mask, r_mask)
+    #             cops = l_cops if foot_name == "left" else r_cops
+    #             pts = []
+    #             for c_pt in cops:
+    #                 x = (c_pt[0] - bbox[2]) * upf
+    #                 y = (c_pt[1] - bbox[0]) * upf
+    #                 if not (np.isnan(x) or np.isnan(y)):
+    #                     pts.append((x, y))
+    #             if len(pts) > 1:
+    #                 t = colors_arr[i]
+    #                 cr = 255
+    #                 cg = int(255 * (1 - t))
+    #                 cb = int(255 * t)
+    #                 draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 4))
+    #                 if pts:
+    #                     x0, y0 = pts[0]
+    #                     r = max(3, upf // 3)
+    #                     draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
+    #         buf = io.BytesIO()
+    #         img.save(buf, format='PNG', optimize=True)
+    #         b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
+    #         if foot_name == "left":
+    #             stand_cop_left_b64 = b64
+    #         else:
+    #             stand_cop_right_b64 = b64
 
-    print(" 生成坐姿演变热力图 (PIL)...")
+    # [已注释] 坐姿演变 base64 图片 — 前端使用 heatmap_data.sit_evolution 通过 Canvas 渲染
+    # print(" 生成坐姿演变热力图 (PIL)...")
     sit_evo_images = []
-    if len(stand_peaks) >= 2:
-        stand_times_val = stand_times.values
-        sit_times_val = sit_times.values
-        best_cycle_idx = 0
-        if len(stand_peaks) > 2:
-            best_cycle_idx = len(stand_peaks) // 2 - 1
-        rep_t_start = stand_times_val[stand_peaks[best_cycle_idx]]
-        rep_t_end = stand_times_val[stand_peaks[best_cycle_idx+1]]
-        rep_idx_start = np.searchsorted(sit_times_val, rep_t_start)
-        rep_idx_end = np.searchsorted(sit_times_val, rep_t_end)
-        rep_segment = sit_data[rep_idx_start:rep_idx_end]
-        sit_indices = [int(p * (len(rep_segment)-1)) for p in np.linspace(0, 1, 11)]
-        for col_idx, frame_idx in enumerate(sit_indices):
-            if frame_idx < len(rep_segment):
-                frame = rep_segment[frame_idx]
-                smooth = get_smooth_heatmap(frame, upscale_factor=upf, sigma=sig)
-                b64 = matrix_to_base64_png(smooth)
-                if b64:
-                    sit_evo_images.append({'label': col_idx, 'image': b64})
+    # if len(stand_peaks) >= 2:
+    #     stand_times_val = stand_times.values
+    #     sit_times_val = sit_times.values
+    #     best_cycle_idx = 0
+    #     if len(stand_peaks) > 2:
+    #         best_cycle_idx = len(stand_peaks) // 2 - 1
+    #     rep_t_start = stand_times_val[stand_peaks[best_cycle_idx]]
+    #     rep_t_end = stand_times_val[stand_peaks[best_cycle_idx+1]]
+    #     rep_idx_start = np.searchsorted(sit_times_val, rep_t_start)
+    #     rep_idx_end = np.searchsorted(sit_times_val, rep_t_end)
+    #     rep_segment = sit_data[rep_idx_start:rep_idx_end]
+    #     sit_indices = [int(p * (len(rep_segment)-1)) for p in np.linspace(0, 1, 11)]
+    #     for col_idx, frame_idx in enumerate(sit_indices):
+    #         if frame_idx < len(rep_segment):
+    #             frame = rep_segment[frame_idx]
+    #             smooth = get_smooth_heatmap(frame, upscale_factor=upf, sigma=sig)
+    #             b64 = matrix_to_base64_png(smooth)
+    #             if b64:
+    #                 sit_evo_images.append({'label': col_idx, 'image': b64})
 
-    print(" 生成坐姿COP图 (PIL)...")
+    # [已注释] 坐姿COP base64 图片 — 前端使用 cop_data 通过 Canvas 渲染
+    # print(" 生成坐姿COP图 (PIL)...")
     sit_cop_b64 = None
-    if len(stand_peaks) >= 2:
-        sit_force_curve = np.sum(sit_data, axis=(1, 2))
-        global_max_val = np.max(sit_force_curve) if len(sit_force_curve) > 0 else 1
-        THRESHOLD = max(global_max_val * 0.03, 50)
-        all_cycles_cops = []
-        valid_frames_accumulator = []
-        for i in range(len(stand_peaks) - 1):
-            t_start = stand_times_val[stand_peaks[i]]
-            t_end = stand_times_val[stand_peaks[i+1]]
-            idx_start = np.searchsorted(sit_times_val, t_start)
-            idx_end = np.searchsorted(sit_times_val, t_end)
-            if idx_end <= idx_start: continue
-            segment_data = sit_data[idx_start:idx_end]
-            segment_force = sit_force_curve[idx_start:idx_end]
-            cycle_xs, cycle_ys = [], []
-            has_valid = False
-            for fi, frame in enumerate(segment_data):
-                if segment_force[fi] > THRESHOLD:
-                    cx, cy = calculate_sit_cop(frame)
-                    if not np.isnan(cx):
-                        cycle_xs.append(cx * upf)
-                        cycle_ys.append(cy * upf)
-                        valid_frames_accumulator.append(frame)
-                        has_valid = True
-            if has_valid and len(cycle_xs) > 1:
-                all_cycles_cops.append((cycle_xs, cycle_ys))
-        if len(all_cycles_cops) > 0 and len(valid_frames_accumulator) > 0:
-            avg_frame = np.mean(valid_frames_accumulator, axis=0)
-            bg_smooth = get_smooth_heatmap(avg_frame, upscale_factor=upf, sigma=sig)
-            h_bg, w_bg = bg_smooth.shape
-            mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
-            norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
-            rgb = _JET_LUT[norm]
-            alpha = np.where(bg_smooth > 1, int(255*0.9), 0).astype(np.uint8)
-            rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
-            img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(img)
-            colors_arr = np.linspace(0, 1, max(len(all_cycles_cops), 2))
-            for i, (xs, ys) in enumerate(all_cycles_cops):
-                pts = [(x, y) for x, y in zip(xs, ys) if not (np.isnan(x) or np.isnan(y))]
-                if len(pts) > 1:
-                    t = colors_arr[i]
-                    cr, cg, cb = 255, int(255*(1-t)), int(255*t)
-                    draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 3))
-                    x0, y0 = pts[0]
-                    r = max(3, upf // 2)
-                    draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
-            buf = io.BytesIO()
-            img.save(buf, format='PNG', optimize=True)
-            sit_cop_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
+    # if len(stand_peaks) >= 2:
+    #     sit_force_curve = np.sum(sit_data, axis=(1, 2))
+    #     global_max_val = np.max(sit_force_curve) if len(sit_force_curve) > 0 else 1
+    #     THRESHOLD = max(global_max_val * 0.03, 50)
+    #     all_cycles_cops = []
+    #     valid_frames_accumulator = []
+    #     for i in range(len(stand_peaks) - 1):
+    #         t_start = stand_times_val[stand_peaks[i]]
+    #         t_end = stand_times_val[stand_peaks[i+1]]
+    #         idx_start = np.searchsorted(sit_times_val, t_start)
+    #         idx_end = np.searchsorted(sit_times_val, t_end)
+    #         if idx_end <= idx_start: continue
+    #         segment_data = sit_data[idx_start:idx_end]
+    #         segment_force = sit_force_curve[idx_start:idx_end]
+    #         cycle_xs, cycle_ys = [], []
+    #         has_valid = False
+    #         for fi, frame in enumerate(segment_data):
+    #             if segment_force[fi] > THRESHOLD:
+    #                 cx, cy = calculate_sit_cop(frame)
+    #                 if not np.isnan(cx):
+    #                     cycle_xs.append(cx * upf)
+    #                     cycle_ys.append(cy * upf)
+    #                     valid_frames_accumulator.append(frame)
+    #                     has_valid = True
+    #         if has_valid and len(cycle_xs) > 1:
+    #             all_cycles_cops.append((cycle_xs, cycle_ys))
+    #     if len(all_cycles_cops) > 0 and len(valid_frames_accumulator) > 0:
+    #         avg_frame = np.mean(valid_frames_accumulator, axis=0)
+    #         bg_smooth = get_smooth_heatmap(avg_frame, upscale_factor=upf, sigma=sig)
+    #         h_bg, w_bg = bg_smooth.shape
+    #         mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
+    #         norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
+    #         rgb = _JET_LUT[norm]
+    #         alpha = np.where(bg_smooth > 1, int(255*0.9), 0).astype(np.uint8)
+    #         rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
+    #         img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
+    #         from PIL import ImageDraw
+    #         draw = ImageDraw.Draw(img)
+    #         colors_arr = np.linspace(0, 1, max(len(all_cycles_cops), 2))
+    #         for i, (xs, ys) in enumerate(all_cycles_cops):
+    #             pts = [(x, y) for x, y in zip(xs, ys) if not (np.isnan(x) or np.isnan(y))]
+    #             if len(pts) > 1:
+    #                 t = colors_arr[i]
+    #                 cr, cg, cb = 255, int(255*(1-t)), int(255*t)
+    #                 draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 3))
+    #                 x0, y0 = pts[0]
+    #                 r = max(3, upf // 2)
+    #                 draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
+    #         buf = io.BytesIO()
+    #         img.save(buf, format='PNG', optimize=True)
+    #         sit_cop_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
 
+    # [已注释] images 字典保留空值结构，确保前端不报错
     images = {
-        'stand_evolution': stand_evo_images,
-        'stand_cop_left': stand_cop_left_b64,
-        'stand_cop_right': stand_cop_right_b64,
-        'sit_evolution': sit_evo_images,
-        'sit_cop': sit_cop_b64,
+        'stand_evolution': [],          # 已注释: 前端使用 heatmap_data
+        'stand_cop_left': None,         # 已注释: 前端使用 cop_data
+        'stand_cop_right': None,        # 已注释: 前端使用 cop_data
+        'sit_evolution': [],            # 已注释: 前端使用 heatmap_data
+        'sit_cop': None,                # 已注释: 前端使用 cop_data
     }
 
     # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
@@ -1381,9 +1383,12 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
 
     # --- 4.6.1 heatmap_data: 热力图矩阵数据（供前端 Canvas 渲染） ---
     print(" 生成热力图矩阵数据 (heatmap_data)...")
+    # 计算左右脚掩码和边界框（原在 images 段计算，现移至此处）
+    l_mask = r_mask = l_bbox = r_bbox = None
+    if len(stand_peaks) >= 2:
+        l_mask, r_mask, l_bbox, r_bbox = get_foot_masks_and_bbox(stand_data)
     stand_evo_matrix = []
     if len(stand_peaks) >= 2:
-        # l_mask, r_mask, l_bbox, r_bbox 在前面已计算
         start_idx, end_idx = stand_peaks[0], stand_peaks[1]
         cycle_data = stand_data[start_idx : end_idx+1]
         indices = [int(p * (len(cycle_data)-1)) for p in np.linspace(0, 1, 11)]
