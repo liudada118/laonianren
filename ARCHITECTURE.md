@@ -1,13 +1,15 @@
 # 老年人筛查系统MAC 架构文档
 
-**版本**: 1.4
-**最后更新**: 2026-03-03
+**版本**: 1.5
+**最后更新**: 2026-03-04
 **作者**: Manus AI
 
 ## 更新日志
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-04 | 修复缺陷 | 修复 init.db 和 foot.db 中 matrix 表缺少 timestamp 和 select 列的问题，该 Bug 导致所有采集数据无法写入数据库，CSV导出/回放/报告生成全部失效。同时修复 ensureMatrixNameColumn 函数增加对这两列的自动检查和修复。 |
+| 2026-03-04 | 新增功能 | 新增综合端到端测试 e2e_comprehensive_test.js（49个用例，98%通过率），覆盖登录/连接/4个评估采集/报告生成/CSV导出/历史记录CRUD/数据库回放/WebSocket验证。 |
 | 2026-03-03 | 优化重构 | 移除所有报告组件中的假数据 fallback（generateMockReport、静态 JSON 文件加载），确保报告数据全部来自真实采集；删除 public 下 gait_report_data、grip_report_data、sitstand_report_data 假数据目录（含 60 个文件）。 |
 | 2026-03-03 | 修复缺陷 | 修复 serialServer.js 第 3151 行语法错误（130 帧块与 1024 帧块括号不匹配），由旧设备类型清理时嵌套结构处理不当导致。 |
 | 2026-03-03 | 优化重构 | 清理旧设备类型（BODY/bed/car/endi 等），移除 CH340 直接标记逻辑，统一通过波特率探测识别设备（921600→HL/HR, 1000000→sit, 3000000→foot1-4）。 |
@@ -61,6 +63,7 @@
   - `analysis.md`: 项目结构分析报告。
   - `e2e_test.js`: Playwright 端到端测试脚本（脚本模式）。
   - `e2e_full_click_test.js`: 完全模拟用户点击操作的端到端测试脚本。
+  - `e2e_comprehensive_test.js`: 综合端到端测试（49个用例），覆盖UI交互+后端API+数据库回放+CSV导出+报告生成。
   - `serial_simulator.js`: 虚拟串口模拟器，使用 socat 创建虚拟串口对并发送真实传感器数据。
   - `serial_protocol_analysis.md`: 串口通信协议分析文档。
   - `screenshots*/`: 各版本测试过程中生成的截图。
@@ -244,6 +247,8 @@
 | 2026-03-03 | 串口设备识别重构 | 移除 CH340 芯片直接标记逻辑，统一通过波特率探测识别设备大类（921600→手套, 1000000→起坐垫, 3000000→脚垫），删除所有旧设备类型（BODY/bed/car/endi/carAir 等）的代码。 |
 | 2026-03-03 | 报告假数据清理 | 移除四个报告组件中的假数据 fallback 逻辑和 public 下的静态假数据文件，确保所有报告数据必须来自真实采集。 |
 | 2026-03-03 | serialServer.js 语法修复 | 修复 130 帧块与 1024 帧块之间的括号不匹配问题，恢复应用正常启动。 |
+| 2026-03-04 | matrix表schema修复 | 修复 init.db/foot.db 中 matrix 表缺少 timestamp 和 select 列的严重 Bug，恢复采集数据写入、CSV导出、回放、报告生成功能。 |
+| 2026-03-04 | 综合端到端测试 | 新增 49 个用例的综合测试，覆盖4个评估采集、报告生成、CSV导出、数据库回放、历史记录CRUD、WebSocket验证等全流程。 |
 
 ## 6. 未来维护与更新
 
