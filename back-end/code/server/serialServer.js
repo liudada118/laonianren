@@ -3347,6 +3347,18 @@ function ensureMatrixNameColumn(db) {
         if (e) console.error('ALTER TABLE add sample_type failed:', e)
       })
     }
+    const hasTimestamp = rows.some((r) => r.name === 'timestamp')
+    if (!hasTimestamp) {
+      db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
+        if (e) console.error('ALTER TABLE add timestamp failed:', e)
+      })
+    }
+    const hasSelect = rows.some((r) => r.name === 'select')
+    if (!hasSelect) {
+      db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
+        if (e) console.error('ALTER TABLE add select failed:', e)
+      })
+    }
   })
 }
 
