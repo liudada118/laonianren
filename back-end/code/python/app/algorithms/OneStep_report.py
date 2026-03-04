@@ -23,8 +23,6 @@ from scipy.ndimage import gaussian_filter  # 未使用，但保留你的 import
 from matplotlib.colors import LinearSegmentedColormap  # 未使用，但保留你的 import
 
 
-import asyncio
-from heatmap_renderer import generate_heatmap_png
 from pathlib import Path
 
 # =========================
@@ -2365,11 +2363,8 @@ def cal_cop_fromData(data_array, threshold_ratio=0.8, fps=42, r_radius=0.1, time
     print(f"足弓类型： 左 {arch_results['left_foot']['area_type']} / 右 {arch_results['right_foot']['area_type']}")
 
 
+    # 前端自行渲染热力图，这里不生成外部 web heatmap 图
     png_path = None
-    if save_pdf_path:          # 只要准备出报告就顺手渲染
-        png_path = Path(str(Path(save_pdf_path).with_suffix('')) + '_web_heatmap.png')
-        # 跳过 heatmap_renderer（外部热力图不需要，且在 FastAPI event loop 中会冲突）
-        # asyncio.run(generate_heatmap_png(arch_results['peak_frame_data'], png_path))
     # 生成PDF报告
     if save_pdf_path:
         # ✅ 修改点：直接使用 save_pdf_path 的父目录
@@ -2477,5 +2472,3 @@ if __name__ == "__main__":
         save_pdf_path=save_pdf_path,
         rotate_data=False  #关闭二次旋转
     )
-
-

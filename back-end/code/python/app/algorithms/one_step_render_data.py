@@ -47,16 +47,11 @@ def generate_standing_report(data_array, fps=42, threshold_ratio=0.8):
                 'cop_time_series': { 'path_length', 'contact_area', ... },
             }
     """
-    import tempfile
-
     # 确保是 list of lists 格式（preprocess_origin_data 期望的格式）
     if hasattr(data_array, 'tolist'):
         raw_data = data_array.tolist()
     else:
         raw_data = [list(row) for row in data_array]
-
-    tmp_dir = tempfile.mkdtemp(prefix='standing_render_')
-    tmp_pdf = os.path.join(tmp_dir, 'report.pdf')
 
     # 1. 预处理（跳过CSV读取，直接传入数组）
     processed_data = preprocess_origin_data(
@@ -77,7 +72,7 @@ def generate_standing_report(data_array, fps=42, threshold_ratio=0.8):
     results = cal_cop_fromData(
         processed_data,
         show_plots=False,
-        save_pdf_path=tmp_pdf,
+        save_pdf_path=None,
         rotate_data=False,
         fps=fps,
         threshold_ratio=threshold_ratio,
