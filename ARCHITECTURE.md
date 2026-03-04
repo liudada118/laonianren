@@ -8,6 +8,7 @@
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-04 | 修复缺陷 | 修复步态报告Gait Average Summary左右脚热力图大小不一致。根因：analyze_gait_and_plot中左右脚的canvas大小独立计算，当左脚bounding box比右脚小时，导致imshow的extent不同，显示比例不一致。修复：统一左右脚的canvas大小为max(l_h,r_h)和max(l_w,r_w)。 |
 | 2026-03-04 | 性能优化 | 注释掉算法中前端未使用的base64图片生成，大幅减小render_data体积。起坐算法：注释全部5个images字段（前端已用heatmap_data+cop_data通过Canvas渲染）；步态算法：注释5个前端已用ECharts数值数据渲染的图片，保留3个必需的base64图片。同时跳过对应的matplotlib绘图函数调用，加速算法执行。 |
 | 2026-03-04 | 修复缺陷 | 修复历史记录413 Payload Too Large错误。根因：serialServer.js中存在两行express.json()中间件，第一行无limit（默认100KB）先执行，导致第二行的limit:'50mb'永远不生效。修复：删除无limit的express.json()，合并为一行limit:'200mb'。 |
 | 2026-03-04 | 修复缺陷 | 修复两个严重Bug：(1) completeAssessment中saveAssessmentSession发送的数据包含巨大的原始传感器data字段，导致第二个评估后请求体超限，历史记录只保存1/4；(2) 从Dashboard点击查看报告进入评估页面时，reportData状态变量初始化为null未从assessments恢复，导致显示"暂无报告数据"。修改5个文件：AssessmentContext.jsx + 4个评估页面。 |

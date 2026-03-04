@@ -2001,8 +2001,12 @@ def analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, 
     left_info, l_h, l_w = collect_foot_data(left_on, left_off, False)
     right_info, r_h, r_w = collect_foot_data(right_on, right_off, True)
     
-    l_aligned_imgs, l_aligned_cops = plot_debug_and_get_aligned(left_info, l_h, l_w, False)
-    r_aligned_imgs, r_aligned_cops = plot_debug_and_get_aligned(right_info, r_h, r_w, True)
+    # 统一左右脚的 canvas 大小，确保热力图显示比例一致
+    unified_h = max(l_h, r_h)
+    unified_w = max(l_w, r_w)
+    
+    l_aligned_imgs, l_aligned_cops = plot_debug_and_get_aligned(left_info, unified_h, unified_w, False)
+    r_aligned_imgs, r_aligned_cops = plot_debug_and_get_aligned(right_info, unified_h, unified_w, True)
     
     fig_summary, axes_summary = plt.subplots(1, 2, figsize=(12, 8), facecolor='white')
     
