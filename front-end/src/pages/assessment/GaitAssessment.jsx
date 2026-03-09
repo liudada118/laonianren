@@ -5,6 +5,7 @@ import EChart from '../../components/ui/EChart';
 import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
 import { backendBridge } from '../../lib/BackendBridge';
 import GaitRegionChart from '../../components/report/GaitRegionChart';
+import { exportToPdf } from '../../lib/pdfExport';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -283,8 +284,31 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
   const leftStepLen = parseFloat(gp.leftStepLength) || 0;
   const rightStepLen = parseFloat(gp.rightStepLength) || 0;
 
+  const gaitContentRef = React.useRef(null);
+  const [pdfExporting, setPdfExporting] = React.useState(false);
+  const handlePdfExport = async () => {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    try { await exportToPdf(gaitContentRef?.current, `${patientInfo?.name || '报告'}_步态评估`, { title: '步态评估报告' }); } finally { setPdfExporting(false); }
+  };
+
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col h-full">
+      {/* 顶部栏 */}
+      <div className="shrink-0 px-4 md:px-6 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-light)', background: 'var(--bg-secondary)' }}>
+        <h2 className="text-sm md:text-base font-bold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'} 的步态评估报告</h2>
+        <button onClick={handlePdfExport} disabled={pdfExporting}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+          style={{ color: pdfExporting ? 'var(--text-muted)' : '#DC2626', background: pdfExporting ? 'var(--bg-tertiary)' : '#FEF2F2', border: '1px solid #FCA5A530', cursor: pdfExporting ? 'wait' : 'pointer' }}>
+          {pdfExporting ? (
+            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          )}
+          {pdfExporting ? '导出中...' : '导出 PDF'}
+        </button>
+      </div>
+    <div className="flex flex-1 overflow-hidden">
       <nav className="w-48 shrink-0 p-3 overflow-y-auto hidden lg:block" style={{ borderRight: '1px solid var(--border-light)' }}>
         {sections.map(s => (
           <button key={s.id} onClick={() => scrollToSection(s.id)}
@@ -295,7 +319,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
         ))}
       </nav>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+      <div ref={gaitContentRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
         {/* 1. 步态时空参数 */}
         <section id="gait-spatiotemporal">
           <div className="zeiss-section-title">1. 步态时空参数</div>
@@ -528,6 +552,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
         </section>
       </div>
     </div>
+    </div>
   );
 }
 
@@ -755,7 +780,7 @@ export default function GaitAssessment() {
       });
       if (resp?.data?.render_data) {
         setPythonResult(resp.data.render_data);
-        completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data });
+        completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data }, assessmentIdRef.current);
       } else {
         throw new Error('后端未返回报告数据');
       }
@@ -770,7 +795,7 @@ export default function GaitAssessment() {
 
   const viewReport = () => {
     setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult });
+    completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
   };
 
   // 清理
@@ -873,7 +898,7 @@ export default function GaitAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : analysisError ? '采集完成，分析失败' : '采集完成'}</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : analysisError || '可返回首页继续其他评估'}</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               {pythonResult && (
                 <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>

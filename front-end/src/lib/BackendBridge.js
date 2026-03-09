@@ -160,6 +160,11 @@ class BackendBridge {
     return res.json();
   }
 
+  async rescanPort() {
+    const res = await fetch(`${this.httpUrl}/rescanPort`);
+    return res.json();
+  }
+
   async setActiveMode(mode) {
     const res = await fetch(`${this.httpUrl}/setActiveMode`, {
       method: 'POST',

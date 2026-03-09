@@ -1,7 +1,8 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as echarts from 'echarts';
 import InteractiveArchChart from './InteractiveArchChart';
 import InteractiveCOPChart from './InteractiveCOPChart';
+import { exportToPdf } from '../../lib/pdfExport';
 
 /* ─── 蔡司风格 EChart 封装（增量更新，避免闪烁） ─── */
 function EChart({ option, height = 280 }) {
@@ -644,6 +645,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
           <span className="hidden sm:inline">性别：{patientInfo?.gender || '---'}</span>
           <span className="hidden sm:inline">年龄：{patientInfo?.age || '---'}</span>
           <span className="hidden md:inline">评估时间：{reportTime}</span>
+          <PdfBtnStanding containerRef={contentRef} fileName={`${patientInfo?.name || '报告'}_静态站立评估`} />
           {onClose && (
             <button onClick={onClose} className="ml-2 w-8 h-8 flex items-center justify-center rounded-lg" style={{ color: 'var(--text-muted)' }}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -990,3 +992,38 @@ function AssessmentSummary({ data, diff }) {
 }
 
 
+
+function PdfBtnStanding({ containerRef, fileName }) {
+  const [exporting, setExporting] = React.useState(false);
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await exportToPdf(containerRef?.current, fileName, { title: '静态站立评估报告' });
+    } finally {
+      setExporting(false);
+    }
+  };
+  return (
+    <button onClick={handleExport} disabled={exporting}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+      style={{
+        color: exporting ? 'var(--text-muted)' : '#DC2626',
+        background: exporting ? 'var(--bg-tertiary)' : '#FEF2F2',
+        border: '1px solid #FCA5A530',
+        cursor: exporting ? 'wait' : 'pointer',
+      }}>
+      {exporting ? (
+        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      )}
+      {exporting ? '导出中...' : '导出 PDF'}
+    </button>
+  );
+}

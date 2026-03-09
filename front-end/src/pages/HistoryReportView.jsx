@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getRecord } from '../lib/historyService';
+import { backendBridge } from '../lib/BackendBridge';
 import GripReport from '../components/report/GripReport';
 import StandingReport from '../components/report/StandingReport';
 import SitStandReport from '../components/report/SitStandReport';
@@ -55,6 +56,43 @@ export default function HistoryReportView() {
   const reportData = assessmentData?.report?.reportData || null;
 
   const handleBack = () => navigate('/history');
+
+  // CSV 导出
+  const [csvExporting, setCsvExporting] = useState(false);
+  const assessmentIds = assessmentData?.assessmentId || null;
+
+  const handleExportCsv = useCallback(async () => {
+    if (!assessmentIds) {
+      alert('该历史记录没有关联的采集数据 ID，无法导出 CSV');
+      return;
+    }
+    setCsvExporting(true);
+    try {
+      // assessmentIds 可能是逗号分隔的多个 ID（如握力左右手）
+      const ids = assessmentIds.split(',').filter(Boolean);
+      const sampleTypeMap = { grip: '1', sitstand: '3', standing: '4', gait: 'gait' };
+      const params = ids.length > 1
+        ? { assessmentIds: ids, sampleType: sampleTypeMap[assessmentType] || '' }
+        : { assessmentId: ids[0], sampleType: sampleTypeMap[assessmentType] || '' };
+      const resp = await backendBridge.exportCsv(params);
+      if (resp?.code === 0 && resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = resp.data.fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else {
+        alert('导出失败: ' + (resp?.msg || '未知错误'));
+      }
+    } catch (e) {
+      console.error('CSV导出失败:', e);
+      alert('CSV导出失败: ' + e.message);
+    } finally {
+      setCsvExporting(false);
+    }
+  }, [assessmentIds, assessmentType]);
 
   const renderReport = () => {
     if (loading) {
@@ -134,6 +172,16 @@ export default function HistoryReportView() {
           </span>
           {record?.dateStr && (
             <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{record.dateStr}</span>
+          )}
+          {assessmentIds && (
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all"
+              style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', opacity: csvExporting ? 0.6 : 1 }}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {csvExporting ? '导出中...' : '导出 CSV'}
+            </button>
           )}
           <button onClick={handleBack} className="zeiss-btn-ghost text-xs flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -679,7 +679,7 @@ export default function GripAssessment() {
     setShowCompleteDialog(false);
     setPhase('report');
     setReportMode('static');
-    completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData });
+    completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
   };
 
   const handleClose = async () => {
@@ -940,7 +940,7 @@ export default function GripAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(',')); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport}
                 className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>

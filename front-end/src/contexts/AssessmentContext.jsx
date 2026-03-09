@@ -88,6 +88,34 @@ export function AssessmentProvider({ children }) {
     }
   }, []);
 
+  // ─── 重新扫描串口（掉线重连）───
+  const [rescanLoading, setRescanLoading] = useState(false);
+  const rescanDevices = useCallback(async () => {
+    try {
+      setRescanLoading(true);
+      console.log('[重新扫描] 开始...');
+
+      // 确保 WebSocket 已连接
+      if (!backendBridge.isConnected) {
+        backendBridge.connect();
+        await new Promise((resolve) => {
+          if (backendBridge.isConnected) { resolve(); return; }
+          const off = backendBridge.on('connect', () => { off(); resolve(); });
+          setTimeout(() => { off(); resolve(); }, 3000);
+        });
+      }
+
+      const result = await backendBridge.rescanPort();
+      console.log('[重新扫描] 结果:', result);
+      setRescanLoading(false);
+      return { success: true, data: result };
+    } catch (err) {
+      console.error('[重新扫描] 失败:', err);
+      setRescanLoading(false);
+      return { success: false, error: err.message };
+    }
+  }, []);
+
   // ─── 断开所有设备 ───
   const disconnectAllDevices = useCallback(() => {
     backendBridge.disconnect();
@@ -114,10 +142,10 @@ export function AssessmentProvider({ children }) {
     setState(prev => ({ ...prev, patientInfo: info }));
   }, []);
 
-  const completeAssessment = useCallback((type, report, data) => {
+  const completeAssessment = useCallback((type, report, data, assessmentId) => {
     setState(prev => {
       const assessments = { ...prev.assessments };
-      assessments[type] = { completed: true, report, data };
+      assessments[type] = { completed: true, report, data, assessmentId };
 
       // 自动保存到后端数据库历史记录
       // 注意：只发送 completed 和 report，过滤掉 data 字段（原始传感器数据可能非常大，会导致请求体超过限制）
@@ -127,6 +155,7 @@ export function AssessmentProvider({ children }) {
           assessmentsForSave[key] = {
             completed: val.completed,
             report: val.report,
+            assessmentId: val.assessmentId || null,
             // 不发送 data 字段（原始传感器数据）
           };
         }
@@ -149,6 +178,20 @@ export function AssessmentProvider({ children }) {
     });
   }, []);
 
+  // 开始新的一次评估：重置所有评估状态和患者信息，保留登录和设备连接
+  const startNewSession = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      patientInfo: null,
+      assessments: {
+        grip: { completed: false, report: null, data: null },
+        sitstand: { completed: false, report: null, data: null },
+        standing: { completed: false, report: null, data: null },
+        gait: { completed: false, report: null, data: null },
+      },
+    }));
+  }, []);
+
   const value = {
     ...state,
     login,
@@ -156,6 +199,7 @@ export function AssessmentProvider({ children }) {
     setPatientInfo,
     completeAssessment,
     resetAssessment,
+    startNewSession,
     // 设备连接相关
     deviceConnStatus,
     deviceOnlineMap,
@@ -163,6 +207,8 @@ export function AssessmentProvider({ children }) {
     macInfo,
     connectAllDevices,
     disconnectAllDevices,
+    rescanDevices,
+    rescanLoading,
     backendBridge, // 暴露 backendBridge 实例供各页面使用
   };
 

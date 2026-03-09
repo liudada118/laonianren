@@ -142,7 +142,7 @@ function PatientDialog({ open, onClose, onConfirm }) {
 }
 
 /* ─── 一键连接按钮组件 ─── */
-function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap, macInfo }) {
+function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoading, deviceOnlineMap, macInfo }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
   const isError = status === 'error';
@@ -150,6 +150,7 @@ function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap, macIn
   // 统计在线设备数
   const allDevices = ['HL', 'HR', 'sit', 'foot1', 'foot2', 'foot3', 'foot4'];
   const onlineCount = allDevices.filter(d => deviceOnlineMap[d] === 'online').length;
+  const hasOffline = isConnected && onlineCount < allDevices.length && onlineCount > 0;
 
   // 解析 MAC 信息：将端口路径映射的 macInfo 转为简洁显示
   const macEntries = macInfo ? Object.entries(macInfo) : [];
@@ -223,6 +224,35 @@ function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap, macIn
         )}
         {isConnecting ? '连接中...' : isConnected ? '已连接' : isError ? '重新连接' : '一键连接'}
       </button>
+
+      {/* 重新扫描按钮（已连接且有设备离线时显示） */}
+      {isConnected && (
+        <button
+          onClick={onRescan}
+          disabled={rescanLoading}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: hasOffline ? '#FEF3C7' : 'var(--bg-tertiary)',
+            color: hasOffline ? '#D97706' : 'var(--text-tertiary)',
+            border: hasOffline ? '1px solid #F59E0B40' : '1px solid var(--border-light)',
+            cursor: rescanLoading ? 'wait' : 'pointer',
+            opacity: rescanLoading ? 0.7 : 1,
+          }}
+          title="重新扫描串口，连接掉线设备"
+        >
+          {rescanLoading ? (
+            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          )}
+          {rescanLoading ? '扫描中...' : '重新扫描'}
+        </button>
+      )}
     </div>
   );
 }
@@ -231,12 +261,14 @@ function ConnectButton({ status, onConnect, onDisconnect, deviceOnlineMap, macIn
 export default function Dashboard() {
   const navigate = useNavigate();
   const {
-    institution, patientInfo, setPatientInfo, assessments, resetAssessment,
+    institution, patientInfo, setPatientInfo, assessments, resetAssessment, startNewSession,
     deviceConnStatus, deviceOnlineMap, macInfo, connectAllDevices, disconnectAllDevices,
+    rescanDevices, rescanLoading,
   } = useAssessment();
   const [showDialog, setShowDialog] = useState(false);
   const [pendingPath, setPendingPath] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(null);
+  const [showNewSessionConfirm, setShowNewSessionConfirm] = useState(false);
   const [showGripTip, setShowGripTip] = useState(false);
   const [gripTipPath, setGripTipPath] = useState('');
   const [showSitStandTip, setShowSitStandTip] = useState(false);
@@ -323,12 +355,25 @@ export default function Dashboard() {
             status={deviceConnStatus}
             onConnect={connectAllDevices}
             onDisconnect={disconnectAllDevices}
+            onRescan={rescanDevices}
+            rescanLoading={rescanLoading}
             deviceOnlineMap={deviceOnlineMap}
             macInfo={macInfo}
           />
 
           {institution && (
             <span className="text-sm font-medium hidden lg:inline" style={{ color: 'var(--text-secondary)' }}>{institution}</span>
+          )}
+          {/* 新评估按钮 */}
+          {patientInfo && (
+            <button onClick={() => setShowNewSessionConfirm(true)}
+              className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm px-3 py-1.5 rounded-lg font-semibold transition-all"
+              style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="hidden sm:inline">新评估</span>
+            </button>
           )}
           <button onClick={() => navigate('/history')}
             className="zeiss-btn-ghost flex items-center gap-1.5 md:gap-2 text-xs md:text-sm">
@@ -349,6 +394,21 @@ export default function Dashboard() {
             已完成 <span className="font-bold" style={{ color: 'var(--zeiss-blue)' }}>{completedCount}</span> / <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>4</span> 项评估
             {completedCount === 4 && <span style={{ color: 'var(--success)' }} className="ml-2 font-medium">· 全部完成</span>}
           </p>
+          {completedCount > 0 && (
+            <button
+              onClick={() => {
+                const completedTypes = Object.entries(assessments).filter(([,v]) => v.completed).map(([k]) => k);
+                const first = completedTypes[0];
+                if (first) navigate(`/assessment/${first === 'grip' ? 'grip' : first === 'sitstand' ? 'sitstand' : first === 'standing' ? 'standing' : 'gait'}`, { state: { viewReport: true } });
+              }}
+              className="mt-3 inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
+              style={{ color: '#DC2626', background: '#FEF2F2', border: '1px solid #FCA5A530' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              查看已完成报告
+            </button>
+          )}
         </div>
 
         {/* 四个评估卡片 */}
@@ -521,6 +581,36 @@ export default function Dashboard() {
                 className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer"
                 style={{ background: 'var(--warning)' }}>
                 确认重新评估
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 新评估确认弹窗 */}
+      {showNewSessionConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[420px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center"
+              style={{ background: '#ECFDF5' }}>
+              <svg className="w-6 h-6" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>开始新的评估</h3>
+            <p className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>
+              当前评估对象：<span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}</span>
+            </p>
+            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+              开始新评估将重置所有评估状态并清空患者信息，<br/>当前评估数据已自动保存到历史记录。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowNewSessionConfirm(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+              <button
+                onClick={() => { setShowNewSessionConfirm(false); startNewSession(); }}
+                className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer transition-all"
+                style={{ background: '#059669' }}>
+                确认开始新评估
               </button>
             </div>
           </div>

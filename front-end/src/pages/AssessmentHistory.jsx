@@ -310,6 +310,29 @@ export default function AssessmentHistory() {
                             );
                           })}
                         </div>
+                        {/* 一键导出所有已完成报告 */}
+                        {getCompletedCount(item.assessments) > 0 && (
+                          <div className="mt-3 flex items-center gap-3">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // 依次打开所有已完成的报告页面（用户可在每个报告页单独导出 PDF）
+                                const completedTypes = ASSESSMENT_KEYS.filter(k => item.assessments?.[k]?.completed);
+                                completedTypes.forEach((type, idx) => {
+                                  setTimeout(() => {
+                                    window.open(`/history/report?id=${item.id}&type=${type}`, '_blank');
+                                  }, idx * 500);
+                                });
+                              }}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                              style={{ color: '#DC2626', background: '#FEF2F2', border: '1px solid #FCA5A530', cursor: 'pointer' }}>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              一键打开所有报告（{getCompletedCount(item.assessments)}份）
+                            </button>
+                          </div>
+                        )}
                         {item.institution && (
                           <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>
                             评估机构: {item.institution}

@@ -86,6 +86,7 @@ export function saveAssessmentSession(patientInfo, institution, assessments) {
           existing.assessments[type] = {
             completed: true,
             report: data.report,
+            assessmentId: data.assessmentId || existing.assessments?.[type]?.assessmentId || null,
             completedAt: now.toISOString(),
           };
         }
@@ -99,6 +100,7 @@ export function saveAssessmentSession(patientInfo, institution, assessments) {
         assessmentData[type] = {
           completed: data.completed || false,
           report: data.completed ? data.report : null,
+          assessmentId: data.assessmentId || null,
           completedAt: data.completed ? now.toISOString() : null,
         };
       }

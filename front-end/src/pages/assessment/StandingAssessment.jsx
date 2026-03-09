@@ -554,7 +554,7 @@ export default function StandingAssessment() {
     setCsvExporting(false);
   };
 
-  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); setReportMode('static'); completeAssessment('standing', { completed: true, reportData }); };
+  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); setReportMode('static'); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); };
   const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -685,7 +685,7 @@ export default function StandingAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>共采集 {collectedFrames.current.length} 帧数据</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('standing', { completed: true, reportData }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport}
                 className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>

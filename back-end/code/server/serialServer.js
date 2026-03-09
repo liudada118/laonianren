@@ -1509,6 +1509,37 @@ app.get('/connPort', async (req, res) => {
 
 })
 
+// 重新扫描串口（掉线重连）
+// 清理已断开的串口，重新扫描并连接新发现的设备
+app.get('/rescanPort', async (req, res) => {
+  try {
+    console.log('[rescanPort] 开始重新扫描串口...')
+    // 1. 清理已断开的串口
+    const deadPaths = []
+    for (const path of Object.keys(parserArr)) {
+      const item = parserArr[path]
+      if (!item || !item.port || !item.port.isOpen) {
+        deadPaths.push(path)
+        if (item && item.port) {
+          try { item.port.close(); } catch (e) {}
+        }
+        delete parserArr[path]
+        delete dataMap[path]
+      }
+    }
+    console.log('[rescanPort] 清理已断开串口:', deadPaths.length, '个', deadPaths)
+
+    // 2. 重新调用 connectPort，它会跳过已连接的串口（parserArr[path] 存在且 isOpen）
+    const ports = await connectPort()
+    console.log('[rescanPort] 重新扫描完成，当前连接:', Object.keys(parserArr).length, '个串口')
+
+    res.json(new HttpResult(0, { cleaned: deadPaths, ports }, '重新扫描完成'));
+  } catch (e) {
+    console.error('[rescanPort] 失败:', e)
+    res.json(new HttpResult(1, {}, '重新扫描失败: ' + e.message));
+  }
+})
+
 // 寮€濮嬮噰闆?
 app.post('/startCol', async (req, res) => {
   try {
@@ -1574,13 +1605,88 @@ app.post('/setActiveMode', (req, res) => {
 })
 
 
-// 鍋滄閲囬泦
+/// 停止采集
 app.get('/endCol', async (req, res) => {
   console.log('[endCol] 收到请求: 当前assessmentId=%s', activeAssessmentId)
   colFlag = false
   // 停止采集时立即刷入缓冲区剩余数据
   flushStorageBuffer()
-  res.json(new HttpResult(0, 'success', '偁止采集'));
+
+  // 自动导出 CSV 保存（异步执行，不阻塞响应）
+  const endColAssessmentId = activeAssessmentId
+  if (endColAssessmentId) {
+    // 延迟 500ms 确保 flushStorageBuffer 完成
+    setTimeout(async () => {
+      try {
+        const ids = [endColAssessmentId]
+        let allRows = []
+        for (const aid of ids) {
+          const rows = await new Promise((resolve, reject) => {
+            const sql = 'SELECT * FROM matrix WHERE assessment_id=?'
+            currentDb.all(sql, [aid], (err, data) => {
+              if (err) return reject(err)
+              resolve(data || [])
+            })
+          })
+          allRows = allRows.concat(rows)
+        }
+        if (allRows.length) {
+          const keySet = new Set()
+          const parsedRows = allRows.map(row => {
+            try {
+              const obj = JSON.parse(row.data || '{}')
+              Object.keys(obj).forEach(k => keySet.add(k))
+              return obj
+            } catch { return {} }
+          })
+          const dataKeys = Array.from(keySet)
+          const headers = ['timestamp', 'date', 'assessment_id', 'sample_type']
+          dataKeys.forEach(key => {
+            headers.push(`${key}_pressure`, `${key}_area`, `${key}_max`, `${key}_min`, `${key}_avg`, `${key}_data`)
+          })
+          const csvLines = [headers.join(',')]
+          allRows.forEach((row, idx) => {
+            const rowObj = parsedRows[idx] || {}
+            const line = [
+              row.timestamp || '',
+              (row.date || '').replace(/,/g, ' '),
+              (row.assessment_id || '').replace(/,/g, ' '),
+              row.sample_type || '',
+            ]
+            dataKeys.forEach(key => {
+              const item = rowObj[key]
+              const arr = Array.isArray(item) ? item : (item && item.arr ? item.arr : null)
+              if (Array.isArray(arr)) {
+                const pressure = arr.reduce((a, b) => a + b, 0)
+                const area = arr.filter(v => v > 0).length
+                const max = Math.max(...arr)
+                const positives = arr.filter(v => v > 0)
+                const min = positives.length ? Math.min(...positives) : 0
+                const avg = area > 0 ? (pressure / area).toFixed(2) : '0'
+                line.push(pressure, area, max, min, avg, `"${JSON.stringify(arr)}"`)
+              } else {
+                line.push('', '', '', '', '', '')
+              }
+            })
+            csvLines.push(line.join(','))
+          })
+          const csvContent = csvLines.join('\n')
+          const safeId = endColAssessmentId.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 80)
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)
+          const fileName = `auto_${safeId}_${ts}.csv`
+          const csvDir = path.join(storageBase, 'data')
+          if (!fs.existsSync(csvDir)) fs.mkdirSync(csvDir, { recursive: true })
+          const csvFilePath = path.join(csvDir, fileName)
+          fs.writeFileSync(csvFilePath, '\uFEFF' + csvContent, 'utf-8')
+          console.log('[endCol] 自动保存CSV: %s, rows=%d', csvFilePath, allRows.length)
+        }
+      } catch (e) {
+        console.error('[endCol] 自动保存CSV失败:', e)
+      }
+    }, 500)
+  }
+
+  res.json(new HttpResult(0, 'success', '停止采集'));
 })
 
 // 鑾峰彇鏁版嵁搴撴墍鏈夊瓨鍙栧垪琛?

@@ -327,7 +327,7 @@ export default function SitStandAssessment() {
   const viewReport = () => {
     stopSimulation(); // 停止模拟，释放3D场景资源
     setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory });
+    completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory }, assessmentIdRef.current);
   };
 
   const fmtTime = (t) => {
@@ -481,7 +481,7 @@ export default function SitStandAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory }, assessmentIdRef.current); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
             </div>
