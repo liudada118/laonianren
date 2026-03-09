@@ -1483,13 +1483,14 @@ def analyze_gait_cycle(gait_events, frame_ms=40):
     if len(left_on) < 3 or len(right_on) < 1: return {}, 0, 0
 
     i = 1
-    # while i < len(left_on) - 1:
-    #     if left_on[i] is not None and left_on[i+1] is not None: break
-    #     i += 1
-    # if i >= len(left_on) - 1: return {}, 0, 0
+    while i < len(left_on) - 1:
+        if left_on[i] is not None and left_on[i+1] is not None: break
+        i += 1
+    if i >= len(left_on) - 1: return {}, 0, 0
 
-    cycle_start = left_on[i] 
+    cycle_start = left_on[i]
     cycle_end = left_on[i + 1]
+    if cycle_start is None or cycle_end is None: return {}, 0, 0
 
     right_step_on = -1
     for k in range(len(right_on)):
