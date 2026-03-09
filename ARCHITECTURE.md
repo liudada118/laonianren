@@ -1,13 +1,26 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-03-09 17:40
+**最后更新**: 2026-03-09 10:06
 **作者**: Manus AI
 
 ## 更新日志
 
 | 日期 | 类型 | 描述 |
 |---|---|---|
+| 2026-03-09 10:06 | ld | 修复缺陷 | 修正主页Dashboard评估卡片设备数量提示：起坐5→2（坐垫+脚垫1）、静态站立4→1（脚垫1）。修改文件：Dashboard.jsx。 |
+| 2026-03-09 10:05 | ld | 新增功能 | 三个评估模式（起坐/静态站立/步态）3D场景启用缩放控制并扩大缩放范围（PressureScene3D.js、FootpadScene.js、InsoleScene.jsx）。 |
+| 2026-03-09 10:04 | ld | 新增功能 | 起坐和静态站立前端展示增加脚垫数据左右对调（usePressureScene.js增加flipLR、FootAnalysis.js的parseFrameData增加额外flipLR）。 |
+| 2026-03-09 10:03 | ld | 修复缺陷 | 修正后端脚垫翻转方向为上下翻转（flipFoot64x64Vertical，行顺序反转）实现左右对调。修改文件：serialServer.js。 |
+| 2026-03-09 10:02 | ld | 新增功能 | 后端对所有脚垫(foot1-4)的64×64矩阵数据做水平镜像翻转（左右对调）。修改文件：serialServer.js。 |
+| 2026-03-09 10:01 | ld | 修复缺陷 | 修复起坐评估中foot1脚垫只渲染左上区域的问题（跨模式footBuffers污染），增加模式感知的脚垫过滤。修改文件：usePressureScene.js。 |
+| 2026-03-09 09:58 | ld | 修复缺陷 | 起坐评估坐垫脚垫帧率修复：去除重复帧并使用真实时间戳。修改文件：serialServer.js。 |
+| 2026-03-09 09:55 | ld | 修复缺陷 | 修复同名患者同日评估历史记录被覆盖的问题。修改文件：historyService.js。 |
+| 2026-03-09 09:52 | ld | 修复缺陷 | 修复rescanPort关闭已断开串口时Port is not open崩溃。修改文件：serialServer.js。 |
+| 2026-03-09 09:50 | ld | 修复缺陷 | 修复步态分析analyze_gait_cycle中cycle_start为None导致的TypeError。修改文件：generate_gait_report.py。 |
+| 2026-03-09 09:48 | ld | 修复缺陷 | 修复searchHistory/getRecord非Promise导致.then is not a function错误。修改文件：BackendBridge.js。 |
+| 2026-03-09 09:45 | ld | 新增功能 | 重写PDF导出：使用html2canvas+jsPDF生成真实PDF文件，支持单报告和整体报告导出。修改文件：pdfExport.jsx。 |
+| 2026-03-09 09:40 | ld | 新增功能 | 实现5个功能：设备掉线重连、单报告PDF导出、整体报告PDF导出、历史一键删除、步态评估报告优化。 |
 | 2026-03-09 17:40 | test | 新增功能+优化重构 | 静态站立评估3项改进：(1) 进入评估后弹窗提示“请踩上，10秒后自动结束”；(2) COP轨迹与置信椭圆坐标自适应（根据散点+椭圆范围动态计算坐标轴，图表高度从380/400增大到520，椭圆图改为全宽布局）；(3) 综合评估移到报告最前面；额外修复评估时间持续增加bug。修改文件：StandingAssessment.jsx、StandingReport.jsx。 |
 | 2026-03-09 17:20 | test | 新增功能+修复缺陷 | 起坐能力评估4项改进：(1) Dashboard和SitStandAssessment新增“请起坐 5 次”弹窗提示；(2) 修正报告测试时间持续增加Bug（用useMemo缓存fallbackDate）；(3) 取消站立帧数/坐姿帧数展示，仅保留采样率小字；(4) 力时间曲线合并为单图并添加足底/坐垫图例标识。修改文件：Dashboard.jsx、SitStandAssessment.jsx、SitStandReport.jsx。 |
 | 2026-03-09 16:46 | test | 优化重构 | 握力评估左侧可视化区域实时更新：设备连接后无论是否在采集，左侧面板的压力曲线、统计数据、正态分布图均实时变化。修改文件：GripAssessment.jsx。 |
@@ -133,6 +146,9 @@
 - **`ECharts`**: 用于绘制 2D 图表，如压力曲线、柱状图等 (`components/ui/EChart.jsx`)。
 - **`Three.js` / `@react-three/fiber`**: 用于渲染 3D 模型，如手部模型、足底压力热力图等 (`components/three/`)。
   - **热力图渲染 (`lib/heatmap.js`)**: 一个核心的自定义模块，实现了将离散的压力点数据通过高斯模糊、颜色映射等技术渲染成平滑的热力图纹理，并应用到 3D 模型上。
+  - **脚垫数据前端处理 (`hooks/usePressureScene.js`)**: 起坐/步态评估的脚垫数据处理 hook，包含模式感知的 footBuffers 过滤（防止跨模式数据污染）、`rotateCCW90` 旋转、`flipLR` 水平镜像等变换。
+  - **足底分析 (`lib/FootAnalysis.js`)**: 静态站立评估的数据处理模块，`parseFrameData` 对 64×64 矩阵执行 `rot90 → flipLR → flipUD → flipLR` 变换链，`splitLeftRight` 按列 0-31/32-63 划分左右脚。
+  - **3D 场景缩放控制**: 三个评估模式的 3D 场景（`PressureScene3D.js`、`FootpadScene.js`、`InsoleScene.jsx`）均启用 `OrbitControls.enableZoom`，支持鼠标滚轮/触控板双指缩放。
 
 ### 2.3. 后端服务 (`back-end/code/server/serialServer.js`)
 
@@ -162,6 +178,7 @@
   - `921600` → 手套（HL/HR），通过 130/146 字节帧内类型位区分左右手
   - `1000000` → 起坐垫（sit），1024 字节帧
   - `3000000` → 脚垫（foot1-4），4096 字节帧，通过 AT 指令获取 MAC 地址查映射表细分
+- **脚垫数据预处理流程**：对每个 64×64 脚垫帧依次执行 `zeroBelowThreshold(8)` → `removeSmallIslands64x64(12)` → `flipFoot64x64Vertical`（行顺序反转，实现左右对调），确保前端显示方向与实际脚垫物理方向一致。
 - 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
 - 对原始数据进行解析、分包、校验，转换为数字矩阵。
 - **支持的帧类型**：18 字节（陀螺仪）、130 字节（手套分包矩阵）、146 字节（手套分包+四元数）、1024 字节（起坐垫 32×32）、4096 字节（脚垫 64×64）。
@@ -266,6 +283,16 @@
 | 2026-03-09 16:34 | test | 握力评估操作提示弹窗 | 新增两个用户引导弹窗：Dashboard入口提示"带好手套并手指平铺"、评估页面提示"用最大握力握3次"，提升操作规范性。 |
 | 2026-03-09 16:50 | test | 握力报告布局优化 | 先图后数据、总帧数移出显眼位置、时间范围简化为总时长、面积单位改cm²、删除末尾重复图。 |
 | 2026-03-09 16:46 | test | 握力评估左侧实时可视化 | 设备连接后左侧面板始终实时显示传感器数据，无需等待采集开始。 |
+| 2026-03-09 09:40 | ld | 设备掉线重连与PDF导出 | 实现设备掉线自动重连、单报告PDF导出、整体报告PDF导出（html2canvas+jsPDF）、历史一键删除、步态评估报告优化。 |
+| 2026-03-09 09:45 | ld | BackendBridge Promise修复 | 修复searchHistory/getRecord返回值非Promise导致前端.then调用失败。 |
+| 2026-03-09 09:48 | ld | 步态分析算法修复 | 修复analyze_gait_cycle中cycle_start为None时的TypeError崩溃。 |
+| 2026-03-09 09:50 | ld | 串口重连稳定性 | 修复rescanPort关闭已断开串口时Port is not open崩溃问题。 |
+| 2026-03-09 09:52 | ld | 历史记录唯一性 | 修复同名患者同日评估历史记录被覆盖的问题，使用更精确的ID生成策略。 |
+| 2026-03-09 09:55 | ld | 起坐帧率修复 | 去除重复帧并使用真实时间戳，修复起坐评估坐垫脚垫帧率异常。 |
+| 2026-03-09 09:58 | ld | 起坐脚垫渲染修复 | 修复跨模式footBuffers污染导致起坐评估foot1只渲染左上区域的问题，增加模式感知过滤。 |
+| 2026-03-09 10:02 | ld | 脚垫数据左右对调 | 后端对所有脚垫64×64矩阵做flipFoot64x64Vertical翻转，前端起坐/静态站立增加flipLR，实现脚垫数据左右对调。 |
+| 2026-03-09 10:05 | ld | 3D场景缩放控制 | 三个评估模式3D场景启用OrbitControls缩放，扩大minDistance/maxDistance范围。 |
+| 2026-03-09 10:06 | ld | 主页设备数量修正 | 修正Dashboard评估卡片设备提示：起坐2个（坐垫+脚垫1）、静态站立1个（脚垫1）。 |
 
 ## 6. 未来维护与更新
 
