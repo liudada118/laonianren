@@ -130,8 +130,11 @@ export function AssessmentProvider({ children }) {
             // 不发送 data 字段（原始传感器数据）
           };
         }
-        saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave)
-          .catch(e => console.error('自动保存历史记录失败:', e));
+        try {
+          saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave);
+        } catch (e) {
+          console.error('自动保存历史记录失败:', e);
+        }
       }
 
       return { ...prev, assessments };

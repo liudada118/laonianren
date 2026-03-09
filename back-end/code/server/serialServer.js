@@ -457,6 +457,22 @@ let linkIngPort = [], currentDb, macInfo = {}, selectArr = []
 let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
+
+// 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
+const glovePacket1Cache = {}
+
+/**
+ * 校验四元数合法性（参考 serial_parser_two.py 的 quaternion 属性）
+ * @param {number[]} q - [w, x, y, z]
+ * @returns {number[]|null} - 合法返回 q，否则返回 null
+ */
+function validateQuaternion(q) {
+  if (!q || !Array.isArray(q) || q.length !== 4) return null
+  if (q.some(v => !Number.isFinite(v))) return null
+  const mag = Math.sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3])
+  if (mag < 0.5 || mag > 2.0) return null
+  return q
+}
 let currentSendIntervalMs = null
 const DEFAULT_SEND_MS = 80
 const MIN_SEND_INTERVAL_MS = 5
@@ -905,6 +921,8 @@ app.post('/getHandPdf' , async (req , res) => {
 
     let leftArr = null
     let rightArr = null
+    let leftImuArr = null
+    let rightImuArr = null
     let bestRow = null
     let matchedDate = null
     let matchedTimestamp = null
@@ -915,7 +933,7 @@ app.post('/getHandPdf' , async (req , res) => {
       console.log('[getHandPdf] 使用分离模式: leftId=%s, rightId=%s', leftAssessmentId, rightAssessmentId)
 
       if (leftAssessmentId) {
-        const { dataArr: leftDataArr, rows: leftRows } = await dbGetData({
+        const { dataArr: leftDataArr, rotateArr: leftRotateArr, rows: leftRows } = await dbGetData({
           db: currentDb,
           params: [leftAssessmentId],
           byAssessmentId: true
@@ -926,17 +944,19 @@ app.post('/getHandPdf' , async (req , res) => {
           leftKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (leftDataArr[k] || []).length))
           const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
           leftArr = lk ? leftDataArr[lk] : null
+          leftImuArr = lk && leftRotateArr ? leftRotateArr[lk] : null
           // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
           if (!leftArr && leftKeys.length > 0) {
             leftArr = leftDataArr[leftKeys[0]]
+            leftImuArr = leftRotateArr ? leftRotateArr[leftKeys[0]] : null
           }
           if (!bestRow) bestRow = leftRows[0]
-          console.log('[getHandPdf] 左手最终: key=%s, frames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0)
+          console.log('[getHandPdf] 左手最终: key=%s, frames=%d, imuFrames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0, leftImuArr ? leftImuArr.length : 0)
         }
       }
 
       if (rightAssessmentId) {
-        const { dataArr: rightDataArr, rows: rightRows } = await dbGetData({
+        const { dataArr: rightDataArr, rotateArr: rightRotateArr, rows: rightRows } = await dbGetData({
           db: currentDb,
           params: [rightAssessmentId],
           byAssessmentId: true
@@ -947,12 +967,14 @@ app.post('/getHandPdf' , async (req , res) => {
           rightKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (rightDataArr[k] || []).length))
           const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
           rightArr = rk ? rightDataArr[rk] : null
+          rightImuArr = rk && rightRotateArr ? rightRotateArr[rk] : null
           // 如果 HR 没找到，尝试取第一个可用的数据
           if (!rightArr && rightKeys.length > 0) {
             rightArr = rightDataArr[rightKeys[0]]
+            rightImuArr = rightRotateArr ? rightRotateArr[rightKeys[0]] : null
           }
           if (!bestRow) bestRow = rightRows[0]
-          console.log('[getHandPdf] 右手最终: key=%s, frames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0)
+          console.log('[getHandPdf] 右手最终: key=%s, frames=%d, imuFrames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0, rightImuArr ? rightImuArr.length : 0)
         }
       }
 
@@ -971,7 +993,7 @@ app.post('/getHandPdf' , async (req , res) => {
         return
       }
 
-      const { dataArr, rows } = await dbGetData({
+      const { dataArr, rotateArr, rows } = await dbGetData({
         db: currentDb,
         params: [assessmentId],
         byAssessmentId: true
@@ -999,11 +1021,39 @@ app.post('/getHandPdf' , async (req , res) => {
 
       leftArr = leftKey ? dataArr[leftKey] : null
       rightArr = rightKey ? dataArr[rightKey] : null
+      leftImuArr = leftKey && rotateArr ? rotateArr[leftKey] : null
+      rightImuArr = rightKey && rotateArr ? rotateArr[rightKey] : null
     }
 
     if (!leftArr && !rightArr) {
       res.json(new HttpResult(1, {}, 'no hand data'))
       return
+    }
+
+    // 清洗 IMU 数据：null 项替换为单位四元数 [1,0,0,0]，确保长度与 sensor_data 一致
+    function cleanImuData(imuArr, sensorArr) {
+      if (!imuArr || !sensorArr || imuArr.length !== sensorArr.length) return null
+      // 检查是否有任何有效 IMU 数据
+      const hasAnyImu = imuArr.some(q => q !== null && Array.isArray(q))
+      if (!hasAnyImu) return null
+      return imuArr.map(q => (q !== null && Array.isArray(q)) ? q : [1, 0, 0, 0])
+    }
+
+    const leftImuCleaned = cleanImuData(leftImuArr, leftArr)
+    const rightImuCleaned = cleanImuData(rightImuArr, rightArr)
+    console.log('[getHandPdf] IMU诊断: leftArr=%d, leftImuArr=%d, leftImuCleaned=%s, rightArr=%d, rightImuArr=%d, rightImuCleaned=%s',
+      leftArr ? leftArr.length : 0,
+      leftImuArr ? leftImuArr.length : 0,
+      leftImuCleaned ? `有效(${leftImuCleaned.length}帧)` : 'null',
+      rightArr ? rightArr.length : 0,
+      rightImuArr ? rightImuArr.length : 0,
+      rightImuCleaned ? `有效(${rightImuCleaned.length}帧)` : 'null'
+    )
+    // 如果有 IMU 数据，打印第一帧样本
+    if (leftImuArr && leftImuArr.length > 0) {
+      const firstValid = leftImuArr.find(q => q !== null)
+      console.log('[getHandPdf] 左手IMU样本: first=%s, nullCount=%d/%d',
+        JSON.stringify(firstValid), leftImuArr.filter(q => q === null).length, leftImuArr.length)
     }
 
     let leftRenderResult = null
@@ -1013,12 +1063,14 @@ app.post('/getHandPdf' , async (req , res) => {
         ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: leftArr,
             hand_type: '左手',
+            imu_data: leftImuCleaned,
           })
         : null
       rightRenderResult = rightArr
         ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: rightArr,
             hand_type: '右手',
+            imu_data: rightImuCleaned,
           })
         : null
     } catch (e) {
@@ -1524,8 +1576,10 @@ app.post('/setActiveMode', (req, res) => {
 
 // 鍋滄閲囬泦
 app.get('/endCol', async (req, res) => {
-  console.log('[endCol] 收到请求: 当前assessmentId=%s, activeSendTypes=%s', activeAssessmentId, JSON.stringify(activeSendTypes))
+  console.log('[endCol] 收到请求: 当前assessmentId=%s', activeAssessmentId)
   colFlag = false
+  // 停止采集时立即刷入缓冲区剩余数据
+  flushStorageBuffer()
   res.json(new HttpResult(0, 'success', '偁止采集'));
 })
 
@@ -2684,7 +2738,7 @@ const newSerialPortLink = ({ path, parser, baudRate = 1000000 }) => {
  * @param {object} objs 
  * @returns 瑙ｆ瀽钃濈墮鍒嗗寘鏁版嵁
  */
-function parseData(parserArr, objs, type) {
+function parseData(parserArr, objs) {
 
   let json = {}
     Object.keys(objs).forEach((key) => {
@@ -2697,21 +2751,8 @@ function parseData(parserArr, objs, type) {
         return
       }
       if (obj.port.isOpen) {
-      let blueArr = []
-      // console.log(data.type)
-      if (data.type && (data.type == 'HL' || data.type == 'HR')) {
-
-        const { order } = constantObj
-        const lastData = data[order[1]]
-        const nextData = data[order[2]]
-
-        if (lastData && lastData.length && nextData && nextData.length) {
-          blueArr = [...lastData, ...nextData]
-        }
-      }
-      else if (type == 'highHZ') {
-        blueArr = data.arr
-      }
+      // 统一使用 data.arr（手套在 packet2 到达时已合并，其他设备直接赋值 arr）
+      let blueArr = data.arr && data.arr.length ? data.arr : []
       // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
       const dataStamp = new Date().getTime() - data.stamp
       json[data.type] = {}
@@ -2974,24 +3015,27 @@ async function connectPort() {
         // console.log(pointArr.length)
         // 闄€铻轰华
         if (pointArr.length == 18) {
+          if (!global._18count) global._18count = 0
+          global._18count++
+          if (global._18count <= 5) console.log('[IMU-DEBUG] 收到18字节帧(独立IMU)! count=%d', global._18count)
           const length = pointArr.length
           const arr = pointArr.splice(2, length)
           dataItem.rotate = bytes4ToInt10(arr)
         }
-        // 256鐭╅樀鍒嗗寘
+        // Packet1: 130字节 = 2(order+type) + 128(sensor前半)
+        // 参考 serial_parser_two.py: 缓存 packet1，等待 packet2 到达后合并
         else if (pointArr.length == 130) {
-          // 瑙ｆ瀽鍖呮暟鎹? 绫诲瀷+鍓嶅悗甯х被鍨?128鐭╅樀
-          const length = pointArr.length
-          const order = pointArr[0]
-          const type = pointArr[1]
-          // console.log(constantObj.type[type], order, path, pointArr.length, new Date().getTime())
+          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const sensorData = pointArr.slice(2)  // 128 字节 sensor 前半
 
-          const arr = pointArr.splice(2, length)
-          const orderName = constantObj.order[order]
-          // 鍓嶅悗甯ц祴鍊?绫诲瀷璧嬪€?
-          dataItem[orderName] = arr
-          dataItem.type = constantObj.type[type]
+          dataItem.type = constantObj.type[sensorType]
           dataItem.stamp = new Date().getTime()
+
+          // 按 sensorType 缓存 packet1
+          glovePacket1Cache[sensorType] = {
+            data: sensorData,
+            stamp: dataItem.stamp,
+          }
         } else if (pointArr.length == 1024) {
           // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
           if (!dataItem.type) {
@@ -3043,26 +3087,38 @@ async function connectPort() {
 
         // 1025字节帧已删除（旧设备类型 car-back/car-sit/bed 不再使用）
 
+        // Packet2: 146字节 = 2(order+type) + 128(sensor后半) + 16(IMU)
+        // 参考 serial_parser_two.py: 到达时立即与缓存的 packet1 合并
         } else if (pointArr.length == 146) {
-          const length = pointArr.length
-          const arr = pointArr.splice(length - 16, length)
-          // console.log(pointArr[0], pointArr[1])
-          
-          // dataItem.type = pointArr[1] == 1 ? 'leftHand' : 'rightHand'
-          pointArr.splice(0, 2)
-          // 涓嬩竴甯ц祴鍊? 鏃堕棿鎴宠祴鍊?鍥涘厓鏁拌祴鍊?
+          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const sensorData = pointArr.slice(2, 130)  // 中间 128 字节 = sensor 后半
+          const imuRaw = pointArr.slice(130)          // 最后 16 字节 = IMU
 
+          dataItem.type = constantObj.type[sensorType] || dataItem.type
           const stamp = new Date().getTime()
+          dataItem.stamp = stamp
 
+          // 与缓存的 Packet1 合并为完整 256 字节 sensor 数据
+          const cached = glovePacket1Cache[sensorType]
+          if (cached) {
+            dataItem.arr = [...cached.data, ...sensorData]
+            delete glovePacket1Cache[sensorType]
+          } else {
+            dataItem.arr = sensorData
+          }
+
+          // 解析并校验四元数
+          const rawQuat = bytes4ToInt10(imuRaw)
+          dataItem.rotate = validateQuaternion(rawQuat) || rawQuat
+
+          // 帧率计算
           if (sendDataLength < 30) {
             sendDataLength++
           }
           if (oldTimeObj[dataItem.type]) {
             dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            // console.log(dataItem.HZ , 'hz')
-            if (!MaxHZ && sendDataLength == 30) {
+            if (!MaxHZ && sendDataLength >= 30) {
               MaxHZ = Math.floor(1000 / dataItem.HZ)
-              console.log(MaxHZ)
               HZ = MaxHZ
               if (!activeSendTypes || !activeSendTypes.length) {
                 playtimer = setInterval(() => {
@@ -3072,19 +3128,11 @@ async function connectPort() {
               sendDataLength = 0
             }
           }
-          dataItem.stamp = stamp
-
-          // if (!oldTimeObj[dataItem.type]) {
-          oldTimeObj[dataItem.type] = dataItem.stamp
+          oldTimeObj[dataItem.type] = stamp
           maybeLockSensorHz()
           if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
             updateSendTimerForActiveTypes()
           }
-
-          dataItem.next = pointArr
-          // const stamp = new Date().getTime()
-          dataItem.stamp = stamp
-          dataItem.rotate = bytes4ToInt10(arr)
         } else if (pointArr.length == 4096) {
           // 4096字节帧 = 脚垫 (foot/foot1-4)，64x64 矩阵
           dataItem.premission = true
@@ -3272,10 +3320,8 @@ function colAndSendData() {
  */
 function sendData() {
   let obj
-  // 统一解析所有设备数据：
-  // parseData 对 HL/HR 会自动用 last+next 拼接（不受 type 参数影响）
-  // 对其他设备在 highHZ 模式下用 data.arr
-  obj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
+  // 统一解析所有设备数据（直接传引用，parseData 只读不写，无需深拷贝）
+  obj = parseData(parserArr, dataMap)
 
   // 根据 activeSendTypes 过滤（按评估模式只推送对应设备数据）
   obj = filterDataByTypes(obj, activeSendTypes)
@@ -3364,40 +3410,48 @@ function ensureMatrixNameColumn(db) {
 /**
  * 灏嗘敹鍒扮殑
  */
+// 存储写入缓冲区：攒一批再写，减少 SQLite I/O 次数
+const storageBuffer = []
+const STORAGE_FLUSH_INTERVAL = 200  // 每 200ms 批量写入一次
+let storageFlushTimer = null
+
 function storageData(data) {
-  const rawAssessmentId = activeAssessmentId
-  const parsedAssessmentId = rawAssessmentId !== null && rawAssessmentId !== undefined ? Number(rawAssessmentId) : NaN
   const timestamp = Date.now()
-  // 调试日志：打印存储的数据key和assessmentId
-  const dataKeys = Object.keys(data || {})
-  console.log('[storageData] keys=%s, assessmentId=%s, sampleType=%s, activeSendTypes=%s',
-    JSON.stringify(dataKeys), activeAssessmentId, activeSampleType, JSON.stringify(activeSendTypes))
-  // const date = saveTime;
 
-
-  // const newData = Object.keys(data)
-  const newData = { ...data }
-  for (let i = 0; i < Object.keys(data).length; i++) {
-    const key = Object.keys(data)[i]
-    if (newData[key].status) delete newData[key].status
+  // 构建存储数据（去掉 status 字段）
+  const newData = {}
+  for (const key of Object.keys(data)) {
+    if (!data[key]) continue
+    const item = { ...data[key] }
+    delete item.status
+    newData[key] = item
   }
 
-  const insertQuery =
-    "INSERT INTO matrix (data, timestamp,date ,`select`, name, assessment_id, sample_type) VALUES (?, ?,? ,?, ?, ?, ?)";
   const assessmentId = activeAssessmentId || null
   const sampleType = activeSampleType || null
 
-  currentDb.run(
-    insertQuery,
-    [JSON.stringify(newData), timestamp, colName, JSON.stringify(selectArr), colPersonName, assessmentId, sampleType],
-    function (err) {
-      if (err) {
-        console.error(err);
-        return;
-      }
-      console.log(`Event inserted with ID ${this.lastID}`);
-    }
-  );
+  storageBuffer.push([JSON.stringify(newData), timestamp, colName, JSON.stringify(selectArr), colPersonName, assessmentId, sampleType])
+
+  // 启动批量写入定时器（如果还没启动）
+  if (!storageFlushTimer) {
+    storageFlushTimer = setTimeout(flushStorageBuffer, STORAGE_FLUSH_INTERVAL)
+  }
+}
+
+function flushStorageBuffer() {
+  storageFlushTimer = null
+  if (!storageBuffer.length || !currentDb) return
+
+  const rows = storageBuffer.splice(0)
+  const insertQuery = "INSERT INTO matrix (data, timestamp, date, `select`, name, assessment_id, sample_type) VALUES (?, ?, ?, ?, ?, ?, ?)"
+
+  currentDb.run('BEGIN TRANSACTION')
+  for (const row of rows) {
+    currentDb.run(insertQuery, row)
+  }
+  currentDb.run('COMMIT', (err) => {
+    if (err) console.error('[storageData] batch commit error:', err)
+  })
 }
 
 // 鍋氫竴涓畾鏃跺櫒浠诲姟  鐩戝惉鏄惁瀛樺湪鎰忓鎯呭喌涓插彛鏂紑杩炴帴 鐒跺悗閲嶆柊杩炴帴 

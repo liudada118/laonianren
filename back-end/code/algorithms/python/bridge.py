@@ -72,11 +72,14 @@ def register(name):
 @register('generate_grip_render_report')
 def _grip_report(params):
     from glove_render_data import generate_grip_report
+    imu = params.get('imu_data')
+    sensor = params.get('sensor_data', [])
+    print(f"[bridge.py] grip_report: sensor_data frames={len(sensor)}, imu_data={'None' if imu is None else f'frames={len(imu)}, first={imu[0] if imu else None}'}", file=sys.stderr)
     return generate_grip_report(
-        sensor_data=params.get('sensor_data', []),
+        sensor_data=sensor,
         hand_type=params.get('hand_type', '左手'),
         times=params.get('times'),
-        imu_data=params.get('imu_data'),
+        imu_data=imu,
     )
 
 

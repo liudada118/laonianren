@@ -137,7 +137,7 @@ export function HandModel({
 
     let meshCount = 0;
     group.traverse((child) => {
-      if (child.isMesh && child.name !== 'pressureIndicator') {
+      if (child.isMesh) {
         // 保存原始材质（如果还没保存）
         if (!child.userData._origMaterial) {
           child.userData._origMaterial = child.material;
@@ -162,7 +162,7 @@ export function HandModel({
   const updateHeatmapTexture = useCallback((group, texture) => {
     if (!group || !texture) return;
     group.traverse((child) => {
-      if (child.isMesh && child.name !== 'pressureIndicator') {
+      if (child.isMesh) {
         if (Array.isArray(child.material)) {
           child.material.forEach((mat) => {
             if (mat.uniforms && mat.uniforms.uHeatmap) {
@@ -290,19 +290,6 @@ export function HandModel({
       }
     );
 
-    // Add pressure indicator (glowing sphere)
-    const indicatorGeometry = new THREE.SphereGeometry(0.15, 32, 32);
-    const indicatorMaterial = new THREE.MeshBasicMaterial({
-      color: 0xEF4444,
-      transparent: true,
-      opacity: 0.8
-    });
-    const indicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
-    indicator.position.set(0, -0.5, 0.6);
-    indicator.name = 'pressureIndicator';
-    indicator.visible = false;
-    handGroup.add(indicator);
-
     handGroup.rotation.x = -Math.PI / 3;
     handGroup.position.set(-1, -1, 0);
 
@@ -372,23 +359,6 @@ export function HandModel({
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Update pressure indicator
-  useEffect(() => {
-    if (handGroupRef.current) {
-      const indicator = handGroupRef.current.getObjectByName('pressureIndicator');
-      if (indicator) {
-        indicator.visible = isRecording;
-        if (isRecording) {
-          const scale = 0.5 + (pressureValue / 200) * 1.5;
-          indicator.scale.setScalar(scale);
-          const hue = Math.max(0, 0.6 - (pressureValue / 200) * 0.6);
-          indicator.material.color.setHSL(hue, 0.8, 0.5);
-          indicator.material.opacity = 0.9;
-        }
-      }
-    }
-  }, [pressureValue, isRecording]);
 
   // 创建/更新 heatmap 纹理 - 只在 heatmapCanvas 首次传入时创建纹理并绑定到模型
   useEffect(() => {

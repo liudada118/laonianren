@@ -54,5 +54,12 @@
     "electron": "^31.3.0",
     "electron-builder": "^24.13.3",
     "playwright": "^1.58.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sqlite3",
+      "@serialport/bindings-cpp",
+      "electron"
+    ]
   }
 }

@@ -32,18 +32,19 @@ const initDb = (fileStr, filePath) => {
  * @returns 数据库
  */
 function genDb(file, filePath) {
+  let db
   if (fs.existsSync(file)) {
-
-    const db = new sqlite3.Database(file);
-    console.log('true')
-    return db
-
+    db = new sqlite3.Database(file);
   } else {
     console.log(file, filePath, 'err')
     let data = fs.readFileSync(`${filePath}/init.db`);
     fs.writeFileSync(file, data);
-    return db = new sqlite3.Database(file);
+    db = new sqlite3.Database(file);
   }
+  // 启用 WAL 模式：提升并发写入性能，减少采集时卡顿
+  db.run('PRAGMA journal_mode=WAL')
+  db.run('PRAGMA synchronous=NORMAL')
+  return db
 }
 
 function isAllDigits(str) {
@@ -349,12 +350,13 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
         })
         const keyArr = Array.from(keySet)
 
-        let pressValue = {}, areaValue = {} , dataValue = {}
+        let pressValue = {}, areaValue = {} , dataValue = {}, rotateValue = {}
         for (let j = 0; j < keyArr.length; j++) {
           const key = keyArr[j]
           pressValue[key] = []
           areaValue[key] = []
           dataValue[key] = []
+          rotateValue[key] = []
         }
         for (let i = 0; i < rows.length; i++) {
           const rowObj = parsedRows[i] || {}
@@ -366,9 +368,13 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
             dataValue[key].push(data)
             pressValue[key].push(data.reduce((a, b) => a + b, 0))
             areaValue[key].push(data.filter((a) => a > 0).length)
+            // 提取 IMU 四元数数据 (rotate)，保持与 dataValue 长度一致
+            if (item?.rotate && Array.isArray(item.rotate)) {
+              rotateValue[key].push(item.rotate)
+            } else {
+              rotateValue[key].push(null)
+            }
           }
-          // press.push(pressValue);
-          // area.push(areaValue);
         }
 
         resolve({
@@ -376,6 +382,7 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
           pressArr: pressValue,
           areaArr: areaValue,
           dataArr : dataValue,
+          rotateArr: rotateValue,
           rows: rows
         })
 

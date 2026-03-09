@@ -1209,7 +1209,17 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     duration_stats = calculate_cycle_durations(stand_times, stand_peaks)
 
     if not duration_stats:
-        raise ValueError("无法计算周期统计信息")
+        # 峰值不足2个时，提供默认周期统计（不再抛异常，让报告继续生成）
+        print("  ⚠️ 峰值不足2个，使用默认周期统计（力曲线和压力统计仍可用）")
+        stand_force_total = np.sum(stand_data, axis=(1, 2))
+        t0 = stand_times.iloc[0] if len(stand_times) > 0 else None
+        t_end = stand_times.iloc[-1] if len(stand_times) > 0 else None
+        total_dur = (t_end - t0).total_seconds() if t0 is not None and t_end is not None else 0
+        duration_stats = {
+            "total_duration": total_dur,
+            "num_cycles": 0,
+            "avg_duration": 0,
+        }
 
     # [已注释] 3. base64 PNG 图片生成 — 前端已使用 heatmap_data + cop_data 通过 Canvas 渲染，不再需要 images
     # import base64  # (下方 cop_data 段仍需要，移到那里)

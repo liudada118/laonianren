@@ -129,11 +129,12 @@ def quaternion_to_euler(q):
 
 
 def parse_quaternion_string(quat_str):
-    """解析四元数字符串"""
+    """解析四元数字符串，支持 'w,x,y,z' 和 '[w,x,y,z]' 两种格式"""
     try:
         if not quat_str or quat_str.strip() == '':
             return None
-        parts = quat_str.strip().split(',')
+        cleaned = quat_str.strip().strip('[]')
+        parts = cleaned.split(',')
         if len(parts) != 4:
             return None
         quat = np.array([float(p.strip()) for p in parts])

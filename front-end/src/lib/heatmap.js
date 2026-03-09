@@ -1,7 +1,6 @@
 /**
  * Heatmap Canvas - GPU-accelerated heatmap rendering for pressure sensor data
  * Adapted from the original heatmap.js for the sarcopenia assessment system
- * Enhanced with smooth Gaussian blur and rainbow gradient (blue to red)
  */
 import * as THREE from 'three';
 
@@ -219,18 +218,20 @@ function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, opt
 /* ─── GPU Shader-based rendering ─── */
 
 const DEFAULT_GRADIENT = {
-  0.00: '#39bcff',
-  0.09: '#4bd7ff',
-  0.18: '#5cefff',
-  0.27: '#57f9ee',
-  0.36: '#41ffcc',
-  0.45: '#70ffa8',
-  0.54: '#c1ff84',
-  0.63: '#faff5e',
-  0.72: '#ffcb4a',
-  0.81: '#ffa95b',
-  0.90: '#ff8174',
-  1.00: '#ff5a84'
+  0.00: '#ffffff',
+  0.01: '#4192fe',
+  0.08: '#49aaff',
+  0.17: '#51c6ff',
+  0.25: '#4ddff5',
+  0.33: '#34f6db',
+  0.42: '#6cffb9',
+  0.50: '#c5ff8b',
+  0.58: '#fdf655',
+  0.67: '#ffda41',
+  0.75: '#ffb54a',
+  0.83: '#ff9555',
+  0.92: '#ff7665',
+  1.00: '#ff0000'
 };
 
 function buildGradientTexture(gradient) {
@@ -261,13 +262,10 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uData: { value: dataTexture },
       uGradient: { value: gradientTexture },
       uTexel: { value: texelSize },
-      uSharpen: { value: 0.0 },
-      uGamma: { value: 0.12 },
+      uSharpen: { value: 0.6 },
+      uGamma: { value: 1.0 },
       uFlipX: { value: 0.0 },
-      uFlipY: { value: 1.0 },
-      uBlurRadius: { value: 3.5 },
-      uAlphaThreshold: { value: 0.02 },
-      uThreshold: { value: 0.0 }
+      uFlipY: { value: 1.0 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -277,7 +275,7 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       }
     `,
     fragmentShader: `
-      precision highp float;
+      precision mediump float;
       varying vec2 vUv;
       uniform sampler2D uData;
       uniform sampler2D uGradient;
@@ -286,142 +284,32 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
       uniform float uGamma;
       uniform float uFlipX;
       uniform float uFlipY;
-      uniform float uBlurRadius;
-      uniform float uAlphaThreshold;
-      uniform float uThreshold;
 
       void main() {
         vec2 uv = vUv;
         if (uFlipX > 0.5) uv.x = 1.0 - uv.x;
         if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
-
-        // Data is already blurred on CPU side, just sample with hardware linear filtering
-        float rawV = texture2D(uData, uv).r;
-
-        // Apply threshold: values below threshold become transparent
-        // uThreshold is normalized (0~1), smooth fade around threshold edge
-        float threshFade = smoothstep(uThreshold - 0.02, uThreshold + 0.02, rawV);
-
-        // Apply gamma correction for better visual contrast
-        float v = pow(rawV, uGamma);
-
-        // Clamp to valid range
-        v = clamp(v, 0.0, 1.0);
-
-        // Map through rainbow gradient
+        float c = texture2D(uData, uv).r;
+        float l = texture2D(uData, uv + vec2(-uTexel.x, 0.0)).r;
+        float r = texture2D(uData, uv + vec2(uTexel.x, 0.0)).r;
+        float u = texture2D(uData, uv + vec2(0.0, uTexel.y)).r;
+        float d = texture2D(uData, uv + vec2(0.0, -uTexel.y)).r;
+        float blur = (l + r + u + d) * 0.25;
+        float v = clamp(c + uSharpen * (c - blur), 0.0, 1.0);
+        v = pow(v, uGamma);
         vec4 col = texture2D(uGradient, vec2(v, 0.5));
-
-        // Wide smooth fade for soft edges - large transition zone
-        float alpha = smoothstep(0.01, 0.25, v);
-        // Quintic ease for ultra-smooth edge falloff
-        alpha = alpha * alpha * alpha * (alpha * (alpha * 6.0 - 15.0) + 10.0);
-
-        // Apply threshold fade
-        alpha *= threshFade;
-
-        // Ensure truly zero values produce zero alpha
-        if (rawV < 0.005) alpha = 0.0;
-
-        gl_FragColor = vec4(col.rgb, alpha);
+        gl_FragColor = col;
       }
     `
   });
-}
-
-/* ─── Gaussian blur helper for CPU-side data upscaling ─── */
-
-/**
- * Upscale a small grid (srcW x srcH) to a larger grid (dstW x dstH)
- * using bilinear interpolation, then apply Gaussian blur
- */
-function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
-  // Step 1: Bilinear upscale
-  const upscaled = new Float32Array(dstW * dstH);
-  for (let dy = 0; dy < dstH; dy++) {
-    for (let dx = 0; dx < dstW; dx++) {
-      const sx = (dx / dstW) * srcW;
-      const sy = (dy / dstH) * srcH;
-      const x0 = Math.floor(sx);
-      const y0 = Math.floor(sy);
-      const x1 = Math.min(x0 + 1, srcW - 1);
-      const y1 = Math.min(y0 + 1, srcH - 1);
-      const fx = sx - x0;
-      const fy = sy - y0;
-      const v00 = srcArr[y0 * srcW + x0] || 0;
-      const v10 = srcArr[y0 * srcW + x1] || 0;
-      const v01 = srcArr[y1 * srcW + x0] || 0;
-      const v11 = srcArr[y1 * srcW + x1] || 0;
-      upscaled[dy * dstW + dx] = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
-    }
-  }
-
-  // Step 2: Separable Gaussian blur (horizontal then vertical) - O(n) per pixel
-  const radius = 3;
-  const sigma = 2.0;
-  // Pre-compute 1D Gaussian kernel
-  const kernelSize = radius * 2 + 1;
-  const kernel = new Float32Array(kernelSize);
-  let kernelSum = 0;
-  for (let i = 0; i < kernelSize; i++) {
-    const d = i - radius;
-    kernel[i] = Math.exp(-(d * d) / (2 * sigma * sigma));
-    kernelSum += kernel[i];
-  }
-  for (let i = 0; i < kernelSize; i++) kernel[i] /= kernelSum;
-
-  let current = upscaled;
-  for (let pass = 0; pass < (blurPasses || 3); pass++) {
-    // Horizontal pass
-    const hBlur = new Float32Array(dstW * dstH);
-    for (let y = 0; y < dstH; y++) {
-      const rowOff = y * dstW;
-      for (let x = 0; x < dstW; x++) {
-        let sum = 0;
-        let wSum = 0;
-        for (let k = -radius; k <= radius; k++) {
-          const nx = x + k;
-          if (nx >= 0 && nx < dstW) {
-            const w = kernel[k + radius];
-            sum += current[rowOff + nx] * w;
-            wSum += w;
-          }
-        }
-        hBlur[rowOff + x] = sum / wSum;
-      }
-    }
-    // Vertical pass
-    const vBlur = new Float32Array(dstW * dstH);
-    for (let x = 0; x < dstW; x++) {
-      for (let y = 0; y < dstH; y++) {
-        let sum = 0;
-        let wSum = 0;
-        for (let k = -radius; k <= radius; k++) {
-          const ny = y + k;
-          if (ny >= 0 && ny < dstH) {
-            const w = kernel[k + radius];
-            sum += hBlur[ny * dstW + x] * w;
-            wSum += w;
-          }
-        }
-        vBlur[y * dstW + x] = sum / wSum;
-      }
-    }
-    current = vBlur;
-  }
-
-  return current;
 }
 
 /* ─── Main HeatmapCanvas class ─── */
 
 export class HeatmapCanvas {
   constructor(width, height, canvasWProp, canvasHProp, canvasName, options) {
-    // Internal data resolution - higher for smoother rendering
-    this.srcWidth = 32;
-    this.srcHeight = 32;
-    // GPU texture resolution - upscaled for smooth heatmap
-    this.width = 128;
-    this.height = 128;
+    this.width = 32;
+    this.height = 32;
     this.canvas = document.createElement('canvas');
 
     const contentWidth = 1024;
@@ -440,10 +328,7 @@ export class HeatmapCanvas {
       this.canvas.height = contentWidth * canvasHProp;
     }
 
-    if (options) {
-      // 合并而不是覆盖，保留 gradient 等默认值
-      this.options = { ...this.options, ...options };
-    }
+    if (options) this.options = options;
 
     this.useGPU = false;
     try {
@@ -479,11 +364,6 @@ export class HeatmapCanvas {
       this.scene.add(plane);
       this.cpuCtx = this.canvas.getContext('2d');
       this.useGPU = true;
-
-      // Initial render with empty data to ensure canvas starts transparent
-      this.renderer.render(this.scene, this.camera);
-      this.cpuCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      this.cpuCtx.drawImage(this.gpuCanvas, 0, 0, this.canvas.width, this.canvas.height);
     } catch (err) {
       this.useGPU = false;
     }
@@ -491,33 +371,17 @@ export class HeatmapCanvas {
 
   changeHeatmap(resArr, interp1, interp2, order) {
     if (!this.useGPU) {
-      bthClickHandle(resArr, this.canvas, this.srcWidth, this.srcHeight, interp1, interp2, order, this.options);
+      bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options);
       return;
     }
-
     const min = typeof this.options.min === 'number' ? this.options.min : 0;
     const max = typeof this.options.max === 'number' ? this.options.max : 1;
     const range = max - min || 1;
-
-    // Upscale 32x32 source data to 128x128 with bilinear interpolation and blur
-    const srcTotal = this.srcWidth * this.srcHeight;
-    const normalizedSrc = new Float32Array(srcTotal);
-    for (let i = 0; i < srcTotal; i++) {
-      const v = Array.isArray(resArr) ? resArr[i] || 0 : 0;
-      let n = (v - min) / range;
-      if (n < 0) n = 0;
-      if (n > 1) n = 1;
-      normalizedSrc[i] = n;
-    }
-
-    // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2);
-
-    // Write to GPU texture
     const data = this.dataTexture.image.data;
     const total = this.width * this.height;
     for (let i = 0; i < total; i++) {
-      let n = blurred[i];
+      const v = Array.isArray(resArr) ? resArr[i] || 0 : 0;
+      let n = (v - min) / range;
       if (n < 0) n = 0;
       if (n > 1) n = 1;
       const base = i * 4;
@@ -528,9 +392,8 @@ export class HeatmapCanvas {
       data[base + 3] = 255;
     }
     this.dataTexture.needsUpdate = true;
-    this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.0;
-    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 0.12;
-    this.material.uniforms.uThreshold.value = typeof this.options.threshold === 'number' ? this.options.threshold : 0.0;
+    this.material.uniforms.uSharpen.value = typeof this.options.sharpen === 'number' ? this.options.sharpen : 0.6;
+    this.material.uniforms.uGamma.value = typeof this.options.gamma === 'number' ? this.options.gamma : 1.0;
     this.material.uniforms.uFlipX.value = this.options.flipX ? 1.0 : 0.0;
     this.material.uniforms.uFlipY.value = this.options.flipY === false ? 0.0 : 1.0;
     this.renderer.render(this.scene, this.camera);

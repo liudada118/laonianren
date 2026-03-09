@@ -137,5 +137,22 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-back-end/code/python/app/frontendReport/起坐/__pycache__/
-__pycache__/
+**/__pycache__/
+*.pyc
+
+# Database files
+db/
+
+# Upload data (test binary/csv files)
+upload_data/
+
+# Test screenshots and reports
+test/screenshots*/
+test/screenshots/
+
+# Lock files (can be regenerated)
+pnpm-lock.yaml
+package-lock.json
+
+# macOS
+.DS_Store

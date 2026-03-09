@@ -1,23 +1,17 @@
 /**
- * 历史记录服务 - 基于后端数据库持久化存储
+ * 历史记录服务 - 基于 localStorage 持久化存储
  * 管理评估记录的增删改查
- * 
- * 所有方法均为 async，通过 BackendBridge 调用后端 API
  */
 
-import { backendBridge } from './BackendBridge';
+const STORAGE_KEY = 'sarcopenia_assessment_history';
 
 /**
- * 获取所有历史记录（第一页，最多500条）
- * @returns {Promise<Array>}
+ * 获取所有历史记录
  */
-export async function getHistory() {
+export function getHistory() {
   try {
-    const result = await backendBridge.listHistory({ page: 1, pageSize: 500 });
-    if (result.code === 0 && result.data) {
-      return result.data.items || [];
-    }
-    return [];
+    const data = localStorage.getItem(STORAGE_KEY);
+    return data ? JSON.parse(data) : [];
   } catch (e) {
     console.error('读取历史记录失败:', e);
     return [];
@@ -25,21 +19,112 @@ export async function getHistory() {
 }
 
 /**
- * 保存一次完整评估（可能包含多个评估类型）
- * 按患者+日期分组，后端会自动合并同一天同一患者的记录
- * @param {object} patientInfo - { name, gender, age, weight }
- * @param {string} institution - 机构名称
- * @param {object} assessments - { grip: { completed, report }, ... }
- * @returns {Promise<boolean>}
+ * 根据 ID 获取单条记录
+ * @param {string} id - 记录 ID
+ * @returns {Object|null}
  */
-export async function saveAssessmentSession(patientInfo, institution, assessments) {
+export function getRecord(id) {
+  const history = getHistory();
+  return history.find(r => r.id === id) || null;
+}
+
+/**
+ * 保存一条评估记录
+ * @param {Object} record - 评估记录
+ * @param {string} record.patientName - 患者姓名
+ * @param {string} record.patientGender - 患者性别
+ * @param {number} record.patientAge - 患者年龄
+ * @param {number} record.patientWeight - 患者体重
+ * @param {string} record.assessmentType - 评估类型 (grip|sitstand|standing|gait)
+ * @param {Object} record.reportData - 报告数据
+ * @param {string} record.institution - 机构名称
+ */
+export function saveRecord(record) {
   try {
-    const result = await backendBridge.saveHistory({
-      patientInfo,
-      institution,
-      assessments,
-    });
-    return result.code === 0;
+    const history = getHistory();
+    const newRecord = {
+      id: generateId(),
+      ...record,
+      date: new Date().toISOString(),
+      dateStr: formatDate(new Date()),
+    };
+    history.unshift(newRecord); // 最新的在前面
+
+    // 最多保存500条记录
+    if (history.length > 500) {
+      history.length = 500;
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    return newRecord;
+  } catch (e) {
+    console.error('保存历史记录失败:', e);
+    return null;
+  }
+}
+
+/**
+ * 保存一次完整评估（可能包含多个评估类型）
+ * 按患者+日期分组
+ */
+export function saveAssessmentSession(patientInfo, institution, assessments) {
+  try {
+    const history = getHistory();
+    const now = new Date();
+    const dateStr = formatDate(now);
+
+    // 查找今天同一患者的记录
+    let existingIdx = history.findIndex(
+      r => r.patientName === patientInfo.name && r.dateStr === dateStr
+    );
+
+    if (existingIdx >= 0) {
+      // 更新已有记录
+      const existing = history[existingIdx];
+      for (const [type, data] of Object.entries(assessments)) {
+        if (data.completed) {
+          existing.assessments[type] = {
+            completed: true,
+            report: data.report,
+            completedAt: now.toISOString(),
+          };
+        }
+      }
+      existing.updatedAt = now.toISOString();
+      history[existingIdx] = existing;
+    } else {
+      // 创建新记录
+      const assessmentData = {};
+      for (const [type, data] of Object.entries(assessments)) {
+        assessmentData[type] = {
+          completed: data.completed || false,
+          report: data.completed ? data.report : null,
+          completedAt: data.completed ? now.toISOString() : null,
+        };
+      }
+
+      const newRecord = {
+        id: generateId(),
+        patientName: patientInfo.name,
+        patientGender: patientInfo.gender,
+        patientAge: patientInfo.age,
+        patientWeight: patientInfo.weight,
+        institution: institution || '',
+        assessments: assessmentData,
+        date: now.toISOString(),
+        dateStr,
+        updatedAt: now.toISOString(),
+      };
+      history.unshift(newRecord);
+    }
+
+    // 最多保存200条记录
+    if (history.length > 200) {
+      history.length = 200;
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    return true;
   } catch (e) {
     console.error('保存评估记录失败:', e);
     return false;
@@ -47,32 +132,14 @@ export async function saveAssessmentSession(patientInfo, institution, assessment
 }
 
 /**
- * 获取单条历史记录
- * @param {string} id - 记录ID
- * @returns {Promise<object|null>}
- */
-export async function getRecord(id) {
-  try {
-    const result = await backendBridge.getHistory(id);
-    if (result.code === 0 && result.data) {
-      return result.data;
-    }
-    return null;
-  } catch (e) {
-    console.error('获取记录失败:', e);
-    return null;
-  }
-}
-
-/**
  * 删除一条记录
- * @param {string} id - 记录ID
- * @returns {Promise<boolean>}
  */
-export async function deleteRecord(id) {
+export function deleteRecord(id) {
   try {
-    const result = await backendBridge.deleteHistory(id);
-    return result.code === 0;
+    const history = getHistory();
+    const filtered = history.filter(r => r.id !== id);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    return true;
   } catch (e) {
     console.error('删除记录失败:', e);
     return false;
@@ -80,40 +147,53 @@ export async function deleteRecord(id) {
 }
 
 /**
- * 搜索历史记录（分页）
- * @param {object} params - { keyword, date, page, pageSize }
- * @returns {Promise<{ items: Array, total: number, totalPages: number, page: number }>}
+ * 搜索历史记录
  */
-export async function searchHistory({ keyword, date, page = 1, pageSize = 10 }) {
-  try {
-    const result = await backendBridge.listHistory({ keyword, date, page, pageSize });
-    if (result.code === 0 && result.data) {
-      return result.data;
-    }
-    return { items: [], total: 0, totalPages: 0, page };
-  } catch (e) {
-    console.error('搜索历史记录失败:', e);
-    return { items: [], total: 0, totalPages: 0, page };
+export function searchHistory({ keyword, date, page = 1, pageSize = 10 }) {
+  let records = getHistory();
+
+  if (keyword) {
+    records = records.filter(r =>
+      r.patientName?.includes(keyword) ||
+      r.institution?.includes(keyword)
+    );
   }
+
+  if (date) {
+    records = records.filter(r => r.dateStr === date || r.dateStr?.includes(date));
+  }
+
+  const total = records.length;
+  const totalPages = Math.ceil(total / pageSize);
+  const start = (page - 1) * pageSize;
+  const items = records.slice(start, start + pageSize);
+
+  return { items, total, totalPages, page };
 }
 
 /**
  * 清空所有历史记录
- * @returns {Promise<boolean>}
  */
-export async function clearHistory() {
-  try {
-    const result = await backendBridge.clearHistory();
-    return result.code === 0;
-  } catch (e) {
-    console.error('清空历史记录失败:', e);
-    return false;
-  }
+export function clearHistory() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+// ==================== 工具函数 ====================
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+}
+
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}/${m}/${d}`;
 }
 
 export default {
   getHistory,
-  getRecord,
+  saveRecord,
   saveAssessmentSession,
   deleteRecord,
   searchHistory,

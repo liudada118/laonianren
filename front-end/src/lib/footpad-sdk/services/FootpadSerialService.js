@@ -48,6 +48,9 @@ class SingleFootpadSerialService {
     this.edgeWidth = 3;                 // 边缘过滤宽度（像素）
     this.noiseThreshold = 8;            // 噪音阈值
 
+    // 帧预处理钩子（在转置前对原始矩阵做变换，如行序修正）
+    this.preProcessMatrix = null;
+
     // 内部缓冲区
     this.buffer = new Uint8Array(0);
 
@@ -74,6 +77,7 @@ class SingleFootpadSerialService {
     if (config.footer !== undefined) this.FOOTER = config.footer;
     if (config.edgeWidth !== undefined) this.edgeWidth = config.edgeWidth;
     if (config.noiseThreshold !== undefined) this.noiseThreshold = config.noiseThreshold;
+    if (config.preProcessMatrix !== undefined) this.preProcessMatrix = config.preProcessMatrix;
     this.DATA_SIZE = this.ROWS * this.COLS;
     this.FRAME_SIZE = this.DATA_SIZE + this.FOOTER.length;
   }
@@ -211,16 +215,19 @@ class SingleFootpadSerialService {
         tempMatrix.push(row);
       }
 
-      // 旋转90度
-      const rotatedMatrix = [];
+      // 帧预处理（如 32×32 行序修正）
+      const processedMatrix = this.preProcessMatrix ? this.preProcessMatrix(tempMatrix) : tempMatrix;
+
+      // 转置矩阵（与 Python 的 .T 一致）
+      const transposedMatrix = [];
       for (let c = 0; c < this.COLS; c++) {
         const newRow = [];
-        for (let r = this.ROWS - 1; r >= 0; r--) newRow.push(tempMatrix[r][c]);
-        rotatedMatrix.push(newRow);
+        for (let r = 0; r < this.ROWS; r++) newRow.push(processedMatrix[r][c]);
+        transposedMatrix.push(newRow);
       }
 
       // 边缘噪音过滤
-      const matrix = this.filterEdgeNoise(rotatedMatrix);
+      const matrix = this.filterEdgeNoise(transposedMatrix);
       if (this.onDataCallback) this.onDataCallback(matrix);
       this.buffer = this.buffer.slice(footerIndex + 4);
     }

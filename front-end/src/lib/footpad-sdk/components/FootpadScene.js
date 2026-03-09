@@ -230,10 +230,9 @@ export class FootpadScene {
     const texData = footpad.texture.image.data;
     for (let r = 0; r < 64; r++) {
       for (let c = 0; c < 64; c++) {
-        // 纹理Y轴翻转：第r行 → 纹理第(63-r)行
-        const texIdx = (63 - r) * 64 + c;
+        // 旋转90°：矩阵行方向(脚的长轴)映射到纹理U方向(步行方向X轴)
+        const texIdx = (63 - c) * 64 + r;
         const val = matrix[r][c] || 0;
-        // 简单除以255归一化到0-1
         texData[texIdx] = val / 255.0;
       }
     }
