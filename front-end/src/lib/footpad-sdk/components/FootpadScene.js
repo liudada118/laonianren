@@ -99,10 +99,11 @@ export class FootpadScene {
     // Controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enablePan = true;
+    this.controls.enableZoom = true;
     this.controls.minPolarAngle = 0;
     this.controls.maxPolarAngle = Math.PI / 2.1;
-    this.controls.minDistance = 0.5;
-    this.controls.maxDistance = 5;
+    this.controls.minDistance = 0.2;
+    this.controls.maxDistance = 10;
     this.controls.target.set(0, 0, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;

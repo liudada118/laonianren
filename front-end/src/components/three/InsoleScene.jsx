@@ -62,8 +62,11 @@ function InsoleScene({
           <PerspectiveCamera makeDefault position={[0, 4, 4]} fov={50} />
           <OrbitControls
             enablePan={true}
+            enableZoom={true}
             minPolarAngle={0}
             maxPolarAngle={Math.PI / 2}
+            minDistance={0.5}
+            maxDistance={15}
             target={[0, 0, 0]}
           />
 

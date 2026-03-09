@@ -377,10 +377,11 @@ export class PressureScene3D {
   initControls() {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enablePan = true;
+    this.controls.enableZoom = true;
     this.controls.minPolarAngle = Math.PI / 6;
     this.controls.maxPolarAngle = Math.PI / 2.2;
-    this.controls.minDistance = 0.8;
-    this.controls.maxDistance = 3.5;
+    this.controls.minDistance = 0.3;
+    this.controls.maxDistance = 8;
     this.controls.target.set(0, 0.38, 0.05);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
