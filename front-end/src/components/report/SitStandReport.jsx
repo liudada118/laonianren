@@ -378,6 +378,74 @@ function ForceTimeChart({ times, forces, peaksIdx = [], title, color = C.green, 
   return <EChart option={option} height={height} />;
 }
 
+/* ─── 足底+坐垫合并力-时间曲线 ─── */
+function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], sitTimes, sitForce, height = 320 }) {
+  const hasStand = standTimes?.length > 0 && standForce?.length > 0;
+  const hasSit = sitTimes?.length > 0 && sitForce?.length > 0;
+
+  const option = useMemo(() => {
+    if (!hasStand && !hasSit) return {};
+    const series = [];
+    const markLines = standPeaksIdx
+      .filter(idx => idx < (standTimes?.length || 0))
+      .map(idx => ({ xAxis: standTimes[idx], lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
+
+    if (hasStand) {
+      const data = lttbDownsample(standTimes, standForce, 800);
+      series.push({
+        name: '\u8db3\u5e95\u538b\u529b',
+        type: 'line', data, showSymbol: false, smooth: true,
+        lineStyle: { color: C.green, width: 2 },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + '18' }, { offset: 1, color: C.green + '03' }]) },
+        markLine: markLines.length > 0 ? { data: markLines, symbol: 'none', animation: false } : undefined,
+      });
+    }
+    if (hasSit) {
+      const data = lttbDownsample(sitTimes, sitForce, 800);
+      series.push({
+        name: '\u5750\u57ab\u538b\u529b',
+        type: 'line', data, showSymbol: false, smooth: true,
+        lineStyle: { color: C.blue, width: 2 },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.blue + '18' }, { offset: 1, color: C.blue + '03' }]) },
+      });
+    }
+
+    return {
+      tooltip: {
+        trigger: 'axis', ...ttStyle,
+        formatter: (params) => {
+          if (!params?.length) return '';
+          let html = `<b>${params[0]?.value?.[0]?.toFixed(2)}s</b>`;
+          params.forEach(p => {
+            const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;"></span>`;
+            html += `<br/>${dot}${p.seriesName}: ${p.value?.[1]?.toFixed(0)}`;
+          });
+          return html;
+        },
+      },
+      legend: {
+        data: series.map(s => s.name),
+        top: 0, right: 0,
+        textStyle: { color: C.text, fontSize: 11 },
+        itemWidth: 16, itemHeight: 3,
+      },
+      grid: { top: 35, bottom: 35, left: 55, right: 20 },
+      xAxis: { type: 'value', name: '\u65f6\u95f4 (s)', nameLocation: 'center', nameGap: 22, nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      yAxis: { type: 'value', name: '\u538b\u529b\u503c', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      series,
+    };
+  }, [standTimes, standForce, standPeaksIdx, sitTimes, sitForce, hasStand, hasSit]);
+
+  if (!hasStand && !hasSit) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无力曲线数据</span>
+      </div>
+    );
+  }
+  return <EChart option={option} height={height} />;
+}
+
 /* ─── 周期时长柱状图 ─── */
 function CycleDurationChart({ durations, avgDuration, height = 200 }) {
   const option = useMemo(() => {
@@ -527,6 +595,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
   const contentRef = useRef(null);
+  // 缓存报告生成时间，避免每次渲染时重新生成时间导致持续增加
+  const fallbackDate = useMemo(() => new Date().toLocaleString('zh-CN'), []);
 
   useEffect(() => {
     if (propsReportData) { setReportData(propsReportData); setLoading(false); return; }
@@ -630,7 +700,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
         <div className="flex items-center gap-2 md:gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
           {patientInfo?.gender && <span>性别：{patientInfo.gender}</span>}
           {patientInfo?.age && <span>年龄：{patientInfo.age}</span>}
-          <span>{d.test_date || new Date().toLocaleString('zh-CN')}</span>
+          <span>{d.test_date || fallbackDate}</span>
           {onClose && (
             <button onClick={onClose} className="ml-2 w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -678,7 +748,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 </div>
                 <div className="zeiss-card-inner p-4">
                   <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>测试时间</div>
-                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{d.test_date || new Date().toLocaleString('zh-CN')}</div>
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{d.test_date || fallbackDate}</div>
                 </div>
                 <div className="zeiss-card-inner p-4">
                   <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>评估等级</div>
@@ -702,22 +772,11 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.cyan} />
                 <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.purple} />
               </div>
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div className="zeiss-card-inner p-3 text-center">
-                  <div className="text-base font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>{d.stand_frames || '--'}</div>
-                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>站立帧数</div>
+              {samplingRate && (
+                <div className="mt-2 text-right">
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>采样率: {samplingRate} Hz</span>
                 </div>
-                <div className="zeiss-card-inner p-3 text-center">
-                  <div className="text-base font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>{d.sit_frames || '--'}</div>
-                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>坐姿帧数</div>
-                </div>
-                <div className="zeiss-card-inner p-3 text-center">
-                  <div className="text-base font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
-                    {samplingRate ? `${samplingRate} Hz` : '--'}
-                  </div>
-                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>采样率</div>
-                </div>
-              </div>
+              )}
             </section>
 
             {/* ═══════════ 3. 周期分析 ═══════════ */}
@@ -808,27 +867,12 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
             {/* ═══════════ 5. 力-时间曲线 ═══════════ */}
             <section id="ss-force">
               <SectionHeader title="力-时间曲线" subtitle="Force-Time Curve" />
-              <div className="grid grid-cols-1 gap-4">
-                <div className="zeiss-card p-4">
-                  {standTimes.length > 0 && standForce.length > 0 ? (
-                    <ForceTimeChart times={standTimes} forces={standForce} peaksIdx={standPeaksIdx}
-                      title="脚垫总力随时间变化" color={C.green} height={260} />
-                  ) : (
-                    <div className="flex items-center justify-center py-8">
-                      <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无站立力曲线数据</span>
-                    </div>
-                  )}
-                </div>
-                <div className="zeiss-card p-4">
-                  {sitTimes.length > 0 && sitForce.length > 0 ? (
-                    <ForceTimeChart times={sitTimes} forces={sitForce}
-                      title="坐垫总力随时间变化" color={C.blue} height={260} />
-                  ) : (
-                    <div className="flex items-center justify-center py-8">
-                      <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无坐姿力曲线数据</span>
-                    </div>
-                  )}
-                </div>
+              <div className="zeiss-card p-4">
+                <CombinedForceTimeChart
+                  standTimes={standTimes} standForce={standForce} standPeaksIdx={standPeaksIdx}
+                  sitTimes={sitTimes} sitForce={sitForce}
+                  height={320}
+                />
               </div>
             </section>
 
