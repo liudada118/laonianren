@@ -237,10 +237,18 @@ export default function Dashboard() {
   const [showDialog, setShowDialog] = useState(false);
   const [pendingPath, setPendingPath] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(null);
+  const [showGripTip, setShowGripTip] = useState(false);
+  const [gripTipPath, setGripTipPath] = useState('');
 
   const handleStart = (path) => {
     if (patientInfo) {
-      navigate(path);
+      // 握力评估需要先提示用户带好手套
+      if (path === '/assessment/grip') {
+        setGripTipPath(path);
+        setShowGripTip(true);
+      } else {
+        navigate(path);
+      }
     } else {
       setPendingPath(path);
       setShowDialog(true);
@@ -250,7 +258,13 @@ export default function Dashboard() {
   const handleConfirm = (info) => {
     setPatientInfo(info);
     setShowDialog(false);
-    navigate(pendingPath);
+    // 握力评估需要先提示用户带好手套
+    if (pendingPath === '/assessment/grip') {
+      setGripTipPath(pendingPath);
+      setShowGripTip(true);
+    } else {
+      navigate(pendingPath);
+    }
   };
 
   const confirmReset = () => {
@@ -426,6 +440,33 @@ export default function Dashboard() {
 
       {/* 患者信息弹窗 */}
       <PatientDialog open={showDialog} onClose={() => setShowDialog(false)} onConfirm={handleConfirm} />
+
+      {/* 握力评估手套提示弹窗 */}
+      {showGripTip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[460px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-16 h-16 mx-auto mb-5 rounded-full flex items-center justify-center"
+              style={{ background: '#E8F2FF' }}>
+              <svg className="w-8 h-8" style={{ color: '#0066CC' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力评估准备</h3>
+            <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
+              请确保被评估者已<span className="font-semibold" style={{ color: '#0066CC' }}>带好手套</span>，并且<span className="font-semibold" style={{ color: '#0066CC' }}>手指平铺</span>在传感器上，以确保数据采集的准确性。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowGripTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+              <button
+                onClick={() => { setShowGripTip(false); navigate(gripTipPath); }}
+                className="flex-1 py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+                style={{ background: 'var(--zeiss-blue)' }}>
+                已准备好，开始评估
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 重新评估确认弹窗 */}
       {showResetConfirm && (

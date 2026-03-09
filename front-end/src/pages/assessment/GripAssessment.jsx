@@ -214,6 +214,7 @@ export default function GripAssessment() {
     viewReportMode ? (assessments.grip?.report?.reportData || null) : null
   );
   const [csvExporting, setCsvExporting] = useState(false);
+  const [showGripInstruction, setShowGripInstruction] = useState(!viewReportMode);
   const timerRef = useRef(null);
   const leftRawFramesRef = useRef([]);
   const rightRawFramesRef = useRef([]);
@@ -889,6 +890,30 @@ export default function GripAssessment() {
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
         </div>
       </header>
+
+      {/* 握力指导弹窗 */}
+      {showGripInstruction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[440px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-16 h-16 mx-auto mb-5 rounded-full flex items-center justify-center"
+              style={{ background: '#E8F2FF' }}>
+              <svg className="w-8 h-8" style={{ color: '#0066CC' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力评估指导</h3>
+            <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
+              请用<span className="font-bold" style={{ color: '#0066CC' }}>最大握力</span>握 <span className="font-bold text-xl" style={{ color: '#0066CC' }}>3</span> 次
+            </p>
+            <button
+              onClick={() => setShowGripInstruction(false)}
+              className="w-full py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+              style={{ background: 'var(--zeiss-blue)' }}>
+              我知道了
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {showLeftToast && (
