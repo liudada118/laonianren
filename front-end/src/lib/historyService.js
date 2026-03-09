@@ -67,16 +67,16 @@ export function saveRecord(record) {
  * 保存一次完整评估（可能包含多个评估类型）
  * 按患者+日期分组
  */
-export function saveAssessmentSession(patientInfo, institution, assessments) {
+export function saveAssessmentSession(patientInfo, institution, assessments, sessionId) {
   try {
     const history = getHistory();
     const now = new Date();
     const dateStr = formatDate(now);
 
-    // 查找今天同一患者的记录
-    let existingIdx = history.findIndex(
-      r => r.patientName === patientInfo.name && r.dateStr === dateStr
-    );
+    // 按 sessionId 查找已有记录（同一次评估会话内的多次完成会更新同一条记录）
+    let existingIdx = sessionId
+      ? history.findIndex(r => r.sessionId === sessionId)
+      : -1;
 
     if (existingIdx >= 0) {
       // 更新已有记录
@@ -107,6 +107,7 @@ export function saveAssessmentSession(patientInfo, institution, assessments) {
 
       const newRecord = {
         id: generateId(),
+        sessionId: sessionId || generateId(),
         patientName: patientInfo.name,
         patientGender: patientInfo.gender,
         patientAge: patientInfo.age,

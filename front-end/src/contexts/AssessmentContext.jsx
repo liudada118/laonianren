@@ -4,6 +4,10 @@ import { backendBridge } from '../lib/BackendBridge';
 
 const AssessmentContext = createContext(null);
 
+function generateSessionId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
+}
+
 const INITIAL_STATE = {
   // 登录信息
   secretKey: '',
@@ -12,6 +16,9 @@ const INITIAL_STATE = {
   
   // 当前评估对象（全局共享，只输入一次）
   patientInfo: null,
+
+  // 当前评估会话 ID（区分同名患者的不同评估）
+  sessionId: generateSessionId(),
   
   // 四个评估的完成状态和数据
   assessments: {
@@ -160,7 +167,7 @@ export function AssessmentProvider({ children }) {
           };
         }
         try {
-          saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave);
+          saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave, prev.sessionId);
         } catch (e) {
           console.error('自动保存历史记录失败:', e);
         }
@@ -178,11 +185,12 @@ export function AssessmentProvider({ children }) {
     });
   }, []);
 
-  // 开始新的一次评估：重置所有评估状态和患者信息，保留登录和设备连接
+  // 开始新的一次评估：重置所有评估状态和患者信息，生成新 sessionId，保留登录和设备连接
   const startNewSession = useCallback(() => {
     setState(prev => ({
       ...prev,
       patientInfo: null,
+      sessionId: generateSessionId(),
       assessments: {
         grip: { completed: false, report: null, data: null },
         sitstand: { completed: false, report: null, data: null },
