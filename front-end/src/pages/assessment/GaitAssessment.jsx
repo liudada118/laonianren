@@ -311,6 +311,10 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
   const thStyle = 'px-3 py-2 text-left text-[11px] font-semibold';
   const tdStyle = 'px-3 py-2 text-[11px]';
 
+  // Hooks 必须在所有条件分支之前调用
+  const gaitContentRef = React.useRef(null);
+  const [pdfExporting, setPdfExporting] = React.useState(false);
+
   if (loading) {
     return <div className="flex items-center justify-center h-full"><div className="text-sm" style={{ color: 'var(--text-muted)' }}>正在加载报告数据...</div></div>;
   }
@@ -320,9 +324,6 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
   const rightStepTime = parseFloat(gp.rightStepTime) || 0;
   const leftStepLen = parseFloat(gp.leftStepLength) || 0;
   const rightStepLen = parseFloat(gp.rightStepLength) || 0;
-
-  const gaitContentRef = React.useRef(null);
-  const [pdfExporting, setPdfExporting] = React.useState(false);
   const handlePdfExport = async () => {
     if (pdfExporting) return;
     setPdfExporting(true);
