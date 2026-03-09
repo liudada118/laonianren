@@ -17,18 +17,17 @@ function EChart({ option, height = 280 }) {
   return <div ref={ref} style={{ width: '100%', height }} />;
 }
 
-/* ─── 目录项 ─── */
+/* ─── 目录项（删除了最后的"力占比分析"重复项）─── */
 const SECTIONS = [
   { id: 'overview', label: '基本信息' },
   { id: 'pressure', label: '手部压力分布' },
-  { id: 'time-analysis', label: '时间分析' },
-  { id: 'peak-data', label: '峰值帧数据' },
   { id: 'force-curve', label: '力-时间曲线' },
   { id: 'force-stack', label: '力分布堆叠图' },
   { id: 'force-bar', label: '各部位力分布' },
   { id: 'euler', label: '手部姿态' },
   { id: 'angular', label: '抖动检测' },
-  { id: 'pie', label: '力占比分析' },
+  { id: 'time-analysis', label: '时间分析' },
+  { id: 'peak-data', label: '峰值帧数据' },
 ];
 
 /* ─── 默认空 fingers 数据（防止 undefined 崩溃）─── */
@@ -40,6 +39,30 @@ const DEFAULT_FINGERS = [
   { name: '小指', force: 0, area: 0, points: 0, adc: 0 },
   { name: '手掌', force: 0, area: 0, points: 0, adc: 0 },
 ];
+
+/* ─── mm² → cm² 转换辅助函数 ─── */
+function mm2ToCm2(mm2Val) {
+  if (typeof mm2Val !== 'number' || isNaN(mm2Val)) return '0';
+  return parseFloat((mm2Val / 100).toFixed(2));
+}
+
+/* ─── 解析 timeRange 为简洁的总时长 ─── */
+function formatDuration(timeRange) {
+  if (!timeRange || timeRange === '-') return '-';
+  // 格式如 "0.000s ~ 17.500s"
+  const match = timeRange.match(/([\d.]+)\s*s?\s*[~\-–]\s*([\d.]+)\s*s?/);
+  if (match) {
+    const start = parseFloat(match[1]);
+    const end = parseFloat(match[2]);
+    const duration = end - start;
+    if (duration >= 1) {
+      return `${parseFloat(duration.toFixed(1))} 秒`;
+    }
+    return `${parseFloat(duration.toFixed(3))} 秒`;
+  }
+  // 如果已经是简洁格式，直接返回
+  return timeRange;
+}
 
 /* ─── 主报告组件 ─── */
 export default function GripReport({ patientName, onClose, onSwitchDynamic, reportData: propsReportData }) {
@@ -197,7 +220,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
       series: [
         { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
         { name: '俯仰(Pitch)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.pitch || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#0066CC' }, lineStyle: { width: 2 } },
-        { name: '偏航(Yaw)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.yaw || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#059669' }, lineStyle: { width: 2 } }
+        { name: '偏航(Yaw)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.yaw || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#059669' }, lineStyle: { width: 2 } },
       ]
     };
   }, [data]);
@@ -335,15 +358,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
         <div ref={contentRef} className="flex-1 overflow-y-auto p-6 scroll-smooth" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1100px] mx-auto space-y-8">
 
-            {/* 基本信息 */}
+            {/* 基本信息：总帧数移到不显眼位置，时间范围改为总时长 */}
             <section id="grip-overview">
               <SectionHeader title="基本信息" />
               <div className="zeiss-card p-4">
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   {[
                     { l: '测试手类型', v: data.handType || handLabel },
-                    { l: '总帧数', v: data.totalFrames },
-                    { l: '时间范围', v: data.timeRange },
+                    { l: '采集时长', v: formatDuration(data.timeRange) },
                     { l: '峰值力', v: data.peakInfo ? `${parseFloat((data.peakInfo.peak_force ?? 0).toFixed(2))}N` : '-' }
                   ].map((item, i) => (
                     <div key={i} className="zeiss-card-inner p-3 text-center">
@@ -352,10 +374,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     </div>
                   ))}
                 </div>
+                {/* 总帧数以小字显示在底部 */}
+                <div className="mt-2 text-right pr-1">
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>总帧数: {data.totalFrames}</span>
+                </div>
               </div>
             </section>
 
-            {/* 手部压力分布 */}
+            {/* 手部压力分布：面积单位 mm² → cm² */}
             <section id="grip-pressure">
               <SectionHeader title="手部压力分布" />
               <div className="flex gap-4">
@@ -373,7 +399,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                         <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</div>
                         <div className="flex gap-3 text-[11px]">
                           <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? 0)}N</span></span>
-                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area ?? 0}mm²</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{mm2ToCm2(f.area)}cm²</span></span>
                           <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points ?? 0}</span></span>
                         </div>
                       </div>
@@ -384,70 +410,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>合计</span>
                     <div className="flex gap-5 text-sm">
                       <span style={{ color: 'var(--text-tertiary)' }}>总力: <b style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? parseFloat(data.totalForce.toFixed(2)) : data.totalForce}N</b></span>
-                      <span style={{ color: 'var(--text-tertiary)' }}>总面积: <b style={{ color: '#0891B2' }}>{data.totalArea}mm²</b></span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>总面积: <b style={{ color: '#0891B2' }}>{mm2ToCm2(data.totalArea)}cm²</b></span>
                     </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            {/* 时间分析 */}
-            <section id="grip-time-analysis">
-              <SectionHeader title="时间与抖动分析" />
-              <div className="zeiss-card overflow-hidden">
-                <div className="grid grid-cols-4 gap-px" style={{ background: 'var(--border-light)' }}>
-                  {(data.timeAnalysis || []).map((row, i) => (
-                    <div key={i} className="p-3 text-center transition-colors" style={{ background: 'var(--bg-secondary)' }}>
-                      <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{row.label}</div>
-                      <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{row.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            {/* 峰值帧数据 */}
-            <section id="grip-peak-data">
-              <SectionHeader title="峰值帧各部位数据" />
-              <div className="zeiss-card overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ background: 'var(--zeiss-blue-light)' }}>
-                      <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--text-tertiary)' }}>部位</th>
-                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>ADC</th>
-                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>力 (N)</th>
-                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>面积 (mm²)</th>
-                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>点数</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.fingers || []).map((f, i) => (
-                      <tr key={i} className="transition-colors" style={{ borderTop: '1px solid var(--border-light)' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                        <td className="px-4 py-2.5 flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[i] }}/>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc ?? '-'}</td>
-                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? '-')}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area ?? '-'}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points ?? '-'}</td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: '2px solid var(--border-medium)', background: 'var(--bg-tertiary)' }}>
-                      <td className="px-4 py-2.5 font-bold" style={{ color: 'var(--text-primary)' }}>合计</td>
-                      <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
-                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? parseFloat(data.totalForce.toFixed(2)) : data.totalForce}</td>
-                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: '#0891B2' }}>{data.totalArea}</td>
-                      <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* 力-时间曲线 */}
+            {/* 力-时间曲线（图表先于数据表格）*/}
             <section id="grip-force-curve">
               <SectionHeader title={`${handLabel} - 力-时间曲线`} />
               <div className="zeiss-card p-4"><EChart option={forceTimeOption} height={320} /></div>
@@ -459,7 +429,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
               <div className="zeiss-card p-4"><EChart option={stackOption} height={320} /></div>
             </section>
 
-            {/* 各部位力分布 */}
+            {/* 各部位力分布（柱状图 + 饼图）*/}
             <section id="grip-force-bar">
               <SectionHeader title={`${handLabel} - 峰值帧各部位力分布`} />
               <div className="grid grid-cols-2 gap-4">
@@ -480,10 +450,60 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
               <div className="zeiss-card p-4"><EChart option={angVelOption} height={320} /></div>
             </section>
 
-            {/* 力占比分析 */}
-            <section id="grip-pie">
-              <SectionHeader title={`${handLabel} - 峰值帧各部位力占比`} />
-              <div className="zeiss-card p-4"><EChart option={pieOption} height={350} /></div>
+            {/* 时间分析（数据表格移到图表后面）*/}
+            <section id="grip-time-analysis">
+              <SectionHeader title="时间与抖动分析" />
+              <div className="zeiss-card overflow-hidden">
+                <div className="grid grid-cols-4 gap-px" style={{ background: 'var(--border-light)' }}>
+                  {(data.timeAnalysis || []).map((row, i) => (
+                    <div key={i} className="p-3 text-center transition-colors" style={{ background: 'var(--bg-secondary)' }}>
+                      <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{row.label}</div>
+                      <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{row.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* 峰值帧数据（数据表格移到图表后面，面积单位 mm² → cm²）*/}
+            <section id="grip-peak-data">
+              <SectionHeader title="峰值帧各部位数据" />
+              <div className="zeiss-card overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: 'var(--zeiss-blue-light)' }}>
+                      <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--text-tertiary)' }}>部位</th>
+                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>ADC</th>
+                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>力 (N)</th>
+                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>面积 (cm²)</th>
+                      <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--text-tertiary)' }}>点数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.fingers || []).map((f, i) => (
+                      <tr key={i} className="transition-colors" style={{ borderTop: '1px solid var(--border-light)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td className="px-4 py-2.5 flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[i] }}/>
+                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? '-')}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{mm2ToCm2(f.area)}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points ?? '-'}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '2px solid var(--border-medium)', background: 'var(--bg-tertiary)' }}>
+                      <td className="px-4 py-2.5 font-bold" style={{ color: 'var(--text-primary)' }}>合计</td>
+                      <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
+                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: 'var(--zeiss-blue)' }}>{typeof data.totalForce === 'number' ? parseFloat(data.totalForce.toFixed(2)) : data.totalForce}</td>
+                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: '#0891B2' }}>{mm2ToCm2(data.totalArea)}</td>
+                      <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-muted)' }}>-</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
 
             <div className="h-8" />
