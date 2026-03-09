@@ -1,19 +1,22 @@
 /**
  * PDF 导出工具
  * 
- * 使用 window.print() 实现 PDF 导出
- * 在 Electron 环境中，会调用 webContents.printToPDF 实现无弹窗直接保存
- * 在浏览器环境中，会弹出打印对话框
+ * 使用 html2canvas + jsPDF 将 DOM 内容渲染为真实 PDF 文件并触发下载
+ * 支持长页面自动分页（单页滑动模式）
  */
 import React from 'react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 /**
- * 将指定容器内容导出为 PDF
+ * 将指定容器内容导出为 PDF 文件
  * @param {HTMLElement} container - 要导出的 DOM 容器
  * @param {string} fileName - 文件名（不含扩展名）
  * @param {object} options - 配置选项
- * @param {string} options.title - PDF 标题
+ * @param {string} options.title - PDF 标题（元数据）
  * @param {string} options.orientation - 'portrait' | 'landscape'
+ * @param {number} options.scale - 渲染缩放比例，默认 2
+ * @param {number} options.quality - JPEG 质量 0-1，默认 0.95
  */
 export async function exportToPdf(container, fileName = 'report', options = {}) {
   if (!container) {
@@ -21,136 +24,101 @@ export async function exportToPdf(container, fileName = 'report', options = {}) 
     return false;
   }
 
-  const { title = '评估报告', orientation = 'portrait' } = options;
+  const {
+    title = '评估报告',
+    orientation = 'portrait',
+    scale = 2,
+    quality = 0.95,
+  } = options;
 
-  // 检查是否在 Electron 环境中
-  const isElectron = !!(window.electronAPI || (typeof process !== 'undefined' && process.versions?.electron));
-
-  if (isElectron && window.electronAPI?.printToPDF) {
-    // Electron 环境：使用 IPC 调用主进程的 printToPDF
-    try {
-      const result = await window.electronAPI.printToPDF({
-        fileName: `${fileName}.pdf`,
-        landscape: orientation === 'landscape',
-        printBackground: true,
-        margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
-      });
-      console.log('[PDF Export] Electron PDF 导出成功:', result);
-      return true;
-    } catch (e) {
-      console.error('[PDF Export] Electron PDF 导出失败:', e);
-      // fallback 到 window.print
-    }
-  }
-
-  // 浏览器环境 / Electron fallback：使用 window.print()
-  return printContainerAsPdf(container, fileName, title, orientation);
-}
-
-/**
- * 使用 window.print() 打印指定容器
- */
-function printContainerAsPdf(container, fileName, title, orientation) {
-  return new Promise((resolve) => {
-    // 创建打印专用 iframe
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none;';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-
-    // 复制所有样式表
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
-    let styleHtml = styles.map(s => s.outerHTML).join('\n');
-
-    // 添加打印专用样式
-    styleHtml += `
-      <style>
-        @page {
-          size: A4 ${orientation};
-          margin: 10mm;
-        }
-        @media print {
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color-adjust: exact !important;
-          }
-          body {
-            margin: 0;
-            padding: 0;
-            background: white !important;
-            font-size: 12px;
-          }
-          .no-print { display: none !important; }
-          canvas { max-width: 100% !important; }
-          .zeiss-card { break-inside: avoid; page-break-inside: avoid; }
-          section { break-inside: avoid; page-break-inside: avoid; }
-        }
-      </style>
-    `;
-
-    // 克隆容器内容
-    const clonedContent = container.cloneNode(true);
-
-    // 将 ECharts canvas 转换为图片
-    const originalCanvases = container.querySelectorAll('canvas');
-    const clonedCanvases = clonedContent.querySelectorAll('canvas');
-    originalCanvases.forEach((canvas, i) => {
-      try {
-        const img = doc.createElement('img');
-        img.src = canvas.toDataURL('image/png');
-        img.style.cssText = `width:${canvas.style.width || canvas.width + 'px'};height:${canvas.style.height || canvas.height + 'px'};max-width:100%;`;
-        if (clonedCanvases[i] && clonedCanvases[i].parentNode) {
-          clonedCanvases[i].parentNode.replaceChild(img, clonedCanvases[i]);
-        }
-      } catch (e) {
-        console.warn('[PDF Export] Canvas 转图片失败:', e);
-      }
+  try {
+    // 1. 使用 html2canvas 将 DOM 渲染为 canvas
+    const canvas = await html2canvas(container, {
+      scale,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      // 滚动容器需要完整渲染
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: container.scrollWidth,
+      windowHeight: container.scrollHeight,
     });
 
-    doc.open();
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${title} - ${fileName}</title>
-          ${styleHtml}
-        </head>
-        <body>
-          ${clonedContent.outerHTML}
-        </body>
-      </html>
-    `);
-    doc.close();
+    // 2. 计算 PDF 尺寸（A4: 210mm x 297mm）
+    const isLandscape = orientation === 'landscape';
+    const pageWidth = isLandscape ? 297 : 210;
+    const pageHeight = isLandscape ? 210 : 297;
+    const margin = 5; // mm
+    const contentWidth = pageWidth - margin * 2;
+    const contentHeight = pageHeight - margin * 2;
 
-    // 等待样式和图片加载完成后打印
-    iframe.contentWindow.onload = () => {
-      setTimeout(() => {
-        try {
-          iframe.contentWindow.print();
-        } catch (e) {
-          console.error('[PDF Export] 打印失败:', e);
+    // 图片宽度适配到 PDF 内容区域宽度
+    const imgWidth = contentWidth;
+    const imgHeight = (canvas.height * contentWidth) / canvas.width;
+
+    // 3. 创建 jsPDF 实例
+    const pdf = new jsPDF({
+      orientation: isLandscape ? 'l' : 'p',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    // 设置 PDF 元数据
+    pdf.setProperties({
+      title: `${title} - ${fileName}`,
+      creator: '老年人筛查系统',
+    });
+
+    // 4. 将 canvas 转为图片数据
+    const imgData = canvas.toDataURL('image/jpeg', quality);
+
+    // 5. 单页滑动模式：如果内容超过一页，自动分页
+    if (imgHeight <= contentHeight) {
+      // 内容不超过一页，直接放置
+      pdf.addImage(imgData, 'JPEG', margin, margin, imgWidth, imgHeight);
+    } else {
+      // 内容超过一页，按页高裁切分页
+      let remainingHeight = imgHeight;
+      let position = 0; // 当前在图片中的 mm 偏移
+
+      while (remainingHeight > 0) {
+        if (position > 0) {
+          pdf.addPage();
         }
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-          resolve(true);
-        }, 1000);
-      }, 500);
-    };
 
-    // 超时保护
-    setTimeout(() => {
-      if (document.body.contains(iframe)) {
-        try { iframe.contentWindow.print(); } catch (e) {}
-        setTimeout(() => {
-          if (document.body.contains(iframe)) document.body.removeChild(iframe);
-          resolve(true);
-        }, 1000);
+        // 计算当前页应该显示的图片区域
+        // 使用 canvas 裁切来实现精确分页
+        const sliceHeight = Math.min(contentHeight, remainingHeight);
+        const sourceY = (position / imgHeight) * canvas.height;
+        const sourceH = (sliceHeight / imgHeight) * canvas.height;
+
+        // 创建当前页的 canvas 切片
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sourceH;
+        const ctx = pageCanvas.getContext('2d');
+        ctx.drawImage(canvas, 0, sourceY, canvas.width, sourceH, 0, 0, canvas.width, sourceH);
+
+        const pageImgData = pageCanvas.toDataURL('image/jpeg', quality);
+        pdf.addImage(pageImgData, 'JPEG', margin, margin, imgWidth, sliceHeight);
+
+        position += sliceHeight;
+        remainingHeight -= sliceHeight;
       }
-    }, 5000);
-  });
+    }
+
+    // 6. 保存 PDF 文件
+    pdf.save(`${fileName}.pdf`);
+
+    console.log('[PDF Export] PDF 生成成功:', `${fileName}.pdf`);
+    return true;
+  } catch (e) {
+    console.error('[PDF Export] PDF 生成失败:', e);
+    alert('PDF 生成失败: ' + e.message);
+    return false;
+  }
 }
 
 /**
