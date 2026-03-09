@@ -1876,9 +1876,9 @@ def plot_all_largest_regions_heatmap(left_regions, right_regions, total_matrix, 
         draw_fpa_overlay(idx, is_right=True)
 
     cbar = plt.colorbar(hm)
-    cbar.set_label("Accumulated Pressure / FPA Analysis")
+    cbar.set_label("累积压力 / 足偏角分析")
     ax.set_xticks([]); ax.set_yticks([])
-    plt.title("Footprint Heatmap with FPA Analysis")
+    plt.title("足印热力图（足偏角分析）")
     
     if save_path: 
         plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
@@ -2037,7 +2037,7 @@ def analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, 
                 ax_l.plot(cop_ys, cop_xs, color='white', linewidth=2.0, alpha=0.9)
                 ax_l.plot(cop_ys[0], cop_xs[0], 'o', color='white', markeredgecolor='red', markersize=5)
                 ax_l.plot(cop_ys[-1], cop_xs[-1], 'x', color='red', markersize=5)
-        ax_l.set_title(f"Left Foot Average\n(n={len(l_aligned_imgs)} steps)", color='black', fontsize=14)
+        ax_l.set_title(f"左脚平均\n(共{len(l_aligned_imgs)}步)", color='black', fontsize=14)
     else:
         ax_l.text(0.5, 0.5, "No Data", color='white', ha='center'); ax_l.axis('off')
     ax_l.set_xticks([]); ax_l.set_yticks([])
@@ -2063,12 +2063,12 @@ def analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, 
                 ax_r.plot(cop_ys, cop_xs, color='white', linewidth=2.0, alpha=0.9)
                 ax_r.plot(cop_ys[0], cop_xs[0], 'o', color='white', markeredgecolor='red', markersize=5)
                 ax_r.plot(cop_ys[-1], cop_xs[-1], 'x', color='red', markersize=5)
-        ax_r.set_title(f"Right Foot Average\n(n={len(r_aligned_imgs)} steps)", color='black', fontsize=14)
+        ax_r.set_title(f"右脚平均\n(共{len(r_aligned_imgs)}步)", color='black', fontsize=14)
     else:
         ax_r.text(0.5, 0.5, "No Data", color='white', ha='center'); ax_r.axis('off')
     ax_r.set_xticks([]); ax_r.set_yticks([])
 
-    plt.suptitle("Gait Average Summary (Smoothed)", fontsize=16, color='black')
+    plt.suptitle("步态平均摘要（平滑处理）", fontsize=16, color='black')
     plt.tight_layout()
     
     if save_dir:
@@ -2165,7 +2165,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
             for ax in ax_row: 
                 ax.set_facecolor('black')
                 ax.axis('off')
-                if ax == ax_row[0]: ax.text(0.5, 0.5, "No Signal", color='gray', ha='center', transform=ax.transAxes)
+                if ax == ax_row[0]: ax.text(0.5, 0.5, "无信号", color='gray', ha='center', transform=ax.transAxes)
             return
 
         loads, frames, start_time_base = best_step_data
@@ -2204,7 +2204,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
 
         # Frame 1
         selected_frames.append(frames[1])
-        selected_titles.append("Start\n0ms")
+        selected_titles.append("落地\n0ms")
         # Frames 2-5
         for r in [0.4, 0.5, 0.6, 0.85]:
             idx = (np.abs(ascending_loads - peak_val * r)).argmin()
@@ -2213,7 +2213,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
             selected_titles.append(f"{t}ms")
         # Frame 6
         selected_frames.append(frames[peak_idx])
-        selected_titles.append(f"Peak\n{peak_idx*frame_ms}ms")
+        selected_titles.append(f"峰值\n{peak_idx*frame_ms}ms")
         # Frames 7-9
         for r in [0.85, 0.7, 0.5]:
             idx = (np.abs(descending_loads - peak_val * r)).argmin()
@@ -2222,7 +2222,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
             selected_titles.append(f"{t}ms")
         # Frame 10
         selected_frames.append(frames[-1])
-        selected_titles.append(f"End\n{(len(frames)-1)*frame_ms}ms")
+        selected_titles.append(f"离地\n{(len(frames)-1)*frame_ms}ms")
 
         # --- 绘图 (集成插值算法) ---
         global_max = np.max(frames)
@@ -2250,19 +2250,19 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
                               vmin=0, vmax=vmax_val)
                 
                 ax.set_xticks([]); ax.set_yticks([])
-                font_weight = 'bold' if "Peak" in selected_titles[k] else 'normal'
+                font_weight = 'bold' if "峰值" in selected_titles[k] else 'normal'
                 ax.set_title(selected_titles[k], color='black', fontsize=9, fontweight=font_weight)
             else:
                 ax.axis('off')
 
     # 执行
     process_foot(left_on, left_off, False, axes[0])
-    axes[0, 0].set_ylabel("Left Foot", fontsize=14, rotation=0, labelpad=40, va='center')
+    axes[0, 0].set_ylabel("左脚", fontsize=14, rotation=0, labelpad=40, va='center')
 
     process_foot(right_on, right_off, True, axes[1])
-    axes[1, 0].set_ylabel("Right Foot", fontsize=14, rotation=0, labelpad=40, va='center')
+    axes[1, 0].set_ylabel("右脚", fontsize=14, rotation=0, labelpad=40, va='center')
 
-    plt.suptitle("Foot Pressure Evolution (Start -> End)", fontsize=16, y=0.98)
+    plt.suptitle("足底压力演变（落地 → 离地）", fontsize=16, y=0.98)
     
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -3109,12 +3109,19 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     def downsample_series(series, max_points=500):
         n = len(series.get("time", []))
         if n <= max_points:
-            return series
+            # 统一key名，确保前端能正确读取
+            return {
+                "time": [round(v, 3) for v in series.get("time", [])],
+                "area": [round(v, 2) for v in series.get("area", [])],
+                "load": [round(v, 2) for v in series.get("load", [])],
+                "copSpeed": [round(v, 2) for v in series.get("cop_speed", [])],
+                "pressure": [round(v, 3) for v in series.get("pressure", [])],
+            }
         step = max(1, n // max_points)
         return {
             "time": [round(v, 3) for v in series["time"][::step]],
             "area": [round(v, 2) for v in series["area"][::step]],
-            "force": [round(v, 2) for v in series["load"][::step]],
+            "load": [round(v, 2) for v in series["load"][::step]],
             "copSpeed": [round(v, 2) for v in series["cop_speed"][::step]],
             "pressure": [round(v, 3) for v in series["pressure"][::step]],
         }

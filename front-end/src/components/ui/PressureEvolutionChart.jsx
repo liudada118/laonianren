@@ -31,8 +31,8 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
     const padBottom = 10;
 
     const rows = [
-      { data: leftData, label: 'Left Foot', color: '#3B82F6' },
-      { data: rightData, label: 'Right Foot', color: '#F59E0B' },
+      { data: leftData, label: '左脚', color: '#3B82F6' },
+      { data: rightData, label: '右脚', color: '#F59E0B' },
     ];
 
     const totalW = labelW + numCols * (cellW + cellGap) - cellGap + colorbarMargin + colorbarW + 40;
@@ -112,7 +112,7 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
 
         // Peak 高亮
         const titleText = titles[col] || '';
-        if (titleText.includes('Peak')) {
+        if (titleText.includes('Peak') || titleText.includes('峰值')) {
           ctx.strokeStyle = '#EF4444';
           ctx.lineWidth = 2.5;
           roundRect(ctx, x, y, cellW, cellH, 3);
@@ -125,11 +125,11 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
           ctx.font = 'bold 9px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('PEAK', x + cellW / 2, y - 1);
+          ctx.fillText('峰值', x + cellW / 2, y - 1);
         }
 
         // 时间标签（截断浮点数）
-        let displayTitle = titleText.replace(/(\d+)\.\d+(ms)/g, '$1$2').replace('Peak ', '');
+        let displayTitle = titleText.replace(/(\d+)\.\d+(ms)/g, '$1$2').replace('Peak ', '').replace('峰值\n', '');
         ctx.fillStyle = '#888';
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
