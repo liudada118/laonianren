@@ -180,14 +180,15 @@ async function resolveAssessmentContext(db, req, rawTimestamp) {
   return { assessmentId, matchedDate, matchedTimestamp, tsNum }
 }
 
-function flipFoot64x64Horizontal(arr) {
+function flipFoot64x64Vertical(arr) {
   if (!Array.isArray(arr) || arr.length !== 4096) return arr
   const size = 64
   const out = new Array(arr.length)
   for (let r = 0; r < size; r++) {
-    const rowStart = r * size
+    const srcRowStart = (size - 1 - r) * size
+    const dstRowStart = r * size
     for (let c = 0; c < size; c++) {
-      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+      out[dstRowStart + c] = arr[srcRowStart + c]
     }
   }
   return out
@@ -3193,8 +3194,8 @@ async function connectPort() {
           }
           zeroBelowThreshold(pointArr, 8)
           removeSmallIslands64x64(pointArr, 12)
-          // 对脚垫数据做水平镜像翻转（左右对调）
-          const flippedArr = flipFoot64x64Horizontal(pointArr)
+          // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
+          const flippedArr = flipFoot64x64Vertical(pointArr)
           dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
             dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
