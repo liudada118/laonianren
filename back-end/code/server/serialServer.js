@@ -3193,11 +3193,13 @@ async function connectPort() {
           }
           zeroBelowThreshold(pointArr, 8)
           removeSmallIslands64x64(pointArr, 12)
-          dataItem.arr = pointArr
+          // 对脚垫数据做水平镜像翻转（左右对调）
+          const flippedArr = flipFoot64x64Horizontal(pointArr)
+          dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
-            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
           }
-          lastFootPointArr = pointArr
+          lastFootPointArr = flippedArr
           // console.log(444)
           const stamp = new Date().getTime()
 
