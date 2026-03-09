@@ -14,8 +14,8 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     const canvas = canvasRef.current;
 
     const sides = [
-      { data: gaitAvgData.left, label: 'Left Foot Average', color: '#3B82F6' },
-      { data: gaitAvgData.right, label: 'Right Foot Average', color: '#F59E0B' },
+      { data: gaitAvgData.left, label: '左脚平均', color: '#3B82F6' },
+      { data: gaitAvgData.right, label: '右脚平均', color: '#F59E0B' },
     ].filter(s => s.data && s.data.heatmap);
 
     if (sides.length === 0) return;
@@ -63,7 +63,7 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`${label} (${data.stepCount} steps)`, baseX + 16, padding + labelH / 2);
+      ctx.fillText(`${label}（共${data.stepCount}步）`, baseX + 16, padding + labelH / 2);
 
       // 黑色背景卡片
       roundRect(ctx, cardX, cardY, cellW, cellH, 4);

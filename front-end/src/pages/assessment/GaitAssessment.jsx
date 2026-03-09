@@ -238,18 +238,55 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
     tooltip: { trigger: 'axis', ...tip },
   }), [leftSteps, rightSteps]);
 
-  const makeTimeOpt = (field, label) => ({
-    animation: false,
-    grid: { top: 20, bottom: 30, left: 50, right: 20 },
-    legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
-    xAxis: { type: 'category', data: leftTime.length > 0 ? leftTime : rightTime, axisLabel: { fontSize: 9, color: C.text, rotate: 30, formatter: v => parseFloat(v).toFixed(2) }, show: leftTime.length > 0 },
-    yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text, formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: C.grid } } },
-    series: [
-      { name: '左脚', type: 'line', smooth: true, symbol: 'none', data: ts.left?.[field] || [], lineStyle: { color: C.blue, width: 1.5 } },
-      { name: '右脚', type: 'line', smooth: true, symbol: 'none', data: ts.right?.[field] || [], lineStyle: { color: C.amber, width: 1.5 } },
-    ],
-    tooltip: { trigger: 'axis', ...tip, valueFormatter: v => typeof v === 'number' ? v.toFixed(2) : v },
-  });
+  const makeTimeOpt = (field, label) => {
+    const timeData = leftTime.length > 0 ? leftTime : rightTime;
+    const totalPoints = timeData.length;
+    // 计算合理的标签间距，避免密集显示导致乱码
+    const labelInterval = totalPoints > 0 ? Math.max(0, Math.floor(totalPoints / 8) - 1) : 0;
+    return {
+      animation: false,
+      grid: { top: 20, bottom: 40, left: 55, right: 20 },
+      legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
+      xAxis: {
+        type: 'category',
+        name: '时间(s)',
+        nameTextStyle: { fontSize: 10, color: C.text, padding: [8, 0, 0, 0] },
+        nameLocation: 'end',
+        data: timeData,
+        axisLabel: {
+          fontSize: 9,
+          color: C.text,
+          rotate: 0,
+          interval: labelInterval,
+          formatter: v => {
+            const num = parseFloat(v);
+            return isNaN(num) ? '' : num.toFixed(1);
+          },
+        },
+        axisTick: { alignWithLabel: true },
+        show: timeData.length > 0,
+      },
+      yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text, formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: C.grid } } },
+      series: [
+        { name: '左脚', type: 'line', smooth: true, symbol: 'none', data: ts.left?.[field] || [], lineStyle: { color: C.blue, width: 1.5 } },
+        { name: '右脚', type: 'line', smooth: true, symbol: 'none', data: ts.right?.[field] || [], lineStyle: { color: C.amber, width: 1.5 } },
+      ],
+      tooltip: {
+        trigger: 'axis', ...tip,
+        formatter: params => {
+          if (!params || params.length === 0) return '';
+          const timeVal = parseFloat(params[0].axisValue);
+          const timeStr = isNaN(timeVal) ? params[0].axisValue : `${timeVal.toFixed(2)}s`;
+          let html = `<div style="font-size:11px;font-weight:600;margin-bottom:4px">${timeStr}</div>`;
+          params.forEach(p => {
+            const val = typeof p.value === 'number' ? p.value.toFixed(2) : p.value;
+            html += `<div style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>${p.seriesName}: ${val}</div>`;
+          });
+          return html;
+        },
+      },
+    };
+  };
   const areaOption = useMemo(() => makeTimeOpt('area', 'cm²'), [ts]);
   const forceOption = useMemo(() => makeTimeOpt('load', 'N'), [ts]);
   const pressureOption = useMemo(() => makeTimeOpt('pressure', 'N/cm²'), [ts]);
@@ -326,7 +363,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
                 <th className={thStyle} colSpan={3} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
               </tr><tr className="zeiss-table-header">
                 <th className={thStyle}></th>
-                {['峰值', '均值', '标准差', '峰值', '均值', '标准差'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)' }}>{h}</th>)}
+                {['峰值(N)', '均值(N)', '标准差(N)', '峰值(N)', '均值(N)', '标准差(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)' }}>{h}</th>)}
               </tr></thead>
               <tbody>{balanceData.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
@@ -347,13 +384,13 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
         <section id="gait-evolution">
           <div className="zeiss-section-title">3. 完整足印与平均步态</div>
           <div className="zeiss-card p-4 mb-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Foot Pressure Evolution (Start → End)</h4>
+            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>足底压力演变（落地 → 离地）</h4>
             <div className="overflow-x-auto">
               <img src={images.pressureEvolution || '/gait_report_data/pressure_evolution.png'} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
             </div>
           </div>
           <div className="zeiss-card p-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Gait Average Summary (Smoothed)</h4>
+            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要（平滑处理）</h4>
             <div className="flex justify-center">
               <img src={images.gaitAverage || '/gait_report_data/gait_average.png'} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
             </div>
@@ -362,7 +399,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
 
         {/* 4. 足印热力图 */}
         <section id="gait-heatmap">
-          <div className="zeiss-section-title">4. 足印热力图 (FPA Analysis)</div>
+          <div className="zeiss-section-title">4. 足印热力图（足偏角分析）</div>
           <div className="zeiss-card p-4 flex justify-center">
             <img src={images.footprintHeatmap || '/gait_report_data/footprint_heatmap.png'} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '800px', imageRendering: 'auto' }} />
           </div>
@@ -414,7 +451,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
         </section>
 
         <section id="gait-regions">
-          <div className="zeiss-section-title">7. 分区点位图 (Pressure Regions S1-S6)</div>
+          <div className="zeiss-section-title">7. 分区点位图（压力分区 S1-S6）</div>
           <div className="zeiss-card p-4">
             <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} />
           </div>
@@ -542,6 +579,7 @@ export default function GaitAssessment() {
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
+  const [showGuideDialog, setShowGuideDialog] = useState(!viewReportMode);
   const assessmentIdRef = useRef(`gait_${Date.now()}`);
   const [csvExporting, setCsvExporting] = useState(false);
   const [reportMode, setReportMode] = useState('static');
@@ -857,6 +895,27 @@ export default function GaitAssessment() {
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
         </div>
       </header>
+
+      {/* 进入评估指导弹窗 */}
+      {showGuideDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-5 min-w-[380px] max-w-[440px] animate-slideUp">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'var(--zeiss-blue-light)' }}>
+              <svg className="w-8 h-8" fill="none" stroke="var(--zeiss-blue)" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold text-center" style={{ color: 'var(--text-primary)' }}>步态评估指导</h3>
+            <div className="text-center px-2">
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                请受试者<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>从脚印走向 LOGO 方向</span>，并且<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>走出步道</span>。
+              </p>
+              <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>确保受试者以自然步态匀速行走，采集过程中请勿中途停留。</p>
+            </div>
+            <button onClick={() => setShowGuideDialog(false)} className="zeiss-btn-primary w-full py-3 text-sm font-semibold mt-1">我已了解，开始评估</button>
+          </div>
+        </div>
+      )}
 
       {showComplete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
