@@ -30,7 +30,7 @@ const ASSESSMENTS = [
     iconColor: '#A8C8B8',
     icon: '/icons/sit-stand.png',
     iconBg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
-    devices: ['sit', 'foot1', 'foot2', 'foot3', 'foot4'],
+    devices: ['sit', 'foot1'],
   },
   {
     key: 'standing',
@@ -44,7 +44,7 @@ const ASSESSMENTS = [
     iconColor: '#BEB0D8',
     icon: '/icons/footprint.png',
     iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
-    devices: ['foot1', 'foot2', 'foot3', 'foot4'],
+    devices: ['foot1'],
   },
   {
     key: 'gait',
