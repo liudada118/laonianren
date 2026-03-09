@@ -23,7 +23,7 @@ export function getHistory() {
  * @param {string} id - 记录 ID
  * @returns {Object|null}
  */
-export function getRecord(id) {
+export async function getRecord(id) {
   const history = getHistory();
   return history.find(r => r.id === id) || null;
 }
@@ -151,7 +151,7 @@ export function deleteRecord(id) {
 /**
  * 搜索历史记录
  */
-export function searchHistory({ keyword, date, page = 1, pageSize = 10 }) {
+export async function searchHistory({ keyword, date, page = 1, pageSize = 10 }) {
   let records = getHistory();
 
   if (keyword) {
