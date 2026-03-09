@@ -241,34 +241,30 @@ export function usePressureScene(options = {}) {
       }
     };
 
-    // 处理后端推送的脚垫数据（合并 foot1-4 为一个 64x64 矩阵）
+    // 处理后端推送的脚垫数据
     const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
-    let footDebugCounter = 0;
+    // 根据当前模式确定需要使用的脚垫类型
+    const MODE_FOOT_TYPES = {
+      3: ['foot1'],                              // 起坐评估：只用 foot1
+      4: ['foot1'],                              // 单脚垫模式
+      5: ['foot1', 'foot2', 'foot3', 'foot4'],   // 步态评估：4 个脚垫
+    };
+    const activeFootTypes = MODE_FOOT_TYPES[mode] || ['foot1'];
+
     const handleFootData = (type) => (arr) => {
       const scene = sceneRef.current;
       if (!scene || !arr || arr.length === 0) return;
 
       footBuffers[type] = arr;
 
-      // 调试日志：每 30 帧输出一次数据分布
-      footDebugCounter++;
-      if (footDebugCounter % 30 === 1) {
-        const nonZero = arr.filter(v => v > 0).length;
-        const gt8 = arr.filter(v => v > 8).length;
-        const maxVal = Math.max(...arr);
-        const available = Object.entries(footBuffers).filter(([, v]) => v && v.length > 0);
-        console.log(`[footDebug] type=${type}, arr.length=${arr.length}, nonZero=${nonZero}, gt8=${gt8}, max=${maxVal}, available=${available.map(([k])=>k).join(',')}`);
-      }
+      // 根据当前模式过滤 footBuffers，只保留当前模式需要的脚垫数据
+      const filteredBuffers = {};
+      activeFootTypes.forEach(ft => {
+        filteredBuffers[ft] = footBuffers[ft];
+      });
 
-      // 当所有4个脚垫都有数据时，合并为 64x64 矩阵
-      // 每个脚垫是 32x32 = 1024 个值（从4096中提取有效区域）
-      // 或者直接使用 64x64 = 4096 个值
-      // 根据后端数据格式，每个 foot 是 4096 个值 = 64x64
-      // 但实际上4个脚垫组合成一个完整的足底压力图
-      // 这里先用 foot1 的数据作为左脚，foot3 作为右脚（简化处理）
-      
-      // 使用当前可用的脚垫数据更新场景
-      const combined = combineFootpads(footBuffers);
+      // 使用过滤后的 buffers 更新场景
+      const combined = combineFootpads(filteredBuffers);
       if (combined) {
         const matrix = denoiseMatrix(rotateCCW90(combined), 3, 12);
         scene.updateFootpadData(matrix);
