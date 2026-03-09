@@ -19,6 +19,16 @@ export function getHistory() {
 }
 
 /**
+ * 根据 ID 获取单条记录
+ * @param {string} id - 记录 ID
+ * @returns {Object|null}
+ */
+export function getRecord(id) {
+  const history = getHistory();
+  return history.find(r => r.id === id) || null;
+}
+
+/**
  * 保存一条评估记录
  * @param {Object} record - 评估记录
  * @param {string} record.patientName - 患者姓名

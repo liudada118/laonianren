@@ -3,19 +3,20 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
 import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
-import { footpadServices, SENSOR_KEYS } from '../../lib/footpad-sdk/services/FootpadSerialService';
 import { backendBridge } from '../../lib/BackendBridge';
-import { generateAnimatedWalkwayData } from '../../lib/footpad-sdk/utils/mockFootprintData';
-import gaitDemoDataUrl from '../../assets/gait_demo_data.json?url';
-import { generateGaitReportData } from '../../lib/gaitReportGenerator';
+import GaitRegionChart from '../../components/report/GaitRegionChart';
+
+/* ─── 传感器常量 ─── */
+const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706', purple: '#7C3AED', cyan: '#0891B2' };
 const tip = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332', fontSize: 11 }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
+const PAD_COLORS = ['#3b82f6', '#22c55e', '#a855f7', '#f97316'];
+
 /* ─── 左侧统一数据面板 ─── */
-function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, connectionState }) {
-  /* 传感器压力曲线 */
+function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }) {
   const sensorColors = ['#3b82f6', '#22c55e', '#a855f7', '#f97316'];
   const sensorLabels = ['传感器1', '传感器2', '传感器3', '传感器4'];
 
@@ -43,7 +44,6 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, connectionSta
 
   return (
     <div className="h-full flex flex-col gap-3 overflow-y-auto">
-      {/* 采集状态 */}
       {isRecording && (
         <div className="zeiss-card p-3 flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: C.red }} />
@@ -61,8 +61,8 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, connectionSta
         <div className="px-4 py-2.5 grid grid-cols-2 gap-2">
           {SENSOR_KEYS.map((key, idx) => (
             <div key={key} className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full" style={{ background: connectionState[key] ? '#22c55e' : '#d1d5db' }} />
-              <span className="text-[10px]" style={{ color: connectionState[key] ? sensorColors[idx] : 'var(--text-muted)' }}>
+              <div className="w-2 h-2 rounded-full" style={{ background: isConnected ? '#22c55e' : '#d1d5db' }} />
+              <span className="text-[10px]" style={{ color: isConnected ? sensorColors[idx] : 'var(--text-muted)' }}>
                 {sensorLabels[idx]}
               </span>
             </div>
@@ -118,25 +118,14 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, connectionSta
   );
 }
 
-/* ─── 胶囊标签 ─── */
-function CapsuleTag({ label, color = '#0066CC' }) {
-  return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold"
-      style={{ background: color + '12', color, border: `1px solid ${color}30` }}>
-      {label}
-    </span>
-  );
-}
-
 /* ─── 步态报告组件（使用真实数据） ─── */
-function GaitReportContent({ patientInfo, reportData: propsReportData }) {
+export function GaitReportContent({ patientInfo, pythonResult: externalResult }) {
   const [realData, setRealData] = useState(null);
-  const [loading, setLoading] = useState(!propsReportData);
+  const [loading, setLoading] = useState(true);
 
-  // 优先使用 props 传入的报告数据（采集数据生成），否则从 JSON 文件加载
   useEffect(() => {
-    if (propsReportData) {
-      setRealData(propsReportData);
+    if (externalResult) {
+      setRealData(externalResult);
       setLoading(false);
       return;
     }
@@ -144,7 +133,7 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
       .then(res => res.json())
       .then(data => { setRealData(data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [propsReportData]);
+  }, [externalResult]);
 
   const sections = [
     { id: 'spatiotemporal', title: '1. 步态时空参数' },
@@ -209,6 +198,9 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
   const leftPartCurves = realData?.partitionCurves?.left || [];
   const rightPartCurves = realData?.partitionCurves?.right || [];
 
+  const leftRegionCoords = realData?.regionCoords?.left || {};
+  const rightRegionCoords = realData?.regionCoords?.right || {};
+
   const spLeft = realData?.supportPhases?.left || {};
   const spRight = realData?.supportPhases?.right || {};
   const supportPhases = [
@@ -233,7 +225,6 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
 
   const images = realData?.images || {};
 
-  /* EChart options */
   const fpaOption = useMemo(() => ({
     animation: false,
     grid: { top: 30, bottom: 30, left: 50, right: 20 },
@@ -251,17 +242,16 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
     animation: false,
     grid: { top: 20, bottom: 30, left: 50, right: 20 },
     legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
-    xAxis: { type: 'category', data: leftTime.length > 0 ? leftTime : rightTime, axisLabel: { fontSize: 9, color: C.text, rotate: 30 }, show: leftTime.length > 0 },
-    yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text }, splitLine: { lineStyle: { color: C.grid } } },
+    xAxis: { type: 'category', data: leftTime.length > 0 ? leftTime : rightTime, axisLabel: { fontSize: 9, color: C.text, rotate: 30, formatter: v => parseFloat(v).toFixed(2) }, show: leftTime.length > 0 },
+    yAxis: { type: 'value', name: label, axisLabel: { fontSize: 10, color: C.text, formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: C.grid } } },
     series: [
       { name: '左脚', type: 'line', smooth: true, symbol: 'none', data: ts.left?.[field] || [], lineStyle: { color: C.blue, width: 1.5 } },
       { name: '右脚', type: 'line', smooth: true, symbol: 'none', data: ts.right?.[field] || [], lineStyle: { color: C.amber, width: 1.5 } },
     ],
-    tooltip: { trigger: 'axis', ...tip },
+    tooltip: { trigger: 'axis', ...tip, valueFormatter: v => typeof v === 'number' ? v.toFixed(2) : v },
   });
   const areaOption = useMemo(() => makeTimeOpt('area', 'cm²'), [ts]);
-  const forceOption = useMemo(() => makeTimeOpt('force', 'N'), [ts]);
-  const copSpeedOption = useMemo(() => makeTimeOpt('copSpeed', 'mm/s'), [ts]);
+  const forceOption = useMemo(() => makeTimeOpt('load', 'N'), [ts]);
   const pressureOption = useMemo(() => makeTimeOpt('pressure', 'N/cm²'), [ts]);
 
   const partColors = ['#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6', '#1abc9c'];
@@ -270,12 +260,12 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
     grid: { top: 30, bottom: 30, left: 50, right: 20 },
     legend: { top: 0, textStyle: { fontSize: 10, color: C.text } },
     xAxis: { type: 'category', data: curves[0]?.data?.map((_, i) => i) || [], show: false },
-    yAxis: { type: 'value', name: 'N', axisLabel: { fontSize: 10, color: C.text }, splitLine: { lineStyle: { color: C.grid } } },
+    yAxis: { type: 'value', name: 'N', axisLabel: { fontSize: 10, color: C.text, formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: C.grid } } },
     series: curves.map((c, i) => ({
       name: `S${i + 1}`, type: 'line', smooth: true, symbol: 'none', data: c.data || [],
       lineStyle: { color: partColors[i % partColors.length], width: 1.5 },
     })),
-    tooltip: { trigger: 'axis', ...tip },
+    tooltip: { trigger: 'axis', ...tip, valueFormatter: v => typeof v === 'number' ? v.toFixed(2) : v },
   });
   const leftPartOpt = useMemo(() => makePartOpt(leftPartCurves), [leftPartCurves]);
   const rightPartOpt = useMemo(() => makePartOpt(rightPartCurves), [rightPartCurves]);
@@ -295,7 +285,6 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
 
   return (
     <div className="flex h-full">
-      {/* 左侧导航 */}
       <nav className="w-48 shrink-0 p-3 overflow-y-auto hidden lg:block" style={{ borderRight: '1px solid var(--border-light)' }}>
         {sections.map(s => (
           <button key={s.id} onClick={() => scrollToSection(s.id)}
@@ -306,7 +295,6 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
         ))}
       </nav>
 
-      {/* 右侧报告内容 */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
         {/* 1. 步态时空参数 */}
         <section id="gait-spatiotemporal">
@@ -387,18 +375,9 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
             <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>足偏角 (FPA) 分析</h4>
             <EChart option={fpaOption} height={220} />
           </div>
-          {images.timeSeries ? (
-            <div className="zeiss-card p-4 mb-4">
-              <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>面积 / 负荷 / COP速度 / 压强 时序曲线</h4>
-              <div className="overflow-x-auto">
-                <img src={images.timeSeries} alt="Time Series Curves" className="w-full min-w-[600px]" style={{ imageRendering: 'auto' }} />
-              </div>
-            </div>
-          ) : null}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>面积 (cm²)</h4><EChart option={areaOption} height={200} /></div>
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>负荷 (N)</h4><EChart option={forceOption} height={200} /></div>
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>COP速度 (mm/s)</h4><EChart option={copSpeedOption} height={200} /></div>
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>压强 (N/cm²)</h4><EChart option={pressureOption} height={200} /></div>
           </div>
         </section>
@@ -434,34 +413,16 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
           </div>
         </section>
 
-        {/* 7. 分区点位图 */}
         <section id="gait-regions">
           <div className="zeiss-section-title">7. 分区点位图 (Pressure Regions S1-S6)</div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="zeiss-card p-4">
-              <h4 className="text-xs font-semibold mb-2 flex items-center gap-2" style={{ color: C.blue }}>
-                <span className="w-2 h-2 rounded-full" style={{ background: C.blue }} /> 左足分区点
-              </h4>
-              <img src={images.leftPressureRegions || '/gait_report_data/left_pressure_regions.png'} alt="Left Pressure Regions" className="w-full" />
-            </div>
-            <div className="zeiss-card p-4">
-              <h4 className="text-xs font-semibold mb-2 flex items-center gap-2" style={{ color: C.amber }}>
-                <span className="w-2 h-2 rounded-full" style={{ background: C.amber }} /> 右足分区点
-              </h4>
-              <img src={images.rightPressureRegions || '/gait_report_data/right_pressure_regions.png'} alt="Right Pressure Regions" className="w-full" />
-            </div>
+          <div className="zeiss-card p-4">
+            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} />
           </div>
         </section>
 
         {/* 8. 分区曲线 */}
         <section id="gait-partcurves">
           <div className="zeiss-section-title">8. 分区曲线</div>
-          {(images.leftPartitionCurves || images.rightPartitionCurves) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-              {images.leftPartitionCurves && <div className="zeiss-card p-4"><img src={images.leftPartitionCurves} alt="Left Partition Curves" className="w-full" /></div>}
-              {images.rightPartitionCurves && <div className="zeiss-card p-4"><img src={images.rightPartitionCurves} alt="Right Partition Curves" className="w-full" /></div>}
-            </div>
-          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.blue }}>左足分区曲线</h4><EChart option={leftPartOpt} height={200} /></div>
             <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.amber }}>右足分区曲线</h4><EChart option={rightPartOpt} height={200} /></div>
@@ -570,38 +531,36 @@ function GaitReportContent({ patientInfo, reportData: propsReportData }) {
   );
 }
 
-/* ─── 主组件 ─── */
+/* ===============================================
+   主组件 — 纯 BackendBridge 模式
+   =============================================== */
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
-  const [deviceStatus, setDeviceStatus] = useState('disconnected');
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
+  const assessmentIdRef = useRef(`gait_${Date.now()}`);
+  const [csvExporting, setCsvExporting] = useState(false);
   const [reportMode, setReportMode] = useState('static');
   const [showComplete, setShowComplete] = useState(false);
-  const [gaitReportData, setGaitReportData] = useState(null);
   const [timer, setTimer] = useState(0);
+  const [analysisError, setAnalysisError] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
   const timerRef = useRef(null);
+
+  const [pythonResult, setPythonResult] = useState(
+    viewReportMode ? (assessments.gait?.report?.reportData || assessments.gait?.data?.pythonResult || null) : null
+  );
 
   /* 3D场景相关 */
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.5);
   const [sensorData, setSensorData] = useState({});
-  const [connectionState, setConnectionState] = useState({});
   const sceneRef = useRef(null);
-
-  /* 后端模式 */
-  const [isBackendMode, setIsBackendMode] = useState(false);
-  const backendCleanupRef = useRef(null);
-
-  /* 模拟数据相关 */
-  const simRef = useRef(null);
-  const simFrameRef = useRef(0);
-  const demoDataRef = useRef(null);
 
   /* 实时统计 */
   const [sensorStats, setSensorStats] = useState({
@@ -611,6 +570,55 @@ export default function GaitAssessment() {
     history: [],
     cadence: '—', stride: '—', speed: '—', symmetry: '—',
   });
+
+  /* 噪音过滤 */
+  const denoiseMatrix = useCallback((matrix, threshold = 10, minRegionSize = 15) => {
+    const rows = matrix.length;
+    const cols = matrix[0]?.length || 0;
+    if (rows === 0 || cols === 0) return matrix;
+    const result = matrix.map(row => [...row]);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (result[r][c] < threshold) result[r][c] = 0;
+      }
+    }
+
+    const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
+    const regions = [];
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (visited[r][c] || result[r][c] <= 0) continue;
+        const region = [];
+        const queue = [[r, c]];
+        visited[r][c] = true;
+        while (queue.length > 0) {
+          const [cr, cc] = queue.shift();
+          region.push([cr, cc]);
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = cr + dr, nc = cc + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited[nr][nc] && result[nr][nc] > 0) {
+                visited[nr][nc] = true;
+                queue.push([nr, nc]);
+              }
+            }
+          }
+        }
+        regions.push(region);
+      }
+    }
+
+    for (const region of regions) {
+      if (region.length < minRegionSize) {
+        for (const [r, c] of region) result[r][c] = 0;
+      }
+    }
+
+    return result;
+  }, []);
 
   /* 计算传感器统计数据 */
   const computeStats = useCallback((data) => {
@@ -640,271 +648,134 @@ export default function GaitAssessment() {
     setSensorStats(prev => {
       const newHistory = [...prev.history, totals].slice(-60);
       return {
-        totals,
-        maxVals,
-        activePoints,
-        history: newHistory,
-        cadence: '110',
-        stride: '65.5',
-        speed: '1.10',
-        symmetry: '0.95',
+        totals, maxVals, activePoints, history: newHistory,
+        cadence: '110', stride: '65.5', speed: '1.10', symmetry: '0.95',
       };
     });
   }, []);
 
-  /* 设置串口数据回调 */
-  useEffect(() => {
-    SENSOR_KEYS.forEach((key) => {
-      footpadServices[key].setOnData((matrix) => {
-        setSensorData(prev => {
-          const newData = { ...prev, [key]: matrix };
-          computeStats(newData);
-          return newData;
-        });
-      });
-      footpadServices[key].setOnConnectionChange((connected) => {
-        setConnectionState(prev => ({ ...prev, [key]: connected }));
-        if (connected) setDeviceStatus('connected');
-      });
-    });
-    return () => {
-      SENSOR_KEYS.forEach(key => {
-        footpadServices[key].setOnData(null);
-        footpadServices[key].setOnConnectionChange(null);
-      });
-    };
-  }, [computeStats]);
-
-  /* 连接串口 */
-  const handleConnect = useCallback(async (key) => {
-    if (key) {
-      // 连接单个传感器
-      const success = await footpadServices[key].connect();
-      if (success) setDeviceStatus('connected');
-    } else {
-      // 依次连接所有传感器
-      setDeviceStatus('connecting');
-      for (const k of SENSOR_KEYS) {
-        try { await footpadServices[k].connect(); } catch (e) { console.warn(`Failed to connect ${k}:`, e); }
-      }
-      setDeviceStatus('connected');
-    }
-  }, []);
-
-  /* 断开串口 */
-  const handleDisconnect = useCallback(async () => {
-    for (const key of SENSOR_KEYS) {
-      try { await footpadServices[key].disconnect(); } catch (e) {}
-    }
-    setDeviceStatus('disconnected');
-    setConnectionState({});
-  }, []);
-
-  /* 噪音过滤：去除低压力孤立点 + 连通域过滤小区域 */
-  const denoiseMatrix = useCallback((matrix, threshold = 10, minRegionSize = 15) => {
-    const rows = matrix.length;
-    const cols = matrix[0]?.length || 0;
-    if (rows === 0 || cols === 0) return matrix;
-    const result = matrix.map(row => [...row]);
-    
-    // 第一步：低于阈值的点直接置零
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (result[r][c] < threshold) result[r][c] = 0;
-      }
-    }
-    
-    // 第二步：连通域分析，去除面积太小的区域
-    const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
-    const regions = [];
-    
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (visited[r][c] || result[r][c] <= 0) continue;
-        // BFS 找连通域
-        const region = [];
-        const queue = [[r, c]];
-        visited[r][c] = true;
-        while (queue.length > 0) {
-          const [cr, cc] = queue.shift();
-          region.push([cr, cc]);
-          for (let dr = -1; dr <= 1; dr++) {
-            for (let dc = -1; dc <= 1; dc++) {
-              if (dr === 0 && dc === 0) continue;
-              const nr = cr + dr, nc = cc + dc;
-              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited[nr][nc] && result[nr][nc] > 0) {
-                visited[nr][nc] = true;
-                queue.push([nr, nc]);
-              }
-            }
-          }
-        }
-        regions.push(region);
-      }
-    }
-    
-    // 去除面积小于 minRegionSize 的连通域
-    for (const region of regions) {
-      if (region.length < minRegionSize) {
-        for (const [r, c] of region) {
-          result[r][c] = 0;
-        }
-      }
-    }
-    
-    return result;
-  }, []);
-
-  /* ─── 后端数据通道：全局一键连接后自动启用 ─── */
+  // ─── 挂载时激活步道模式，使采集前就能显示可视化 ───
   useEffect(() => {
     if (!isGlobalConnected) return;
-    if (backendCleanupRef.current) return; // 已在监听
+    backendBridge.setActiveMode(5).catch(e => console.warn('步道模式激活失败:', e));
+  }, [isGlobalConnected]);
 
-    // 设置脚垫模式，后端只推送 foot1-4 数据
-    backendBridge.setActiveMode(5).then(() => {
-      console.log('[GaitAssessment] 已设置后端模式 mode=5');
-    }).catch(e => console.error('[GaitAssessment] setActiveMode failed:', e));
+  // ─── 后端数据监听 ───
+  useEffect(() => {
+    if (!isGlobalConnected) return;
 
-    setIsBackendMode(true);
-    setDeviceStatus('connected');
-    setConnectionState({ sensor1: true, sensor2: true, sensor3: true, sensor4: true });
-
-    // foot1-foot4 映射到 sensor1-sensor4
-    const footToSensor = { foot1Data: 'sensor1', foot2Data: 'sensor2', foot3Data: 'sensor3', foot4Data: 'sensor4' };
-    const unsubs = [];
-
-    Object.entries(footToSensor).forEach(([event, sensorKey]) => {
-      const handler = (arr) => {
-        if (!arr || arr.length === 0) return;
-        // 后端推送的是 4096 个值的 flat 数组，转为 64x64 矩阵
+    const footHandlers = {};
+    ['foot1Data', 'foot2Data', 'foot3Data', 'foot4Data'].forEach((eventName, idx) => {
+      const key = SENSOR_KEYS[idx];
+      footHandlers[eventName] = (arr) => {
+        // 将一维数组转为 64x64 矩阵
+        const raw = [];
+        for (let r = 0; r < 64; r++) raw.push(arr.slice(r * 64, (r + 1) * 64));
+        // 转置矩阵，与 FootpadSerialService 的 transpose 保持一致
         const matrix = [];
-        for (let r = 0; r < 64; r++) {
-          matrix.push(arr.slice(r * 64, (r + 1) * 64));
+        for (let c = 0; c < 64; c++) {
+          const row = [];
+          for (let r = 0; r < 64; r++) row.push(raw[r][c]);
+          matrix.push(row);
         }
-        const filtered = denoiseMatrix(matrix, 15, 20);
+        const denoised = denoiseMatrix(matrix, 15, 20);
         setSensorData(prev => {
-          const newData = { ...prev, [sensorKey]: filtered };
+          const newData = { ...prev, [key]: denoised };
           computeStats(newData);
           return newData;
         });
       };
-      unsubs.push(backendBridge.on(event, handler));
+      backendBridge.on(eventName, footHandlers[eventName]);
     });
 
-    backendCleanupRef.current = () => {
-      unsubs.forEach(fn => fn());
-      setIsBackendMode(false);
-    };
-
-    console.log('[GaitAssessment] 后端数据通道已建立');
-
     return () => {
-      if (backendCleanupRef.current) {
-        backendCleanupRef.current();
-        backendCleanupRef.current = null;
-      }
+      Object.entries(footHandlers).forEach(([event, handler]) => {
+        backendBridge.off(event, handler);
+      });
     };
   }, [isGlobalConnected, computeStats, denoiseMatrix]);
 
-  /* 模拟数据 - 使用真实CSV数据回放 */
-  const handleSimulate = useCallback(async () => {
-    setDeviceStatus('connecting');
-
-    // 加载真实步态数据
-    if (!demoDataRef.current) {
-      try {
-        const res = await fetch(gaitDemoDataUrl);
-        demoDataRef.current = await res.json();
-      } catch (e) {
-        console.warn('Failed to load demo data, using mock data');
-        demoDataRef.current = null;
+  // ─── CSV 导出 ───
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: 'gait' });
+      if (resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = resp.data.fileName;
+        a.click();
       }
+    } catch (e) {
+      console.error('CSV导出失败:', e);
+    } finally {
+      setCsvExporting(false);
     }
-
-    setDeviceStatus('connected');
-    setConnectionState({ sensor1: true, sensor2: true, sensor3: true, sensor4: true });
-    simFrameRef.current = 0;
-
-    // 启动模拟回放
-    if (simRef.current) clearInterval(simRef.current);
-    simRef.current = setInterval(() => {
-      const demoData = demoDataRef.current;
-      const frame = simFrameRef.current;
-      const newData = {};
-
-      if (demoData && demoData.sensors) {
-        // 使用真实CSV数据回放
-        SENSOR_KEYS.forEach((key) => {
-          const sensorFrames = demoData.sensors[key];
-          if (sensorFrames && sensorFrames.length > 0) {
-            const idx = frame % sensorFrames.length;
-            const flat = sensorFrames[idx];
-            if (flat && flat.length === 4096) {
-              // 将一维数组转为64×64矩阵
-              const matrix = [];
-              for (let r = 0; r < 64; r++) {
-                matrix.push(flat.slice(r * 64, (r + 1) * 64));
-              }
-              newData[key] = denoiseMatrix(matrix, 15, 20);
-            } else {
-              newData[key] = Array.from({ length: 64 }, () => new Array(64).fill(0));
-            }
-          }
-        });
-      } else {
-        // 使用SDK内置假数据
-        const mockData = generateAnimatedWalkwayData(frame, 120);
-        Object.assign(newData, mockData);
-      }
-
-      setSensorData(newData);
-      computeStats(newData);
-      simFrameRef.current++;
-    }, 100); // ~10fps to reduce CPU load
-  }, [computeStats, denoiseMatrix]);
-
-  /* 停止模拟 */
-  const stopSimulate = useCallback(() => {
-    if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
-    setDeviceStatus('disconnected');
-    setConnectionState({});
-    setSensorData({});
-  }, []);
-
-  /* 采集控制 */
-  const start = () => {
-    if (deviceStatus !== 'connected') return;
-    setPhase('recording'); setTimer(0);
-    timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
-  };
-
-  const stop = () => {
-    clearInterval(timerRef.current);
-    if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
-    setPhase('processing');
-    // 生成报告数据
-    setTimeout(() => {
-      try {
-        const report = generateGaitReportData(sensorData, sensorStats, timer);
-        console.log('[GaitAssessment] 报告数据已生成:', report);
-        setGaitReportData(report);
-      } catch (e) {
-        console.error('[GaitAssessment] 报告生成失败:', e);
-      }
-      setShowComplete(true);
-    }, 2000);
-  };
-
-  const viewReport = () => {
-    setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('gait', { completed: true }, { sensorData });
   };
 
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
+  /* ─── 开始采集 ─── */
+  const start = async () => {
+    if (!isGlobalConnected) return;
+    setPhase('recording'); setTimer(0);
+    setAnalysisError('');
+
+    try {
+      await backendBridge.setActiveMode(5); // 5=脚垫模式
+      await backendBridge.startCol({
+        name: patientInfo?.name || '未知',
+        assessmentId: assessmentIdRef.current,
+        date: new Date().toISOString().split('T')[0],
+        colName: 'gait_assessment',
+      });
+    } catch (e) {
+      console.error('后端采集启动失败:', e);
+    }
+
+    timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
+  };
+
+  /* ─── 停止采集 ─── */
+  const stop = async () => {
+    clearInterval(timerRef.current);
+    setPhase('processing');
+    setAnalyzing(true);
+    setAnalysisError('');
+
+    try {
+      await backendBridge.endCol();
+      await new Promise(r => setTimeout(r, 500));
+      const resp = await backendBridge.getGaitReport({
+        timestamp: new Date().toISOString(),
+        assessmentId: assessmentIdRef.current,
+        collectName: 'gait_assessment',
+        body_weight_kg: patientInfo?.weight || 60,
+      });
+      if (resp?.data?.render_data) {
+        setPythonResult(resp.data.render_data);
+        completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data });
+      } else {
+        throw new Error('后端未返回报告数据');
+      }
+    } catch (e) {
+      console.error('报告生成失败:', e);
+      setAnalysisError(e.message || '报告生成失败');
+    } finally {
+      setAnalyzing(false);
+      setShowComplete(true);
+    }
+  };
+
+  const viewReport = () => {
+    setShowComplete(false); setPhase('report'); setReportMode('static');
+    completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult });
+  };
+
+  // 清理
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    if (simRef.current) clearInterval(simRef.current);
   }, []);
 
   /* ─── 报告模式 ─── */
@@ -934,6 +805,10 @@ export default function GaitAssessment() {
               </button>
             </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="zeiss-btn-secondary text-xs py-2 px-4">
+              {csvExporting ? '导出中...' : '保存CSV'}
+            </button>
             <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary text-xs py-2 px-3 md:px-4">返回首页</button>
           </div>
         </header>
@@ -945,7 +820,7 @@ export default function GaitAssessment() {
               </div>
             </div>
           ) : (
-            <GaitReportContent patientInfo={patientInfo} reportData={gaitReportData} />
+            <GaitReportContent patientInfo={patientInfo} pythonResult={pythonResult} />
           )}
         </main>
       </div>
@@ -965,21 +840,18 @@ export default function GaitAssessment() {
           </h1>
         </div>
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-            <div className={`zeiss-status-dot ${deviceStatus}`} />
-            <span className="text-xs" style={{ color: isBackendMode ? '#7C3AED' : 'var(--text-tertiary)' }}>
-              {isBackendMode ? '后端已连接' : deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
+          {/* 设备连接状态 */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+            {SENSOR_KEYS.map((key, idx) => (
+              <div key={key} className="flex items-center gap-1 px-1 py-0.5">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: isGlobalConnected ? PAD_COLORS[idx] : '#d1d5db' }} />
+                <span className="text-[10px]" style={{ color: isGlobalConnected ? PAD_COLORS[idx] : 'var(--text-muted)' }}>{idx + 1}</span>
+              </div>
+            ))}
+            <span style={{ color: 'var(--border-medium)', margin: '0 1px' }}>|</span>
+            <span className="text-[10px]" style={{ color: isGlobalConnected ? 'var(--success)' : 'var(--text-muted)' }}>
+              {isGlobalConnected ? '已连接' : '未连接'}
             </span>
-            {!isBackendMode && deviceStatus === 'disconnected' && (
-              <>
-                <button onClick={() => handleConnect()} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)' }}>连接</button>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: 'var(--success)' }}>模拟</button>
-              </>
-            )}
-            {!isBackendMode && deviceStatus === 'connected' && (
-              <button onClick={simRef.current ? stopSimulate : handleDisconnect} className="text-xs font-medium ml-1" style={{ color: C.red }}>断开</button>
-            )}
           </div>
           <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
@@ -989,15 +861,23 @@ export default function GaitAssessment() {
       {showComplete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
           <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-            </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
+            {pythonResult ? (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
+                <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#FEF3C7' }}>
+                <svg className="w-7 h-7" fill="none" stroke="#D97706" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+              </div>
+            )}
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : analysisError ? '采集完成，分析失败' : '采集完成'}</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : analysisError || '可返回首页继续其他评估'}</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true }, { sensorData }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              {pythonResult && (
+                <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              )}
             </div>
           </div>
         </div>
@@ -1011,7 +891,7 @@ export default function GaitAssessment() {
             timer={timer}
             fmtTime={fmtTime}
             isRecording={phase === 'recording'}
-            connectionState={connectionState}
+            isConnected={isGlobalConnected}
           />
         </div>
 
@@ -1034,7 +914,6 @@ export default function GaitAssessment() {
               <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
                 <input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} className="rounded" /> 热力图
               </label>
-
               <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 <span>平滑</span>
                 <input type="range" min={0} max={100} value={smoothness * 100} onChange={e => setSmoothness(e.target.value / 100)} className="w-16 h-1" />
@@ -1048,7 +927,9 @@ export default function GaitAssessment() {
                 <div className="w-64 h-2 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border-light)' }}>
                   <div className="h-full rounded-full progress-animate" style={{ background: 'linear-gradient(to right, var(--zeiss-blue), #0891B2)' }} />
                 </div>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>正在分析步态数据，请稍候...</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  {analyzing ? '正在分析步态数据，请稍候...' : '正在生成报告，请稍候...'}
+                </p>
               </div>
             )}
           </div>
@@ -1056,7 +937,7 @@ export default function GaitAssessment() {
           {/* 底部操作按钮 */}
           {phase !== 'processing' && (
             <div className="absolute bottom-6 z-20 flex flex-col items-center gap-3">
-              {phase === 'idle' && deviceStatus === 'connected' && (
+              {phase === 'idle' && isGlobalConnected && (
                 <>
                   <button onClick={start} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
@@ -1064,10 +945,13 @@ export default function GaitAssessment() {
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集</span>
                 </>
               )}
-              {phase === 'idle' && deviceStatus !== 'connected' && (
-                <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
-                  请先连接设备或选择模拟模式
-                </span>
+              {phase === 'idle' && !isGlobalConnected && (
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
+                  <svg className="w-4 h-4" style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>请先在首页连接设备</span>
+                </div>
               )}
               {phase === 'recording' && (
                 <>

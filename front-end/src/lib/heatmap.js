@@ -328,10 +328,7 @@ export class HeatmapCanvas {
       this.canvas.height = contentWidth * canvasHProp;
     }
 
-    if (options) {
-      // 合并而不是覆盖，保留 gradient 等默认值
-      this.options = { ...this.options, ...options };
-    }
+    if (options) this.options = options;
 
     this.useGPU = false;
     try {
@@ -373,17 +370,6 @@ export class HeatmapCanvas {
   }
 
   changeHeatmap(resArr, interp1, interp2, order) {
-    // 调试日志：每50帧打印一次
-    if (!this._frameCount) this._frameCount = 0;
-    this._frameCount++;
-    const shouldLog = this._frameCount % 50 === 1;
-
-    if (shouldLog) {
-      const nonZero = Array.isArray(resArr) ? resArr.filter(v => v > 0).length : 0;
-      const maxVal = Array.isArray(resArr) ? Math.max(...resArr) : 0;
-      console.log(`[Heatmap] changeHeatmap #${this._frameCount}: arrLen=${resArr?.length}, nonZero=${nonZero}, max=${maxVal}, useGPU=${this.useGPU}, canvas=${this.canvas.width}x${this.canvas.height}, options.max=${this.options.max}`);
-    }
-
     if (!this.useGPU) {
       bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options);
       return;

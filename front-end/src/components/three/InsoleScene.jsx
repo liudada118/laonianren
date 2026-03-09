@@ -72,7 +72,7 @@ function InsoleScene({
           <pointLight position={[-10, 5, -10]} intensity={0.5} />
 
           <Suspense fallback={null}>
-            <Environment preset="studio" />
+            <Environment files="/assets/hdri/studio_small_03_1k.hdr" />
             <group position={[0, 0, 0]}>
               <InsoleSceneInner
                 showHeatmap={showHeatmap}

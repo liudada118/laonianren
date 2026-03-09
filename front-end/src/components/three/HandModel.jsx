@@ -25,33 +25,159 @@ export function HandModel({
   const lastAppliedVersionRef = useRef(-1);
   // 用 ref 跟踪 isLeftHand，确保模型加载完成后能读到最新值
   const isLeftHandRef = useRef(isLeftHand);
+  // 保存原始材质信息
+  const originalMaterialsRef = useRef([]);
 
-  // 将纹理应用到模型的函数
+  // 创建自定义 ShaderMaterial 混合原始材质和热力图
+  const createHeatmapOverlayMaterial = useCallback((originalMaterial, heatmapTexture) => {
+    // Use a clean light gray base color for the hand model
+    // Don't use original material's map texture as it contains the old block-style heatmap
+    const origColor = new THREE.Color(0.82, 0.82, 0.85);
+
+    // Get heatmap texture dimensions for texel size calculation
+    const heatW = heatmapTexture.image ? heatmapTexture.image.width : 512;
+    const heatH = heatmapTexture.image ? heatmapTexture.image.height : 512;
+
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      uniforms: {
+        uOrigColor: { value: origColor },
+        uOrigMap: { value: null },
+        uHasOrigMap: { value: 0.0 },
+        uHeatmap: { value: heatmapTexture },
+        uHeatTexel: { value: new THREE.Vector2(1.0 / heatW, 1.0 / heatH) },
+        uLightDir: { value: new THREE.Vector3(0.4, 0.6, 0.8).normalize() },
+        uLightDir2: { value: new THREE.Vector3(-0.3, 0.4, 0.2).normalize() },
+        uAmbient: { value: 0.65 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        void main() {
+          vUv = uv;
+          vNormal = normalize(normalMatrix * normal);
+          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        uniform vec3 uOrigColor;
+        uniform sampler2D uOrigMap;
+        uniform float uHasOrigMap;
+        uniform sampler2D uHeatmap;
+        uniform vec2 uHeatTexel;
+        uniform vec3 uLightDir;
+        uniform vec3 uLightDir2;
+        uniform float uAmbient;
+
+        // 13-tap Gaussian blur on heatmap texture for soft edges
+        vec4 sampleHeatmapBlurred(vec2 uv) {
+          vec4 sum = vec4(0.0);
+          float blurSize = 3.5;
+          vec2 off1 = uHeatTexel * blurSize;
+          vec2 off2 = uHeatTexel * blurSize * 2.0;
+          // Center (highest weight)
+          sum += texture2D(uHeatmap, uv) * 0.20;
+          // Ring 1: 4 cardinal neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off1.x,    0.0)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x,    0.0)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0,  off1.y)) * 0.10;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0, -off1.y)) * 0.10;
+          // Ring 1: 4 diagonal neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off1.x,  off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x,  off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2( off1.x, -off1.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off1.x, -off1.y)) * 0.05;
+          // Ring 2: 4 cardinal far neighbors
+          sum += texture2D(uHeatmap, uv + vec2( off2.x,    0.0)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(-off2.x,    0.0)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0,  off2.y)) * 0.05;
+          sum += texture2D(uHeatmap, uv + vec2(   0.0, -off2.y)) * 0.05;
+          return sum;
+        }
+
+        void main() {
+          vec3 baseColor = uOrigColor;
+          if (uHasOrigMap > 0.5) {
+            baseColor *= texture2D(uOrigMap, vUv).rgb;
+          }
+          float diff1 = max(dot(vNormal, uLightDir), 0.0);
+          float diff2 = max(dot(vNormal, uLightDir2), 0.0) * 0.4;
+          float totalDiff = min(diff1 + diff2, 1.0);
+          vec3 litBase = baseColor * (uAmbient + (1.0 - uAmbient) * totalDiff);
+
+          // Sample with blur for soft edges
+          vec4 heatColor = sampleHeatmapBlurred(vUv);
+          float heatAlpha = heatColor.a;
+
+          // Quintic smoothstep for ultra-soft edge falloff
+          float t = clamp(heatAlpha, 0.0, 1.0);
+          float blendAlpha = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+          // Extra attenuation at very low alpha
+          blendAlpha *= smoothstep(0.0, 0.12, heatAlpha);
+
+          vec3 boostedHeat = heatColor.rgb * 1.05;
+          vec3 heatLit = boostedHeat * (0.7 + 0.3 * totalDiff);
+          vec3 finalColor = mix(litBase, heatLit, blendAlpha * 0.90);
+
+          gl_FragColor = vec4(finalColor, 1.0);
+        }
+      `
+    });
+  }, []);
+
+  // 将纹理应用到模型的函数 - 使用自定义 shader 混合
   const applyTextureToModel = useCallback((group, texture) => {
     if (!group || !texture) return;
 
     let meshCount = 0;
     group.traverse((child) => {
-      if (child.isMesh && child.name !== 'pressureIndicator') {
-        if (Array.isArray(child.material)) {
-          child.material.forEach((mat) => {
-            if (mat.map !== texture) {
-              mat.map = texture;
-              mat.needsUpdate = true;
-            }
-          });
+      if (child.isMesh) {
+        // 保存原始材质（如果还没保存）
+        if (!child.userData._origMaterial) {
+          child.userData._origMaterial = child.material;
+        }
+
+        const origMat = child.userData._origMaterial;
+
+        if (Array.isArray(origMat)) {
+          child.material = origMat.map((mat) => createHeatmapOverlayMaterial(mat, texture));
         } else {
-          if (child.material.map !== texture) {
-            child.material.map = texture;
-            child.material.needsUpdate = true;
-          }
+          child.material = createHeatmapOverlayMaterial(origMat, texture);
         }
         meshCount++;
       }
     });
     if (meshCount > 0) {
-      console.log(`[HandModel] 纹理已应用到 ${meshCount} 个 mesh`);
+      console.log(`[HandModel] 热力图叠加材质已应用到 ${meshCount} 个 mesh`);
     }
+  }, [createHeatmapOverlayMaterial]);
+
+  // 更新热力图纹理（不重新创建材质）
+  const updateHeatmapTexture = useCallback((group, texture) => {
+    if (!group || !texture) return;
+    group.traverse((child) => {
+      if (child.isMesh) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((mat) => {
+            if (mat.uniforms && mat.uniforms.uHeatmap) {
+              mat.uniforms.uHeatmap.value = texture;
+              mat.uniformsNeedUpdate = true;
+            }
+          });
+        } else {
+          if (child.material.uniforms && child.material.uniforms.uHeatmap) {
+            child.material.uniforms.uHeatmap.value = texture;
+            child.material.uniformsNeedUpdate = true;
+          }
+        }
+      }
+    });
   }, []);
 
   // 应用左右手镜像 scale 的辅助函数
@@ -148,9 +274,9 @@ export function HandModel({
 
         handGroup.add(model);
 
-        // 如果有待处理的纹理更新，立即应用
+        // Always apply custom shader to override model's built-in heatmap texture
         if (heatmapTextureRef.current) {
-          console.log('[HandModel] 模型加载完成，应用待处理的纹理');
+          console.log('[HandModel] 模型加载完成，应用自定义 shader');
           applyTextureToModel(handGroup, heatmapTextureRef.current);
         }
       },
@@ -163,19 +289,6 @@ export function HandModel({
         console.error('[HandModel] 模型加载失败:', err);
       }
     );
-
-    // Add pressure indicator (glowing sphere)
-    const indicatorGeometry = new THREE.SphereGeometry(0.15, 32, 32);
-    const indicatorMaterial = new THREE.MeshBasicMaterial({
-      color: 0xEF4444,
-      transparent: true,
-      opacity: 0.8
-    });
-    const indicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
-    indicator.position.set(0, -0.5, 0.6);
-    indicator.name = 'pressureIndicator';
-    indicator.visible = false;
-    handGroup.add(indicator);
 
     handGroup.rotation.x = -Math.PI / 3;
     handGroup.position.set(-1, -1, 0);
@@ -247,23 +360,6 @@ export function HandModel({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update pressure indicator
-  useEffect(() => {
-    if (handGroupRef.current) {
-      const indicator = handGroupRef.current.getObjectByName('pressureIndicator');
-      if (indicator) {
-        indicator.visible = isRecording;
-        if (isRecording) {
-          const scale = 0.5 + (pressureValue / 200) * 1.5;
-          indicator.scale.setScalar(scale);
-          const hue = Math.max(0, 0.6 - (pressureValue / 200) * 0.6);
-          indicator.material.color.setHSL(hue, 0.8, 0.5);
-          indicator.material.opacity = 0.9;
-        }
-      }
-    }
-  }, [pressureValue, isRecording]);
-
   // 创建/更新 heatmap 纹理 - 只在 heatmapCanvas 首次传入时创建纹理并绑定到模型
   useEffect(() => {
     if (!heatmapCanvas) {
@@ -277,14 +373,28 @@ export function HandModel({
       texture.magFilter = THREE.LinearFilter;
       texture.wrapS = THREE.ClampToEdgeWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
+      // Disable premultiplied alpha to ensure transparent pixels stay transparent
+      texture.premultiplyAlpha = false;
       heatmapTextureRef.current = texture;
       console.log('[HandModel] 创建新的 CanvasTexture, canvas尺寸:', heatmapCanvas.width, 'x', heatmapCanvas.height);
 
-      // 如果模型已加载，立即应用纹理
+      // Don't apply texture until we have actual data (heatmapVersion > 0)
+      // This prevents showing stale/empty heatmap on initial load
+    }
+
+    // Apply custom shader to model (always, to override built-in heatmap texture)
+    if (heatmapTextureRef.current) {
       if (modelLoadedRef.current && handGroupRef.current) {
-        applyTextureToModel(handGroupRef.current, texture);
-      } else {
-        textureNeedsApplyRef.current = true;
+        // Check if shader materials are already applied
+        let hasShaderMat = false;
+        handGroupRef.current.traverse((child) => {
+          if (child.isMesh && child.material?.uniforms?.uHeatmap) {
+            hasShaderMat = true;
+          }
+        });
+        if (!hasShaderMat) {
+          applyTextureToModel(handGroupRef.current, heatmapTextureRef.current);
+        }
       }
     }
 

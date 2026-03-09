@@ -1,8 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getHistory } from '../lib/historyService';
+import { getRecord } from '../lib/historyService';
 import GripReport from '../components/report/GripReport';
 import StandingReport from '../components/report/StandingReport';
+import SitStandReport from '../components/report/SitStandReport';
+import { GaitReportContent } from './assessment/GaitAssessment';
 
 const TYPE_LABELS = {
   grip: '握力评估',
@@ -11,111 +13,6 @@ const TYPE_LABELS = {
   gait: '行走步态评估',
 };
 
-/* ─── 起坐能力评估简易报告 ─── */
-function SitStandReportView({ patientName }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="zeiss-section-title">起坐能力评估报告</div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>基本信息</h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { l: '评估对象', v: patientName },
-              { l: '评估类型', v: '5次起坐测试' },
-              { l: '评估时间', v: new Date().toLocaleString('zh-CN') },
-              { l: '总耗时', v: '12.5s' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>起坐分析结果</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { l: '平均单次耗时', v: '2.50s', color: 'var(--zeiss-blue)' },
-              { l: '最快单次耗时', v: '2.10s', color: 'var(--success)' },
-              { l: '最慢单次耗时', v: '3.05s', color: 'var(--warning)' },
-              { l: '左右对称性', v: '92.3%', color: 'var(--zeiss-blue)' },
-              { l: '稳定性评分', v: '85.6', color: 'var(--success)' },
-              { l: '综合评级', v: '良好', color: 'var(--success)' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-xl font-bold" style={{ color: item.color }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>评估结论</h3>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            受试者完成5次起坐测试，总耗时12.5秒，平均单次耗时2.50秒。起坐过程中左右对称性良好（92.3%），
-            稳定性评分85.6分。根据国际肌少症工作组(EWGSOP2)标准，5次起坐测试时间小于15秒为正常范围，
-            该受试者表现良好，起坐能力正常。
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── 步态评估简易报告 ─── */
-function GaitReportView({ patientName }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="zeiss-section-title">行走步态评估报告</div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>基本信息</h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { l: '评估对象', v: patientName },
-              { l: '评估类型', v: '6米步行测试' },
-              { l: '评估时间', v: new Date().toLocaleString('zh-CN') },
-              { l: '行走距离', v: '6.0m' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>步态参数</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { l: '步速', v: '1.12 m/s', color: 'var(--zeiss-blue)' },
-              { l: '步频', v: '108 步/分', color: 'var(--success)' },
-              { l: '步幅', v: '62.3 cm', color: 'var(--warning)' },
-              { l: '左右步长比', v: '0.97', color: 'var(--zeiss-blue)' },
-              { l: '步态周期', v: '1.11s', color: 'var(--success)' },
-              { l: '双支撑相', v: '22.5%', color: '#7C3AED' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4 text-center">
-                <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-xl font-bold" style={{ color: item.color }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="zeiss-card p-6">
-          <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>评估结论</h3>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            受试者完成6米步行测试，步速1.12m/s，步频108步/分钟，步幅62.3cm。根据EWGSOP2标准，
-            步速大于0.8m/s为正常范围。受试者步态参数均在正常范围内，左右步长比接近1.0，
-            表明步态对称性良好。双支撑相占比22.5%，处于正常范围（20%-30%），平衡能力正常。
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ─── 历史报告查看页面 ─── */
 export default function HistoryReportView() {
@@ -124,26 +21,85 @@ export default function HistoryReportView() {
   const recordId = searchParams.get('id');
   const assessmentType = searchParams.get('type');
 
-  // 从 localStorage 获取记录
-  const record = useMemo(() => {
-    const history = getHistory();
-    return history.find(r => r.id === recordId);
+  // 从后端数据库获取记录
+  const [record, setRecord] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!recordId) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    getRecord(recordId).then(data => {
+      if (!cancelled) {
+        setRecord(data);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [recordId]);
 
   const patientName = record?.patientName || '未知';
+  const patientInfo = record ? {
+    name: record.patientName,
+    gender: record.patientGender,
+    age: record.patientAge,
+    weight: record.patientWeight,
+  } : { name: '未知' };
+
+  // 从历史记录中提取报告数据
+  const assessmentData = record?.assessments?.[assessmentType];
+  const reportData = assessmentData?.report?.reportData || null;
 
   const handleBack = () => navigate('/history');
 
   const renderReport = () => {
+    if (loading) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 rounded-full animate-spin mb-4 mx-auto"
+              style={{ borderColor: 'var(--border-light)', borderTopColor: 'var(--zeiss-blue)' }} />
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载中...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!record) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <p style={{ color: 'var(--text-muted)' }}>未找到对应的记录</p>
+        </div>
+      );
+    }
+
+    if (!reportData) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <svg className="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--text-muted)' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>该评估记录没有保存报告数据</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>请重新进行评估以生成完整报告</p>
+          </div>
+        </div>
+      );
+    }
+
     switch (assessmentType) {
       case 'grip':
-        return <GripReport patientName={patientName} onClose={handleBack} />;
+        return <GripReport patientName={patientName} onClose={handleBack} reportData={reportData} />;
       case 'standing':
-        return <StandingReport patientInfo={{ name: patientName }} onClose={handleBack} />;
+        return <StandingReport patientInfo={patientInfo} onClose={handleBack} reportData={reportData} />;
       case 'sitstand':
-        return <SitStandReportView patientName={patientName} />;
+        return <SitStandReport patientInfo={patientInfo} reportData={reportData} onClose={handleBack} />;
       case 'gait':
-        return <GaitReportView patientName={patientName} />;
+        return <GaitReportContent patientInfo={patientInfo} reportData={reportData} onClose={handleBack} />;
       default:
         return (
           <div className="flex-1 flex items-center justify-center">

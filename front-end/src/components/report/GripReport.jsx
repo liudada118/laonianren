@@ -19,89 +19,55 @@ function EChart({ option, height = 280 }) {
 
 /* ─── 目录项 ─── */
 const SECTIONS = [
-  { id: 'overview', label: '基本信息' },
-  { id: 'pressure', label: '手部压力分布' },
-  { id: 'time-analysis', label: '时间分析' },
-  { id: 'peak-data', label: '峰值帧数据' },
-  { id: 'force-curve', label: '力-时间曲线' },
-  { id: 'force-stack', label: '力分布堆叠图' },
-  { id: 'force-bar', label: '各部位力分布' },
-  { id: 'euler', label: '手部姿态' },
-  { id: 'angular', label: '抖动检测' },
-  { id: 'pie', label: '力占比分析' },
-];
-
-/* ─── 默认空 fingers 数据（防止 undefined 崩溃）─── */
-const DEFAULT_FINGERS = [
-  { name: '拇指', force: 0, area: 0, points: 0, adc: 0 },
-  { name: '食指', force: 0, area: 0, points: 0, adc: 0 },
-  { name: '中指', force: 0, area: 0, points: 0, adc: 0 },
-  { name: '无名指', force: 0, area: 0, points: 0, adc: 0 },
-  { name: '小指', force: 0, area: 0, points: 0, adc: 0 },
-  { name: '手掌', force: 0, area: 0, points: 0, adc: 0 },
+  { id: 'overview', label: '基本信息', icon: '📋' },
+  { id: 'pressure', label: '手部压力分布', icon: '🖐' },
+  { id: 'time-analysis', label: '时间分析', icon: '⏱' },
+  { id: 'peak-data', label: '峰值帧数据', icon: '📊' },
+  { id: 'force-curve', label: '力-时间曲线', icon: '📈' },
+  { id: 'force-stack', label: '力分布堆叠图', icon: '📉' },
+  { id: 'force-bar', label: '各部位力分布', icon: '📊' },
+  { id: 'euler', label: '手部姿态', icon: '🔄' },
+  { id: 'angular', label: '抖动检测', icon: '〰' },
+  { id: 'pie', label: '力占比分析', icon: '🥧' },
 ];
 
 /* ─── 主报告组件 ─── */
-export default function GripReport({ patientName, onClose, onSwitchDynamic, reportData: propsReportData }) {
+export default function GripReport({ patientName, onClose, onSwitchDynamic, pythonResult }) {
   const [activeHand, setActiveHand] = useState('left');
   const [activeSection, setActiveSection] = useState('overview');
-  const [rawReport, setRawReport] = useState(null);
-  const [loading, setLoading] = useState(!propsReportData);
+  const [reportData, setReportData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const contentRef = useRef(null);
 
-  // 加载数据
+  // pythonResult 格式: { left?: singleHandData, right?: singleHandData }
+  // 或者 null（使用静态 JSON）
+  const hasBothHands = pythonResult && pythonResult.left && pythonResult.right;
+  const hasLeftOnly = pythonResult && pythonResult.left && !pythonResult.right;
+  const hasRightOnly = pythonResult && !pythonResult.left && pythonResult.right;
+
+  // 加载数据：优先使用 Python 结果，否则加载静态 JSON
   useEffect(() => {
-    if (propsReportData) {
-      setRawReport(propsReportData);
-      // 设置默认显示的手
-      if (propsReportData.activeHand === '右手') {
-        setActiveHand('right');
-      } else {
-        setActiveHand(propsReportData.left ? 'left' : 'right');
-      }
+    if (pythonResult) {
+      // 根据 activeHand 选择对应手的数据
+      const handData = pythonResult[activeHand] || pythonResult.left || pythonResult.right;
+      setReportData(handData);
       setLoading(false);
       return;
     }
     setLoading(true);
     fetch('/grip_report_data/grip_report.json')
       .then(r => r.json())
-      .then(d => { setRawReport(d); setLoading(false); })
-      .catch(() => { setRawReport(null); setLoading(false); });
-  }, [propsReportData]);
+      .then(data => { setReportData(data); setLoading(false); })
+      .catch(() => { setReportData(null); setLoading(false); });
+  }, [pythonResult, activeHand]);
 
-  // 解析当前手的数据，并确保关键字段有默认值
-  const data = useMemo(() => {
-    if (!rawReport) return null;
-    let handData;
-    // 新格式: { left: {...}, right: {...}, activeHand }
-    if (rawReport.left || rawReport.right) {
-      handData = activeHand === 'left' ? rawReport.left : rawReport.right;
-    } else {
-      // 旧格式: 直接就是单手数据
-      handData = rawReport;
-    }
-    // 如果选中的手没有数据，返回 null（会显示"数据加载失败"页面）
-    if (!handData) return null;
-    // 确保关键字段有默认值，防止 undefined 崩溃
-    return {
-      ...handData,
-      fingers: handData.fingers || DEFAULT_FINGERS,
-      totalForce: handData.totalForce ?? 0,
-      totalArea: handData.totalArea ?? 0,
-      totalFrames: handData.totalFrames ?? '-',
-      timeRange: handData.timeRange ?? '-',
-      times: handData.times || [],
-      forceTimeSeries: handData.forceTimeSeries || {},
-      eulerData: handData.eulerData || {},
-      angularVelocity: handData.angularVelocity || [],
-      timeAnalysis: handData.timeAnalysis || [],
-    };
-  }, [rawReport, activeHand]);
+  // 初始化 activeHand：如果只有右手数据，默认选右手
+  useEffect(() => {
+    if (hasRightOnly) setActiveHand('right');
+    else if (hasLeftOnly || hasBothHands) setActiveHand('left');
+  }, [pythonResult]);
 
-  // 是否有两只手的数据
-  const hasLeft = rawReport?.left != null;
-  const hasRight = rawReport?.right != null;
-  const hasBothHands = hasLeft && hasRight;
+  const data = reportData;
 
   const colors = ['#0066CC', '#0891B2', '#059669', '#D97706', '#9333EA', '#DC2626'];
   const fingerNames = ['拇指', '食指', '中指', '无名指', '小指', '手掌'];
@@ -128,19 +94,19 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   // ─── 蔡司风格图表配色 ───
   const chartTextColor = '#6B7B8D';
   const gridLineColor = '#EDF0F4';
-  const tooltipStyle = { backgroundColor: '#FFFFFF', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 8px;' };
+  const tooltipStyle = { backgroundColor: '#FFFFFF', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 8px;', valueFormatter: (v) => typeof v === 'number' ? v.toFixed(1) : v };
   const baseGrid = { top: 50, bottom: 35, left: 55, right: 20 };
 
-  // ─── ECharts 配置 ───
+  // ─── ECharts 配置 (使用真实数据) ───
   const forceTimeOption = useMemo(() => {
-    if (!data?.times?.length) return {};
+    if (!data?.times) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: [...fingerNames, '总力'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         ...fingerKeys.map((key, i) => ({
@@ -154,14 +120,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const stackOption = useMemo(() => {
-    if (!data?.times?.length) return {};
+    if (!data?.times) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: fingerNames, top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: fingerKeys.map((key, i) => ({
         name: fingerNames[i], type: 'line', stack: 'total', areaStyle: { opacity: 0.35 },
@@ -172,7 +138,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const barOption = useMemo(() => {
-    if (!data?.fingers?.length) return {};
+    if (!data?.fingers) return {};
     return {
       tooltip: tooltipStyle,
       grid: { top: 30, bottom: 35, left: 55, right: 20 },
@@ -181,20 +147,20 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
       series: [{
         type: 'bar', barWidth: '45%', itemStyle: { borderRadius: [6, 6, 0, 0] },
         data: data.fingers.map((f, i) => ({ value: f.force, itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: colors[i] }, { offset: 1, color: colors[i] + '30' }]) } })),
-        label: { show: true, position: 'top', formatter: '{c}N', fontSize: 11, fontWeight: 'bold', color: chartTextColor }
+        label: { show: true, position: 'top', formatter: (p) => p.value.toFixed(1) + 'N', fontSize: 11, fontWeight: 'bold', color: chartTextColor }
       }]
     };
   }, [data]);
 
   const eulerOption = useMemo(() => {
-    if (!data?.times?.length) return {};
+    if (!data?.times) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: ['横滚(Roll)', '俯仰(Pitch)', '偏航(Yaw)'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '角度(°)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
@@ -205,14 +171,14 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const angVelOption = useMemo(() => {
-    if (!data?.times?.length) return {};
+    if (!data?.times) return {};
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle },
       legend: { data: ['角速度', '检测阈值'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => t.toFixed(1)), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '角速度(°/s)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor } },
       series: [
         { name: '角速度', type: 'line', smooth: true, symbol: 'none', data: (data.angularVelocity || []).filter((_, i) => i % step === 0), itemStyle: { color: '#9333EA' }, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2 } },
@@ -222,9 +188,9 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   }, [data]);
 
   const pieOption = useMemo(() => {
-    if (!data?.fingers?.length) return {};
+    if (!data?.fingers) return {};
     return {
-      tooltip: { formatter: '{b}: {c}N ({d}%)', ...tooltipStyle },
+      tooltip: { formatter: (p) => `${p.name}: ${p.value.toFixed(1)}N (${p.percent.toFixed(1)}%)`, ...tooltipStyle },
       legend: { orient: 'vertical', right: 15, top: 'center', textStyle: { fontSize: 11, color: chartTextColor } },
       series: [{
         type: 'pie', radius: ['35%', '68%'], center: ['40%', '50%'],
@@ -257,8 +223,6 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
     );
   }
 
-  const handLabel = activeHand === 'left' ? '左手' : '右手';
-
   return (
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-primary)' }}>
       {/* 顶部栏 */}
@@ -266,36 +230,6 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
         style={{ borderBottom: '1px solid var(--border-light)', background: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-4">
           <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{patientName || '---'} 的握力评估报告</h2>
-          {/* 左右手切换Tab */}
-          {(hasLeft || hasRight) && (
-            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-light)' }}>
-              <button
-                onClick={() => hasLeft && setActiveHand('left')}
-                disabled={!hasLeft}
-                className="px-4 py-1.5 text-sm font-medium transition-all"
-                style={{
-                  background: activeHand === 'left' ? 'var(--zeiss-blue)' : 'var(--bg-secondary)',
-                  color: activeHand === 'left' ? '#FFFFFF' : hasLeft ? 'var(--text-tertiary)' : 'var(--text-muted)',
-                  opacity: hasLeft ? 1 : 0.5,
-                  cursor: hasLeft ? 'pointer' : 'not-allowed',
-                }}>
-                左手
-              </button>
-              <button
-                onClick={() => hasRight && setActiveHand('right')}
-                disabled={!hasRight}
-                className="px-4 py-1.5 text-sm font-medium transition-all"
-                style={{
-                  background: activeHand === 'right' ? 'var(--zeiss-blue)' : 'var(--bg-secondary)',
-                  color: activeHand === 'right' ? '#FFFFFF' : hasRight ? 'var(--text-tertiary)' : 'var(--text-muted)',
-                  opacity: hasRight ? 1 : 0.5,
-                  cursor: hasRight ? 'pointer' : 'not-allowed',
-                  borderLeft: '1px solid var(--border-light)',
-                }}>
-                右手
-              </button>
-            </div>
-          )}
           <button onClick={onSwitchDynamic}
             className="flex items-center gap-1.5 text-sm font-medium transition-colors px-3 py-1.5 rounded-lg"
             style={{ color: 'var(--zeiss-blue)', background: 'var(--zeiss-blue-light)', border: '1px solid rgba(0,102,204,0.15)' }}>
@@ -307,6 +241,21 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
           </button>
         </div>
         <div className="flex items-center gap-3">
+          {/* 左右手切换（仅双手数据时显示） */}
+          {hasBothHands && (
+            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-light)' }}>
+              {['left', 'right'].map(h => (
+                <button key={h} onClick={() => setActiveHand(h)}
+                  className="px-3 py-1.5 text-xs font-medium transition-all"
+                  style={{
+                    background: activeHand === h ? 'var(--zeiss-blue)' : 'var(--bg-tertiary)',
+                    color: activeHand === h ? '#fff' : 'var(--text-secondary)',
+                  }}>
+                  {h === 'left' ? '左手' : '右手'}
+                </button>
+              ))}
+            </div>
+          )}
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
             style={{ color: 'var(--text-muted)' }}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -343,10 +292,10 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
               <div className="zeiss-card p-4">
                 <div className="grid grid-cols-4 gap-3">
                   {[
-                    { l: '测试手类型', v: data.handType || handLabel },
+                    { l: '测试手类型', v: data.handType },
                     { l: '总帧数', v: data.totalFrames },
                     { l: '时间范围', v: data.timeRange },
-                    { l: '峰值力', v: data.peakInfo ? `${(data.peakInfo.peak_force ?? 0).toFixed(1)}N` : '-' }
+                    { l: '峰值力', v: data.peakInfo ? `${data.peakInfo.peak_force.toFixed(1)}N` : '-' }
                   ].map((item, i) => (
                     <div key={i} className="zeiss-card-inner p-3 text-center">
                       <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
@@ -362,24 +311,24 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
               <SectionHeader title="手部压力分布" />
               <div className="flex gap-4">
                 <div className="flex-1" style={{ minWidth: 0 }}>
-                  <HandPressureMap fingers={data.fingers} totalForce={data.totalForce} hand={data.hand || handLabel} sensorMatrix={data.peakSensorMatrix || data.avgSensorMatrix} />
+                  <HandPressureMap fingers={data.fingers} totalForce={data.totalForce} hand={data.hand || '左手'} />
                 </div>
                 <div className="w-[360px] space-y-2">
-                  {(data.fingers || []).map((f, i) => (
+                  {data.fingers.map((f, i) => (
                     <div key={i} className="zeiss-card p-3 flex items-center gap-3 transition-colors hover:shadow-md">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs"
                         style={{ backgroundColor: colors[i] + '15', color: colors[i], border: `1px solid ${colors[i]}30` }}>
-                        {f.name?.[0] || '-'}
+                        {f.name[0]}
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</div>
+                        <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name}</div>
                         <div className="flex gap-3 text-[11px]">
-                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? 0)}N</span></span>
-                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area ?? 0}mm²</span></span>
-                          <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points ?? 0}</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : f.force}N</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{f.area}mm²</span></span>
+                          <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points}</span></span>
                         </div>
                       </div>
-                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? ((f.force ?? 0) / data.totalForce * 100).toFixed(1) : 0}%</div>
+                      <div className="text-lg font-bold" style={{ color: colors[i] }}>{data.totalForce > 0 ? (f.force / data.totalForce * 100).toFixed(1) : 0}%</div>
                     </div>
                   ))}
                   <div className="zeiss-card p-3 flex justify-between items-center" style={{ background: 'var(--zeiss-blue-light)', borderColor: 'rgba(0,102,204,0.15)' }}>
@@ -398,7 +347,7 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
               <SectionHeader title="时间与抖动分析" />
               <div className="zeiss-card overflow-hidden">
                 <div className="grid grid-cols-4 gap-px" style={{ background: 'var(--border-light)' }}>
-                  {(data.timeAnalysis || []).map((row, i) => (
+                  {data.timeAnalysis.map((row, i) => (
                     <div key={i} className="p-3 text-center transition-colors" style={{ background: 'var(--bg-secondary)' }}>
                       <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{row.label}</div>
                       <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{row.value}</div>
@@ -423,18 +372,18 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     </tr>
                   </thead>
                   <tbody>
-                    {(data.fingers || []).map((f, i) => (
+                    {data.fingers.map((f, i) => (
                       <tr key={i} className="transition-colors" style={{ borderTop: '1px solid var(--border-light)' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                         <td className="px-4 py-2.5 flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[i] }}/>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</span>
+                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{f.name}</span>
                         </td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc ?? '-'}</td>
-                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : (f.force ?? '-')}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area ?? '-'}</td>
-                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.adc}</td>
+                        <td className="px-4 py-2.5 text-center font-semibold" style={{ color: 'var(--text-primary)' }}>{typeof f.force === 'number' ? f.force.toFixed(1) : f.force}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.area}</td>
+                        <td className="px-4 py-2.5 text-center" style={{ color: 'var(--text-tertiary)' }}>{f.points}</td>
                       </tr>
                     ))}
                     <tr style={{ borderTop: '2px solid var(--border-medium)', background: 'var(--bg-tertiary)' }}>
@@ -451,19 +400,19 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
 
             {/* 力-时间曲线 */}
             <section id="grip-force-curve">
-              <SectionHeader title={`${handLabel} - 力-时间曲线`} />
+              <SectionHeader title={`${data.handType} - 力-时间曲线`} />
               <div className="zeiss-card p-4"><EChart option={forceTimeOption} height={320} /></div>
             </section>
 
             {/* 力分布堆叠图 */}
             <section id="grip-force-stack">
-              <SectionHeader title={`${handLabel} - 各部位力分布（堆叠图）`} />
+              <SectionHeader title={`${data.handType} - 各部位力分布（堆叠图）`} />
               <div className="zeiss-card p-4"><EChart option={stackOption} height={320} /></div>
             </section>
 
             {/* 各部位力分布 */}
             <section id="grip-force-bar">
-              <SectionHeader title={`${handLabel} - 峰值帧各部位力分布`} />
+              <SectionHeader title={`${data.handType} - 峰值帧各部位力分布`} />
               <div className="grid grid-cols-2 gap-4">
                 <div className="zeiss-card p-4"><EChart option={barOption} height={280} /></div>
                 <div className="zeiss-card p-4"><EChart option={pieOption} height={280} /></div>
@@ -472,19 +421,19 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
 
             {/* 手部姿态 */}
             <section id="grip-euler">
-              <SectionHeader title={`${handLabel} - 手部姿态（欧拉角）`} />
+              <SectionHeader title={`${data.handType} - 手部姿态（欧拉角）`} />
               <div className="zeiss-card p-4"><EChart option={eulerOption} height={320} /></div>
             </section>
 
             {/* 抖动检测 */}
             <section id="grip-angular">
-              <SectionHeader title={`${handLabel} - 角速度曲线（抖动检测）`} />
+              <SectionHeader title={`${data.handType} - 角速度曲线（抖动检测）`} />
               <div className="zeiss-card p-4"><EChart option={angVelOption} height={320} /></div>
             </section>
 
             {/* 力占比分析 */}
             <section id="grip-pie">
-              <SectionHeader title={`${handLabel} - 峰值帧各部位力占比`} />
+              <SectionHeader title={`${data.handType} - 峰值帧各部位力占比`} />
               <div className="zeiss-card p-4"><EChart option={pieOption} height={350} /></div>
             </section>
 

@@ -160,7 +160,8 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       for (const key of regionKeys) {
         const region = HAND_REGIONS[key];
         const f = fingers[region.fingerIdx];
-        result[key] = f ? (f.force || 0) : 0;
+        const rawForce = f ? (f.force || 0) : 0;
+        result[key] = typeof rawForce === 'number' ? parseFloat(rawForce.toFixed(2)) : rawForce;
       }
     }
     return result;
@@ -179,7 +180,7 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
           count++;
         }
       }
-      result[key] = count > 0 ? sum / count : 0;
+      result[key] = count > 0 ? parseFloat((sum / count).toFixed(2)) : 0;
     }
     return result;
   }, [sensorMatrix]);
@@ -283,7 +284,8 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
         const ly = region.label.y * H;
 
         const name = f.name;
-        const force = `${f.force}N`;
+        const forceNum = typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force || 0);
+        const force = `${forceNum}N`;
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';

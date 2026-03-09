@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import HandModel from '../../components/three/HandModel';
 import GripReport from '../../components/report/GripReport';
 import EChart from '../../components/ui/EChart';
 import { HeatmapCanvas } from '../../lib/heatmap';
-import { mapLeftHand, mapRightHand, generateSimulatedSensorData } from '../../lib/gripDataMapping';
-import { gloveService } from '../../lib/GloveSerialService';
+import { mapLeftHand, mapRightHand } from '../../lib/gripDataMapping';
 import { backendBridge } from '../../lib/BackendBridge';
-import SerialLogPanel from '../../components/debug/SerialLogPanel';
-import { generateGripReportData } from '../../lib/gripReportGenerator';
 
 /* ─── 步骤指示器 (蔡司风格) ─── */
 function StepIndicator({ current, steps }) {
@@ -20,11 +17,12 @@ function StepIndicator({ current, steps }) {
         const active = i === current;
         return (
           <React.Fragment key={i}>
-            {i > 0 && <div className="zeiss-step-line" style={done ? { background: 'var(--success)' } : {}} />}
-            <div className="flex flex-col items-center gap-1">
-              <div className={`zeiss-step-circle ${done ? 'completed' : active ? 'active' : 'pending'}`}>
+            {i > 0 && <div className="w-4 h-px mx-0.5" style={{ background: done ? 'var(--zeiss-blue)' : 'var(--border-light)' }} />}
+            <div className="flex items-center gap-1">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${done ? 'text-white' : active ? 'text-white' : ''}`}
+                style={{ background: done ? 'var(--zeiss-blue)' : active ? 'var(--zeiss-blue)' : 'var(--bg-tertiary)', color: done || active ? 'white' : 'var(--text-muted)', border: `1.5px solid ${done || active ? 'var(--zeiss-blue)' : 'var(--border-light)'}` }}>
                 {done ? (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : i + 1}
@@ -109,7 +107,6 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 
   return (
     <div className="h-full flex flex-col gap-3 overflow-y-auto">
-      {/* 采集状态 */}
       {isRecording && (
         <div className="zeiss-card p-3 flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: '#DC2626' }} />
@@ -188,18 +185,17 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 /* ─── 主组件 ─── */
 export default function GripAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge } = useAssessment();
+  const location = useLocation();
+  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const isGlobalConnected = deviceConnStatus === 'connected';
+  const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   const videoRef = useRef(null);
 
-  // 如果首页已一键连接，自动进入后端模式
-  const isGlobalConnected = deviceConnStatus === 'connected';
-  const [deviceStatus, setDeviceStatus] = useState(isGlobalConnected ? 'connected' : 'disconnected');
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [isBackendMode, setIsBackendMode] = useState(isGlobalConnected);
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'left-idle');
   const backendCleanupRef = useRef(null);
-  const [leftGloveConnected, setLeftGloveConnected] = useState(false);
-  const [rightGloveConnected, setRightGloveConnected] = useState(false);
-  const [phase, setPhase] = useState('left-idle');
+  const assessmentIdRef = useRef(`grip_${Date.now()}`);
+  const lastFrameTimeRef = useRef(0);
+  const THROTTLE_MS = 100; // 限制 UI 更新频率为 ~10fps，减少卡顿
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [pressure, setPressure] = useState(0);
@@ -207,166 +203,30 @@ export default function GripAssessment() {
   const [rightData, setRightData] = useState([]);
   const [showLeftToast, setShowLeftToast] = useState(false);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
-  const [gripReportData, setGripReportData] = useState(null);
   const timerRef = useRef(null);
-  const leftRawFramesRef = useRef([]);
-  const rightRawFramesRef = useRef([]);
-  // 完整数据用于报告（不截断）
-  const leftFullDataRef = useRef([]);
-  const rightFullDataRef = useRef([]);
+
+  const [pythonResult, setPythonResult] = useState(
+    viewReportMode ? (assessments.grip?.report?.reportData || null) : null
+  );
+  const [csvExporting, setCsvExporting] = useState(false);
 
   // Heatmap state
   const [heatmapCanvas, setHeatmapCanvas] = useState(null);
   const [heatmapVersion, setHeatmapVersion] = useState(0);
   const bodyCanvasRef = useRef(null);
-  const frameRef = useRef(0);
-
-  // 串口实时数据 ref（用于采集时记录）
-  const isRecordingRef = useRef(false);
-  const currentHandRef = useRef('left'); // 'left' | 'right'
-
-  // 调试面板
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [simLogs, setSimLogs] = useState([]);
-  const simLogIdRef = useRef(0);
-
-  // 模拟日志辅助函数
-  const addSimLog = useCallback((message, type = 'data') => {
-    simLogIdRef.current += 1;
-    setSimLogs(prev => [...prev, { id: simLogIdRef.current, message, type }]);
-  }, []);
+  const phaseRef = useRef(phase);
 
   // Initialize HeatmapCanvas
   useEffect(() => {
     if (!bodyCanvasRef.current) {
       bodyCanvasRef.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', {
-        min: 0,
-        max: 500,
-        size: 40
+        min: 0, max: 500, size: 40
       });
       setHeatmapCanvas(bodyCanvasRef.current.canvas);
     }
   }, []);
 
-  // 全局一键连接后，自动设置后端数据监听
-  useEffect(() => {
-    if (!isGlobalConnected || backendCleanupRef.current) return;
-
-    // 设置手套模式，后端只推送 HL/HR 数据
-    backendBridge.setActiveMode(1).then(() => {
-      console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
-      addSimLog('已设置为手套模式 (mode=1)', 'info');
-    }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
-
-    setIsBackendMode(true);
-    setDeviceStatus('connected');
-
-    // 监听后端数据
-    const unsubLeft = backendBridge.on('leftHandData', (arr) => {
-      if (gloveService.onLeftHandData) {
-        gloveService.onLeftHandData(arr);
-      }
-    });
-    const unsubRight = backendBridge.on('rightHandData', (arr) => {
-      if (gloveService.onRightHandData) {
-        gloveService.onRightHandData(arr);
-      }
-    });
-
-    backendCleanupRef.current = () => {
-      unsubLeft();
-      unsubRight();
-    };
-
-    addSimLog('已自动连接后端数据通道', 'info');
-
-    return () => {
-      if (backendCleanupRef.current) {
-        backendCleanupRef.current();
-        backendCleanupRef.current = null;
-      }
-    };
-  }, [isGlobalConnected]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 设置手套串口数据回调
-  useEffect(() => {
-    const handleLeftData = (sensorArray) => {
-      if (!leftGloveConnected) setLeftGloveConnected(true);
-
-      // 始终更新热力图（不管是否在采集状态，只要有数据就显示）
-      if (bodyCanvasRef.current) {
-        try {
-          const mapped = mapLeftHand(sensorArray);
-          bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-          setHeatmapVersion(v => v + 1);
-        } catch (e) { console.error('[Left] heatmap error:', e); }
-      }
-
-      // 如果正在采集左手数据，记录统计
-      if (isRecordingRef.current && currentHandRef.current === 'left') {
-        const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
-        const avgPressure = totalPressure / sensorArray.length;
-        setPressure(avgPressure);
-
-        // 完整数据用于报告（带时间戳，不截断）
-        leftFullDataRef.current.push({ time: leftFullDataRef.current.length, value: avgPressure, timestamp: Date.now() });
-        leftRawFramesRef.current.push([...sensorArray]);
-
-        // 显示数据（截断到200条用于实时图表）
-        setLeftData(prev => {
-          const next = [...prev, { time: prev.length, value: avgPressure }];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
-      }
-    };
-
-    const handleRightData = (sensorArray) => {
-      if (!rightGloveConnected) setRightGloveConnected(true);
-
-      // 始终更新热力图（不管是否在采集状态，只要有数据就显示）
-      if (bodyCanvasRef.current) {
-        try {
-          const mapped = mapRightHand(sensorArray);
-          bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-          setHeatmapVersion(v => v + 1);
-        } catch (e) { console.error('[Right] heatmap error:', e); }
-      }
-
-      // 如果正在采集右手数据，记录统计
-      if (isRecordingRef.current && currentHandRef.current === 'right') {
-        const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
-        const avgPressure = totalPressure / sensorArray.length;
-        setPressure(avgPressure);
-
-        // 完整数据用于报告（带时间戳，不截断）
-        rightFullDataRef.current.push({ time: rightFullDataRef.current.length, value: avgPressure, timestamp: Date.now() });
-        rightRawFramesRef.current.push([...sensorArray]);
-
-        // 显示数据（截断到200条用于实时图表）
-        setRightData(prev => {
-          const next = [...prev, { time: prev.length, value: avgPressure }];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
-      }
-    };
-
-    gloveService.setOnLeftHandData(handleLeftData);
-    gloveService.setOnRightHandData(handleRightData);
-
-    return () => {
-      gloveService.setOnLeftHandData(null);
-      gloveService.setOnRightHandData(null);
-    };
-  }, [leftGloveConnected, rightGloveConnected]);
-
-  // 更新设备状态
-  useEffect(() => {
-    if (isSimulating || leftGloveConnected || rightGloveConnected) {
-      setDeviceStatus('connected');
-    } else if (gloveService.connected) {
-      setDeviceStatus('connecting'); // 连接了但还没收到数据
-    }
-  }, [isSimulating, leftGloveConnected, rightGloveConnected]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   const leftStats = useMemo(() => {
     if (leftData.length === 0) return { avg: '0.00', max: '0.00', sum: '0.00', mean: '0.00', variance: '0.00', skewness: '0.00', kurtosis: '0.00', std: 15 };
@@ -388,214 +248,61 @@ export default function GripAssessment() {
 
   const stepIndex = phase.startsWith('left') ? 0 : phase.startsWith('right') ? 1 : 2;
 
-  /* ─── 连接手套（通过 Web Serial API 弹窗选择） ─── */
-  const handleConnectGlove = useCallback(async () => {
-    try {
-      setDeviceStatus('connecting');
-      const success = await gloveService.connect();
-      if (!success) {
-        setDeviceStatus('disconnected');
-      }
-      // 连接成功后，数据回调会自动识别左手/右手
-    } catch (e) {
-      console.error('连接手套失败:', e);
-      setDeviceStatus('disconnected');
-    }
-  }, []);
-
-  /* ─── 断开手套 ─── */
-  const handleDisconnect = useCallback(async () => {
-    // 断开后端模式（只取消事件监听，不断开全局 WebSocket）
-    if (isBackendMode) {
-      if (backendCleanupRef.current) {
-        backendCleanupRef.current();
-        backendCleanupRef.current = null;
-      }
-      // 不再调用 backendBridge.disconnect()，保持全局 ws 连接
-      setIsBackendMode(false);
-    }
-    await gloveService.disconnect();
-    setDeviceStatus('disconnected');
-    setLeftGloveConnected(false);
-    setRightGloveConnected(false);
-    setIsSimulating(false);
-  }, [isBackendMode]);
-
-  /* ─── 模拟模式 ─── */
-  const handleSimulate = useCallback(() => {
-    setIsSimulating(true);
-    setDeviceStatus('connected');
-  }, []);
-
-  /* ─── 后端模式：通过 WebSocket 连接后端 serialServer ─── */
-  const handleBackendConnect = useCallback(async () => {
-    try {
-      setDeviceStatus('connecting');
-      addSimLog('正在连接后端服务...', 'info');
-
-      // 先调用后端API连接串口设备
-      const connResult = await backendBridge.connPort();
-      addSimLog(`后端连接结果: ${JSON.stringify(connResult)}`, 'info');
-
-      // 设置手套模式 (mode=1)
-      await backendBridge.setActiveMode(1);
-      addSimLog('已设置为手套模式 (mode=1)', 'info');
-
-      // 连接WebSocket
-      backendBridge.connect();
-
-      // 监听数据
-      const unsubLeft = backendBridge.on('leftHandData', (arr) => {
-        if (gloveService.onLeftHandData) {
-          gloveService.onLeftHandData(arr);
-        }
-      });
-      const unsubRight = backendBridge.on('rightHandData', (arr) => {
-        if (gloveService.onRightHandData) {
-          gloveService.onRightHandData(arr);
-        }
-      });
-      const unsubConnect = backendBridge.on('connect', () => {
-        addSimLog('WebSocket 已连接', 'info');
-        setDeviceStatus('connected');
-      });
-      const unsubDisconnect = backendBridge.on('disconnect', () => {
-        addSimLog('WebSocket 已断开', 'error');
-      });
-
-      // 保存清理函数
-      backendCleanupRef.current = () => {
-        unsubLeft();
-        unsubRight();
-        unsubConnect();
-        unsubDisconnect();
-      };
-
-      setIsBackendMode(true);
-      setDeviceStatus('connected');
-      addSimLog('后端模式已启动，等待数据...', 'info');
-    } catch (e) {
-      console.error('后端连接失败:', e);
-      addSimLog(`后端连接失败: ${e.message}`, 'error');
-      setDeviceStatus('disconnected');
-    }
-  }, [addSimLog]);
-
-  /* ─── 开始采集 ─── */
-  const startRecording = () => {
+  // ─── 开始采集 ───
+  const startRecording = async () => {
     const isLeft = phase === 'left-idle';
     setPhase(isLeft ? 'left-recording' : 'right-recording');
     setTimer(0);
-    frameRef.current = 0;
-    isRecordingRef.current = true;
-    currentHandRef.current = isLeft ? 'left' : 'right';
 
-    if (isSimulating) {
-      addSimLog(`模拟模式开始采集 ${isLeft ? '左手' : '右手'}`, 'info');
-      // 模拟模式：用定时器生成数据
-      timerRef.current = setInterval(() => {
-        setTimer(p => p + 1);
-        frameRef.current += 1;
-
-        const sensorData = generateSimulatedSensorData(isLeft, frameRef.current);
-        // 保存原始帧数据用于报告生成
-        const framesRef = isLeft ? leftRawFramesRef : rightRawFramesRef;
-        framesRef.current.push([...sensorData]);
-
-        const totalPressure = sensorData.reduce((a, b) => a + b, 0);
-        const avgPressure = totalPressure / sensorData.length;
-        setPressure(avgPressure);
-
-        // 完整数据用于报告（不截断）
-        const fullRef = isLeft ? leftFullDataRef : rightFullDataRef;
-        fullRef.current.push({ time: fullRef.current.length, value: avgPressure, timestamp: Date.now() });
-
-        // 显示数据（截断到200条用于实时图表）
-        const setter = isLeft ? setLeftData : setRightData;
-        setter(prev => {
-          const next = [...prev, { time: prev.length, value: avgPressure }];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
-
-        if (bodyCanvasRef.current) {
-          try {
-            const mapped = isLeft ? mapLeftHand(sensorData) : mapRightHand(sensorData);
-            bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-            setHeatmapVersion(v => v + 1);
-          } catch (e) {
-            console.error('[Sim] heatmap error:', e);
-            addSimLog(`热力图更新错误: ${e.message}`, 'error');
-          }
-        }
-
-        // 每10帧输出一次模拟日志
-        if (frameRef.current % 10 === 0) {
-          const max = Math.max(...sensorData);
-          const nonZero = sensorData.filter(v => v > 0).length;
-          addSimLog(`模拟帧 #${frameRef.current}: avg=${avgPressure.toFixed(1)}, max=${max}, nonZero=${nonZero}/256`, 'data');
-        }
-      }, 100);
-    } else if (isBackendMode) {
-      // 后端模式：调用后端API开始采集，数据通过WebSocket自动流入
-      addSimLog(`后端模式开始采集 ${isLeft ? '左手' : '右手'}`, 'info');
-      backendBridge.startCol({
-        name: patientInfo?.name || 'test',
-        assessmentId: `grip_${Date.now()}`,
-        sampleType: isLeft ? 'grip_left' : 'grip_right',
-        date: new Date().toISOString(),
-        colName: isLeft ? '左手握力' : '右手握力',
-      }).then(() => {
-        addSimLog('后端采集已启动', 'info');
-      }).catch(e => {
-        addSimLog(`后端采集启动失败: ${e.message}`, 'error');
+    try {
+      await backendBridge.setActiveMode(isLeft ? 11 : 12); // 11=左手, 12=右手
+      await backendBridge.startCol({
+        name: patientInfo?.name || '未知',
+        assessmentId: assessmentIdRef.current,
+        date: new Date().toISOString().split('T')[0],
+        colName: isLeft ? 'grip_left' : 'grip_right',
       });
-      timerRef.current = setInterval(() => {
-        setTimer(p => p + 1);
-      }, 100);
-    } else {
-      // 真实设备模式：数据通过串口回调自动流入，只需要计时器
-      timerRef.current = setInterval(() => {
-        setTimer(p => p + 1);
-      }, 100);
+    } catch (e) {
+      console.error('后端采集启动失败:', e);
     }
+
+    timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
   };
 
+  // ─── 结束采集 ───
   const stopRecording = () => {
     clearInterval(timerRef.current);
     timerRef.current = null;
-    isRecordingRef.current = false;
-
-    // 后端模式：调用后端API结束采集
-    if (isBackendMode) {
-      backendBridge.endCol().then(() => {
-        addSimLog('后端采集已结束', 'info');
-      }).catch(e => {
-        addSimLog(`后端采集结束失败: ${e.message}`, 'error');
-      });
-    }
 
     if (phase === 'left-recording') {
+      backendBridge.endCol().catch(e => console.error('结束左手采集失败:', e));
+      // 切换到右手模式，让后端开始推送右手数据（这样 right-idle 阶段就能看到热力图预览）
+      backendBridge.setActiveMode(12).catch(e => console.error('切换右手模式失败:', e));
       setShowLeftToast(true);
       setTimeout(() => setShowLeftToast(false), 3000);
       setPhase('right-idle');
       setTimer(0);
     } else {
       setPhase('processing');
-      // 生成报告数据
-      setTimeout(() => {
+      (async () => {
         try {
-          const report = generateGripReportData(
-            leftFullDataRef.current, rightFullDataRef.current,
-            leftRawFramesRef.current, rightRawFramesRef.current,
-            patientInfo?.name || ''
-          );
-          console.log('[GripAssessment] 报告数据已生成:', report);
-          setGripReportData(report);
+          await backendBridge.endCol();
+          await backendBridge.setActiveMode(1); // 恢复双手模式
+          await new Promise(r => setTimeout(r, 500));
+          const resp = await backendBridge.getGripReport({
+            timestamp: new Date().toISOString(),
+            collectName: 'grip_assessment',
+            leftAssessmentId: assessmentIdRef.current,
+            rightAssessmentId: assessmentIdRef.current,
+          });
+          if (resp?.data?.render_data) {
+            setPythonResult(resp.data.render_data);
+          }
         } catch (e) {
-          console.error('[GripAssessment] 报告生成失败:', e);
+          console.error('后端报告生成失败:', e);
         }
         setShowCompleteDialog(true);
-      }, 2000);
+      })();
     }
   };
 
@@ -603,17 +310,109 @@ export default function GripAssessment() {
     setShowCompleteDialog(false);
     setPhase('report');
     setReportMode('static');
-    completeAssessment('grip', { completed: true }, { leftData, rightData });
+    completeAssessment('grip', { completed: true, reportData: pythonResult }, { leftData, rightData });
   };
 
-  const handleClose = () => {
-    // 断开串口
-    if (gloveService.connected) {
-      gloveService.disconnect();
+  // ─── 后端模式：监听 BackendBridge 数据 ───
+  useEffect(() => {
+    if (!isGlobalConnected) return;
+
+    // 页面加载时根据当前 phase 设置 activeMode，让 idle 阶段就能预览数据
+    const initPhase = phaseRef.current;
+    if (initPhase.startsWith('left-')) {
+      backendBridge.setActiveMode(11).catch(() => {});
+    } else if (initPhase.startsWith('right-')) {
+      backendBridge.setActiveMode(12).catch(() => {});
     }
-    navigate('/dashboard');
+
+    const handleLeftHand = (arr256) => {
+      const p = phaseRef.current;
+      if (!p.startsWith('left-')) return;
+      // 节流：限制 UI 更新频率
+      const now = Date.now();
+      if (now - lastFrameTimeRef.current < THROTTLE_MS) return;
+      lastFrameTimeRef.current = now;
+
+      const totalPressure = arr256.reduce((a, b) => a + b, 0);
+      const avgPressure = totalPressure / arr256.length;
+      setPressure(avgPressure);
+      // idle 阶段只更新热力图预览，recording 阶段才累积折线图数据
+      if (p === 'left-recording') {
+        setLeftData(prev => {
+          const next = [...prev, { time: prev.length, value: avgPressure }];
+          return next.length > 200 ? next.slice(-200) : next;
+        });
+      }
+      if (bodyCanvasRef.current) {
+        try {
+          const mapped = mapLeftHand(arr256);
+          bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
+          setHeatmapVersion(v => v + 1);
+        } catch (e) { /* ignore */ }
+      }
+    };
+
+    const handleRightHand = (arr256) => {
+      const p = phaseRef.current;
+      // 右手 idle 和 recording 阶段都接收数据（idle 阶段显示实时预览）
+      if (!p.startsWith('right-')) return;
+      // 节流
+      const now = Date.now();
+      if (now - lastFrameTimeRef.current < THROTTLE_MS) return;
+      lastFrameTimeRef.current = now;
+
+      const totalPressure = arr256.reduce((a, b) => a + b, 0);
+      const avgPressure = totalPressure / arr256.length;
+      setPressure(avgPressure);
+      // idle 阶段只更新热力图预览，不累积折线图数据
+      if (p === 'right-recording') {
+        setRightData(prev => {
+          const next = [...prev, { time: prev.length, value: avgPressure }];
+          return next.length > 200 ? next.slice(-200) : next;
+        });
+      }
+      if (bodyCanvasRef.current) {
+        try {
+          const mapped = mapRightHand(arr256);
+          bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
+          setHeatmapVersion(v => v + 1);
+        } catch (e) { /* ignore */ }
+      }
+    };
+
+    backendBridge.on('leftHandData', handleLeftHand);
+    backendBridge.on('rightHandData', handleRightHand);
+
+    backendCleanupRef.current = () => {
+      backendBridge.off('leftHandData', handleLeftHand);
+      backendBridge.off('rightHandData', handleRightHand);
+    };
+
+    return () => {
+      if (backendCleanupRef.current) backendCleanupRef.current();
+    };
+  }, [isGlobalConnected]);
+
+  // ─── CSV 导出（后端导出） ───
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: 'grip' });
+      if (resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = resp.data.fileName;
+        a.click();
+      }
+    } catch (e) {
+      console.error('CSV导出失败:', e);
+    } finally {
+      setCsvExporting(false);
+    }
   };
 
+  const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => {
     const s = Math.floor(t / 10);
     return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -621,16 +420,7 @@ export default function GripAssessment() {
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    // 组件卸载时断开串口（仅串口直连模式）
-    if (gloveService.connected) {
-      gloveService.disconnect();
-    }
-    // 清理事件监听（不断开全局 WebSocket）
-    if (backendCleanupRef.current) {
-      backendCleanupRef.current();
-      backendCleanupRef.current = null;
-    }
-    // 不再调用 backendBridge.disconnect()，保持全局连接
+    if (backendCleanupRef.current) backendCleanupRef.current();
   }, []);
 
   /* ─── 报告模式 ─── */
@@ -651,25 +441,15 @@ export default function GripAssessment() {
               <StepIndicator current={2} steps={['左手', '右手', '完成']} />
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '未知'}</span>
               <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{institution || ''}</span>
-              <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs">历史记录</button>
+              <button onClick={() => setReportMode('static')} className="zeiss-btn-secondary flex items-center gap-2 text-xs py-2 px-4">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                切换静态报告
+              </button>
             </div>
           </header>
           <main className="flex-1 flex flex-col items-center justify-center p-6 z-10">
             <div className="zeiss-card p-6 flex flex-col items-center gap-4 max-w-4xl w-full">
-              <div className="flex items-center justify-between w-full">
-                <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}的握力评估动态报告</h2>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setReportMode('static')}
-                    className="zeiss-btn-secondary flex items-center gap-2 text-xs py-2 px-4">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    切换静态报告
-                  </button>
-                  <button onClick={handleClose} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
-                    style={{ color: 'var(--text-muted)' }}>
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-              </div>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}的握力评估动态报告</h2>
               <video ref={videoRef} src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
             </div>
           </main>
@@ -701,34 +481,19 @@ export default function GripAssessment() {
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               {reportMode === 'static' ? '动态报告' : '静态报告'}
             </button>
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="zeiss-btn-secondary text-xs py-2 px-4">
+              {csvExporting ? '导出中...' : '保存CSV'}
+            </button>
             <button onClick={handleClose} className="zeiss-btn-primary text-xs py-2 px-4">返回首页</button>
           </div>
         </header>
         <main className="flex-1 min-h-0 z-10">
-          <GripReport patientName={patientInfo?.name || '未知'} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} reportData={gripReportData} />
+          <GripReport patientName={patientInfo?.name || '未知'} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} pythonResult={pythonResult} />
         </main>
       </div>
     );
   }
-
-  /* ─── 设备连接状态文本 ─── */
-  const getDeviceStatusText = () => {
-    if (isBackendMode) return '后端模式';
-    if (isSimulating) return '模拟模式';
-    if (leftGloveConnected && rightGloveConnected) return '左右手已连接';
-    if (leftGloveConnected) return '左手已连接';
-    if (rightGloveConnected) return '右手已连接';
-    if (gloveService.connected) return '等待数据...';
-    return '未连接';
-  };
-
-  const getDeviceStatusColor = () => {
-    if (isBackendMode) return '#7C3AED';
-    if (isSimulating) return '#0891B2';
-    if (leftGloveConnected || rightGloveConnected) return 'var(--success)';
-    if (gloveService.connected) return '#F59E0B';
-    return 'var(--text-muted)';
-  };
 
   /* ─── 采集模式 — 左侧数据面板 + 右侧3D手模型 ─── */
   return (
@@ -750,40 +515,12 @@ export default function GripAssessment() {
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
           <StepIndicator current={stepIndex} steps={['左手', '右手', '完成']} />
 
-          {/* 设备状态区域 */}
+          {/* 设备状态（只显示全局连接状态） */}
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-            <div className="w-2 h-2 rounded-full" style={{ background: getDeviceStatusColor() }} />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{getDeviceStatusText()}</span>
-
-            {/* 未连接时显示连接和模拟按钮 */}
-            {deviceStatus === 'disconnected' && (
-              <>
-                <button onClick={handleConnectGlove} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)', background: 'none', border: 'none', cursor: 'pointer' }}>连接手套</button>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: '#0891B2', background: 'none', border: 'none', cursor: 'pointer' }}>模拟</button>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <button onClick={handleBackendConnect} className="text-xs font-medium" style={{ color: '#7C3AED', background: 'none', border: 'none', cursor: 'pointer' }}>后端</button>
-              </>
-            )}
-
-            {/* 已连接但只有一只手时，可以继续连接另一只 */}
-            {!isSimulating && gloveService.connected && !(leftGloveConnected && rightGloveConnected) && (
-              <>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <span className="text-[10px]" style={{ color: '#F59E0B' }}>
-                  {!leftGloveConnected && '等待左手数据'}
-                  {!rightGloveConnected && leftGloveConnected && '等待右手数据'}
-                </span>
-              </>
-            )}
-
-            {/* 已连接时显示断开按钮 */}
-            {deviceStatus === 'connected' && (
-              <>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <button onClick={handleDisconnect} className="text-xs font-medium" style={{ color: '#DC2626', background: 'none', border: 'none', cursor: 'pointer' }}>断开</button>
-              </>
-            )}
+            <div className={`zeiss-status-dot ${isGlobalConnected ? 'connected' : 'disconnected'}`} />
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {isGlobalConnected ? '已连接' : '未连接'}
+            </span>
           </div>
 
           <span className="text-sm font-medium hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '未知'}</span>
@@ -808,16 +545,21 @@ export default function GripAssessment() {
       {showCompleteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
           <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-scaleIn">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" style={{ color: 'var(--success)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: pythonResult ? 'var(--success-light)' : '#FEF3C7' }}>
+              {pythonResult ? (
+                <svg className="w-7 h-7" style={{ color: 'var(--success)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              ) : (
+                <svg className="w-7 h-7" fill="none" stroke="#D97706" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+              )}
             </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : '采集完成'}</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : '报告生成失败，请返回首页重试'}</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('grip', { completed: true }, { leftData, rightData }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('grip', { completed: true, reportData: pythonResult }, { leftData, rightData }); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport}
-                className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              {pythonResult && (
+                <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              )}
             </div>
           </div>
         </div>
@@ -851,7 +593,7 @@ export default function GripAssessment() {
           {/* 控制按钮 */}
           {phase !== 'processing' && (
             <div className="absolute bottom-10 z-20 flex flex-col items-center gap-3">
-              {phase.includes('idle') && deviceStatus === 'connected' && (
+              {phase.includes('idle') && isGlobalConnected && (
                 <>
                   <button onClick={startRecording}
                     className="w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-transform"
@@ -861,22 +603,10 @@ export default function GripAssessment() {
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集{phase === 'left-idle' ? '左手' : '右手'}</span>
                 </>
               )}
-              {phase.includes('idle') && deviceStatus !== 'connected' && (
-                <div className="flex flex-col items-center gap-3">
-                  <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
-                    请先连接传感器
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button onClick={handleConnectGlove}
-                      className="zeiss-btn-secondary text-[11px] py-1.5 px-3">连接手套</button>
-                    <button onClick={handleSimulate}
-                      className="text-[11px] py-1.5 px-3 rounded-lg font-medium"
-                      style={{ color: '#0891B2', background: 'rgba(8,145,178,0.08)', border: '1px solid rgba(8,145,178,0.2)' }}>模拟</button>
-                    <button onClick={handleBackendConnect}
-                      className="text-[11px] py-1.5 px-3 rounded-lg font-medium"
-                      style={{ color: '#7C3AED', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>后端</button>
-                  </div>
-                </div>
+              {phase.includes('idle') && !isGlobalConnected && (
+                <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
+                  请先在首页连接设备
+                </span>
               )}
               {phase.includes('recording') && (
                 <>
@@ -896,24 +626,9 @@ export default function GripAssessment() {
         </div>
       </main>
 
-      <div className="h-6 flex items-center justify-between px-6 shrink-0 z-10">
+      <div className="h-6 flex items-center px-6 shrink-0 z-10">
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
-        <button
-          onClick={() => setShowDebugPanel(v => !v)}
-          className="text-[10px] px-2 py-0.5 rounded"
-          style={{
-            color: showDebugPanel ? '#60A5FA' : 'var(--text-muted)',
-            background: showDebugPanel ? 'rgba(96,165,250,0.1)' : 'transparent',
-            border: '1px solid ' + (showDebugPanel ? 'rgba(96,165,250,0.3)' : 'transparent'),
-            cursor: 'pointer'
-          }}
-        >
-          {showDebugPanel ? '隐藏调试' : '调试面板'} (Ctrl+D)
-        </button>
       </div>
-
-      {/* 串口调试面板 */}
-      <SerialLogPanel visible={showDebugPanel} onToggle={() => setShowDebugPanel(v => !v)} simulationLogs={simLogs} />
     </div>
   );
 }

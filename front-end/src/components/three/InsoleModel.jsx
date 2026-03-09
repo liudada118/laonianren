@@ -212,7 +212,7 @@ export default function InsoleModel({ showHeatmap = true, enableClipping = false
         for (let c = 0; c < width; c++) {
           let val = 0;
           if (inputRows === 64 && inputCols === 64) {
-            val = matrix[height - 1 - r]?.[c] || 0;
+            val = matrix[height - 1 - r]?.[width - 1 - c] || 0;
           } else if (inputRows === 32 && inputCols === 32) {
             const srcR = (height - 1 - r) * 31 / 63;
             const srcC = c * 31 / 63;

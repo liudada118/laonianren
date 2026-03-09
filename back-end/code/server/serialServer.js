@@ -9,12 +9,13 @@ const WebSocket = require("ws");
 const HttpResult = require('./HttpResult')
 const { SerialPort, DelimiterParser } = require('serialport')
 const { getPort } = require('../util/serialport')
-const { blue, splitArr } = require('../util/config');
+const { splitArr, BAUD_DEVICE_MAP } = require('../util/config');
 const constantObj = require('../util/config');
 const { bytes4ToInt10 } = require('../util/parseData');
 const { initDb, dbLoadCsv, deleteDbData, dbGetData, getCsvData, changeDbName, changeDbDataName } = require('../util/db');
-const { hand, jqbed, endiSit, endiBack } = require('../util/line');
-const { callPy } = require('../pyWorker');
+const { hand } = require('../util/line');
+// const { callPy } = require('../pyWorker');  // [已迁移到JS算法] Python子进程不再需要
+const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
 const { default: axios } = require('axios');
 const module2 = require('../util/aes_ecb')
@@ -359,9 +360,8 @@ const ORIGIN = 'https://sensor.bodyta.com';
 
 
 app.use(cors());
-app.use(express.json());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
 // serial.txt cache
 const serialPath = (() => {
@@ -457,12 +457,30 @@ let linkIngPort = [], currentDb, macInfo = {}, selectArr = []
 let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
+
+// 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
+const glovePacket1Cache = {}
+
+/**
+ * 校验四元数合法性（参考 serial_parser_two.py 的 quaternion 属性）
+ * @param {number[]} q - [w, x, y, z]
+ * @returns {number[]|null} - 合法返回 q，否则返回 null
+ */
+function validateQuaternion(q) {
+  if (!q || !Array.isArray(q) || q.length !== 4) return null
+  if (q.some(v => !Number.isFinite(v))) return null
+  const mag = Math.sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3])
+  if (mag < 0.5 || mag > 2.0) return null
+  return q
+}
 let currentSendIntervalMs = null
 const DEFAULT_SEND_MS = 80
 const MIN_SEND_INTERVAL_MS = 5
 const HZ_CACHE_UPDATE_MS = 500
 const MODE_TYPE_MAP = {
-  1: ['HL', 'HR'],
+  1: ['HL', 'HR'],      // 握力评估页面进入时：推送双手数据（用于显示连接状态）
+  11: ['HL'],            // 握力评估-左手采集：只推送左手数据
+  12: ['HR'],            // 握力评估-右手采集：只推送右手数据
   2: ['HL', 'HR'],
   3: ['sit', 'foot1'],
   4: ['foot1'],
@@ -572,22 +590,44 @@ function getActiveSendIntervalMs() {
   return min
 }
 
+let _updateTimerDebounce = null
+let _lastTimerUpdateTs = 0
+const TIMER_DEBOUNCE_MS = 500      // 防抖间隔：500ms内不重复触发
+const TIMER_THRESHOLD_MS = 10      // 间隔变化阈值：变化<10ms不重建定时器
+
 function updateSendTimerForActiveTypes() {
+  // 如果定时器还没启动，立即执行一次
+  if (!playtimer) {
+    _doUpdateSendTimer()
+    _lastTimerUpdateTs = Date.now()
+    return
+  }
+  // 防抖：避免每帧数据到达都重建定时器
+  if (_updateTimerDebounce) return
+  const now = Date.now()
+  // 如果距离上次更新不到 TIMER_DEBOUNCE_MS，跳过
+  if (now - _lastTimerUpdateTs < TIMER_DEBOUNCE_MS) return
+  _updateTimerDebounce = setTimeout(() => {
+    _updateTimerDebounce = null
+    _lastTimerUpdateTs = Date.now()
+    _doUpdateSendTimer()
+  }, TIMER_DEBOUNCE_MS)
+}
+
+function _doUpdateSendTimer() {
   const interval = getActiveSendIntervalMs()
-  console.log('[DEBUG] updateSendTimer: interval=', interval, 'activeSendTypes=', activeSendTypes, 'dataMap keys=', Object.keys(dataMap), 'parserArr keys=', Object.keys(parserArr))
-  // Log HZ values for each device in dataMap
-  Object.keys(dataMap).forEach(k => { console.log('[DEBUG] dataMap[' + k + '] type=', dataMap[k]?.type, 'HZ=', dataMap[k]?.HZ, 'stamp=', dataMap[k]?.stamp) })
   if (!activeSendTypes || !Array.isArray(activeSendTypes) || !activeSendTypes.length) return
   const ms = Math.max(MIN_SEND_INTERVAL_MS, Math.floor(interval ?? DEFAULT_SEND_MS))
-  if (currentSendIntervalMs === ms && playtimer) return
+  // 如果定时器已运行且间隔变化小于阈值，不重建
+  if (playtimer && currentSendIntervalMs !== null && Math.abs(ms - currentSendIntervalMs) < TIMER_THRESHOLD_MS) return
   if (playtimer) {
     clearInterval(playtimer)
   }
-  // console.log('[hz] current interval', ms, 'activeTypes', activeSendTypes, 'cache', sensorHzCache)
   currentSendIntervalMs = ms
   playtimer = setInterval(() => {
     colAndSendData()
   }, ms)
+  // console.log('[timer] send interval updated to', ms, 'ms')
 }
 
 function resetSendTimer() {
@@ -617,8 +657,10 @@ function applyActiveMode(mode) {
   const modeNum = parseInt(mode, 10)
   const types = MODE_TYPE_MAP[modeNum]
   if (!types) return null
-  setActiveSendTypes(types, String(modeNum))
-  return { activeTypes: types, sampleType: String(modeNum) }
+  // mode 11/12 是握力评估的左/右手子模式，sampleType 仍用 '1'
+  const sampleType = (modeNum === 11 || modeNum === 12) ? '1' : String(modeNum)
+  setActiveSendTypes(types, sampleType)
+  return { activeTypes: types, sampleType }
 }
 
 const BAUD_CANDIDATES = [921600, 1000000, 3000000]
@@ -846,7 +888,8 @@ app.post('/uploadCanvas', upload.single('file'), async (req, res) => {
     const absolutePath = path.resolve(req.file.path)
     const name = `${pdfPath}/${baseName}`
     console.log(pdfArrData[0], name, `${imgPath}/${baseName}.png`)
-    const pdf = await callPy('generate_foot_pressure_report', {
+    // [已迁移] PDF生成功能待后续用JS实现，目前跳过
+    const pdf = await callAlgorithm('generate_foot_pressure_report', {
       data_array: pdfArrData,
       name: name,
       heatmap_png_path: `${imgPath}/${baseName}.png`,
@@ -872,61 +915,162 @@ app.post('/getHandPdf' , async (req , res) => {
       req.query?.date ??
       ''
 
-    const { assessmentId, matchedDate, matchedTimestamp, tsNum } =
-      await resolveAssessmentContext(currentDb, req, rawTimestamp)
+    // 新方式：前端传入 leftAssessmentId 和 rightAssessmentId，分别查询左右手数据
+    const leftAssessmentId = normalizeAssessmentId(req.body?.leftAssessmentId)
+    const rightAssessmentId = normalizeAssessmentId(req.body?.rightAssessmentId)
 
-    if (!assessmentId) {
-      res.json(new HttpResult(1, {}, 'missing assessment_id'))
-      return
+    let leftArr = null
+    let rightArr = null
+    let leftImuArr = null
+    let rightImuArr = null
+    let bestRow = null
+    let matchedDate = null
+    let matchedTimestamp = null
+    let tsNum = Number(rawTimestamp)
+
+    if (leftAssessmentId || rightAssessmentId) {
+      // ===== 新逻辑：分别从两个 assessmentId 中提取 HL / HR 数据 =====
+      console.log('[getHandPdf] 使用分离模式: leftId=%s, rightId=%s', leftAssessmentId, rightAssessmentId)
+
+      if (leftAssessmentId) {
+        const { dataArr: leftDataArr, rotateArr: leftRotateArr, rows: leftRows } = await dbGetData({
+          db: currentDb,
+          params: [leftAssessmentId],
+          byAssessmentId: true
+        })
+        if (leftRows && leftRows.length) {
+          const leftKeys = Object.keys(leftDataArr || {})
+          console.log('[getHandPdf] 左手assessmentId=%s, rows=%d, keys=%s', leftAssessmentId, leftRows.length, JSON.stringify(leftKeys))
+          leftKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (leftDataArr[k] || []).length))
+          const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
+          leftArr = lk ? leftDataArr[lk] : null
+          leftImuArr = lk && leftRotateArr ? leftRotateArr[lk] : null
+          // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
+          if (!leftArr && leftKeys.length > 0) {
+            leftArr = leftDataArr[leftKeys[0]]
+            leftImuArr = leftRotateArr ? leftRotateArr[leftKeys[0]] : null
+          }
+          if (!bestRow) bestRow = leftRows[0]
+          console.log('[getHandPdf] 左手最终: key=%s, frames=%d, imuFrames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0, leftImuArr ? leftImuArr.length : 0)
+        }
+      }
+
+      if (rightAssessmentId) {
+        const { dataArr: rightDataArr, rotateArr: rightRotateArr, rows: rightRows } = await dbGetData({
+          db: currentDb,
+          params: [rightAssessmentId],
+          byAssessmentId: true
+        })
+        if (rightRows && rightRows.length) {
+          const rightKeys = Object.keys(rightDataArr || {})
+          console.log('[getHandPdf] 右手assessmentId=%s, rows=%d, keys=%s', rightAssessmentId, rightRows.length, JSON.stringify(rightKeys))
+          rightKeys.forEach(k => console.log('[getHandPdf]   key=%s frames=%d', k, (rightDataArr[k] || []).length))
+          const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
+          rightArr = rk ? rightDataArr[rk] : null
+          rightImuArr = rk && rightRotateArr ? rightRotateArr[rk] : null
+          // 如果 HR 没找到，尝试取第一个可用的数据
+          if (!rightArr && rightKeys.length > 0) {
+            rightArr = rightDataArr[rightKeys[0]]
+            rightImuArr = rightRotateArr ? rightRotateArr[rightKeys[0]] : null
+          }
+          if (!bestRow) bestRow = rightRows[0]
+          console.log('[getHandPdf] 右手最终: key=%s, frames=%d, imuFrames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0, rightImuArr ? rightImuArr.length : 0)
+        }
+      }
+
+      matchedDate = bestRow?.date || null
+      matchedTimestamp = bestRow?.timestamp || null
+    } else {
+      // ===== 旧逻辑兼容：使用单个 assessmentId 或 timestamp 查询 =====
+      const resolved = await resolveAssessmentContext(currentDb, req, rawTimestamp)
+      const assessmentId = resolved.assessmentId
+      matchedDate = resolved.matchedDate
+      matchedTimestamp = resolved.matchedTimestamp
+      tsNum = resolved.tsNum || tsNum
+
+      if (!assessmentId) {
+        res.json(new HttpResult(1, {}, 'missing assessment_id'))
+        return
+      }
+
+      const { dataArr, rotateArr, rows } = await dbGetData({
+        db: currentDb,
+        params: [assessmentId],
+        byAssessmentId: true
+      })
+
+      if (!rows || !rows.length) {
+        res.json(new HttpResult(1, {}, 'no data for assessment_id'))
+        return
+      }
+
+      const targetTs = Number(matchedTimestamp ?? tsNum)
+      bestRow = Array.isArray(rows) && rows.length
+        ? rows.reduce((best, row) => {
+            const t = Number(row?.timestamp)
+            if (!Number.isFinite(t)) return best
+            if (!best) return row
+            const bestT = Number(best?.timestamp)
+            if (!Number.isFinite(bestT)) return row
+            return Math.abs(t - targetTs) < Math.abs(bestT - targetTs) ? row : best
+          }, null)
+        : null
+      const keys = Object.keys(dataArr || {})
+      const leftKey = keys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
+      const rightKey = keys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
+
+      leftArr = leftKey ? dataArr[leftKey] : null
+      rightArr = rightKey ? dataArr[rightKey] : null
+      leftImuArr = leftKey && rotateArr ? rotateArr[leftKey] : null
+      rightImuArr = rightKey && rotateArr ? rotateArr[rightKey] : null
     }
-
-    const { dataArr, rows } = await dbGetData({
-      db: currentDb,
-      params: [assessmentId],
-      byAssessmentId: true
-    })
-
-    if (!rows || !rows.length) {
-      res.json(new HttpResult(1, {}, 'no data for assessment_id'))
-      return
-    }
-
-    const targetTs = Number(matchedTimestamp ?? tsNum)
-    const bestRow = Array.isArray(rows) && rows.length
-      ? rows.reduce((best, row) => {
-          const t = Number(row?.timestamp)
-          if (!Number.isFinite(t)) return best
-          if (!best) return row
-          const bestT = Number(best?.timestamp)
-          if (!Number.isFinite(bestT)) return row
-          return Math.abs(t - targetTs) < Math.abs(bestT - targetTs) ? row : best
-        }, null)
-      : null
-    const keys = Object.keys(dataArr || {})
-    const leftKey = keys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
-    const rightKey = keys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
-
-    const leftArr = leftKey ? dataArr[leftKey] : null
-    const rightArr = rightKey ? dataArr[rightKey] : null
 
     if (!leftArr && !rightArr) {
-      res.json(new HttpResult(1, { keys }, 'no hand data'))
+      res.json(new HttpResult(1, {}, 'no hand data'))
       return
+    }
+
+    // 清洗 IMU 数据：null 项替换为单位四元数 [1,0,0,0]，确保长度与 sensor_data 一致
+    function cleanImuData(imuArr, sensorArr) {
+      if (!imuArr || !sensorArr || imuArr.length !== sensorArr.length) return null
+      // 检查是否有任何有效 IMU 数据
+      const hasAnyImu = imuArr.some(q => q !== null && Array.isArray(q))
+      if (!hasAnyImu) return null
+      return imuArr.map(q => (q !== null && Array.isArray(q)) ? q : [1, 0, 0, 0])
+    }
+
+    const leftImuCleaned = cleanImuData(leftImuArr, leftArr)
+    const rightImuCleaned = cleanImuData(rightImuArr, rightArr)
+    console.log('[getHandPdf] IMU诊断: leftArr=%d, leftImuArr=%d, leftImuCleaned=%s, rightArr=%d, rightImuArr=%d, rightImuCleaned=%s',
+      leftArr ? leftArr.length : 0,
+      leftImuArr ? leftImuArr.length : 0,
+      leftImuCleaned ? `有效(${leftImuCleaned.length}帧)` : 'null',
+      rightArr ? rightArr.length : 0,
+      rightImuArr ? rightImuArr.length : 0,
+      rightImuCleaned ? `有效(${rightImuCleaned.length}帧)` : 'null'
+    )
+    // 如果有 IMU 数据，打印第一帧样本
+    if (leftImuArr && leftImuArr.length > 0) {
+      const firstValid = leftImuArr.find(q => q !== null)
+      console.log('[getHandPdf] 左手IMU样本: first=%s, nullCount=%d/%d',
+        JSON.stringify(firstValid), leftImuArr.filter(q => q === null).length, leftImuArr.length)
     }
 
     let leftRenderResult = null
     let rightRenderResult = null
     try {
       leftRenderResult = leftArr
-        ? await callPy('generate_grip_render_report', {
+        ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: leftArr,
-            hand_type: '\u5de6\u624b',
+            hand_type: '左手',
+            imu_data: leftImuCleaned,
           })
         : null
       rightRenderResult = rightArr
-        ? await callPy('generate_grip_render_report', {
+        ? await callAlgorithm('generate_grip_render_report', {
             sensor_data: rightArr,
-            hand_type: '\u53f3\u624b',
+            hand_type: '右手',
+            imu_data: rightImuCleaned,
           })
         : null
     } catch (e) {
@@ -1085,7 +1229,7 @@ app.post('/getSitAndFootPdf', async (req, res) => {
 
     let renderData = null
     try {
-      renderData = await callPy('generate_sit_stand_render_report', {
+      renderData = await callAlgorithm('generate_sit_stand_render_report', {
         stand_data: standData,
         sit_data: sitData,
         username: resolvedName || req.body?.collectName || req.body?.userName || 'user',
@@ -1242,21 +1386,32 @@ app.post('/getFootPdf', async (req, res) => {
       t3: t3.length,
       t4: t4.length
     })
+
     let renderData = null
+
+    // 调用 Python 步道算法（包含完整的去噪、对齐、分析和图片生成）
     try {
-      renderData = await callPy('generate_gait_render_report', {
-        d1: data1,
-        d2: data2,
-        d3: data3,
-        d4: data4,
-        t1,
-        t2,
-        t3,
-        t4,
-        body_weight_kg: bodyWeightKg,
+      // 将 4 路数据转换为 Python 算法需要的格式
+      // board_data: 每块板的数据是 "[v0,v1,...,v4095]" 格式的字符串数组
+      const boardData = [
+        data1.map(arr => JSON.stringify(arr)),
+        data2.map(arr => JSON.stringify(arr)),
+        data3.map(arr => JSON.stringify(arr)),
+        data4.map(arr => JSON.stringify(arr)),
+      ]
+      const boardTimes = [t1, t2, t3, t4]
+
+      console.log('[getFootPdf] 调用 Python 步道算法...')
+      renderData = await callAlgorithm('generate_gait_render_report', {
+        board_data: boardData,
+        board_times: boardTimes,
       })
+
+      if (renderData) {
+        console.log('[getFootPdf] Python 步道算法成功')
+      }
     } catch (e) {
-      console.error('generate_gait_render_report failed:', e)
+      console.error('[getFootPdf] Python 步道算法失败:', e.message)
     }
 
     res.json(
@@ -1299,11 +1454,9 @@ app.post('/selectSystem', (req, res) => {
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
-  if (blue.includes(file)) {
-    baudRate = 921600
-  } else {
-    baudRate = 1000000
-  }
+  ensureHistoryTable(currentDb)
+  // 波特率由 detectBaudRate 自动探测，默认保持 1000000
+  baudRate = 1000000
 })
 
 // 鏌ヨ绯荤粺鍒楄〃鍜屽綋鍓嶇郴缁?
@@ -1317,13 +1470,15 @@ app.get('/getSystem', async (req, res) => {
   //   value: "bed",
   //   typeArr: ["bed", "hand", 'foot', 'bigHand']
   // }
-  baudRate = constantObj.baudRateObj[result.value] ? constantObj.baudRateObj[result.value] : 1000000
+  // 波特率由 detectBaudRate 自动探测
+  baudRate = 1000000
 
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
+  ensureHistoryTable(currentDb)
 
-  res.json(new HttpResult(0, result, '鑾峰彇璁惧鍒楄〃鎴愬姛'));
+  res.json(new HttpResult(0, result, '获取设备列表成功'));
 })
 
 // 鏌ヨ涓插彛
@@ -1358,9 +1513,15 @@ app.get('/connPort', async (req, res) => {
 app.post('/startCol', async (req, res) => {
   try {
     const { fileName, select, name, collectName, date } = req.body
+    console.log('[startCol] 收到请求: assessmentId=%s, sampleType=%s, colName=%s, 当前activeSendTypes=%s',
+      req.body?.assessmentId, req.body?.sampleType || req.body?.sample_type, req.body?.colName, JSON.stringify(activeSendTypes))
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assessmentId')) {
       const v = req.body.assessmentId
       activeAssessmentId = v === null || v === undefined || v === '' ? null : String(v)
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'sampleType') || Object.prototype.hasOwnProperty.call(req.body || {}, 'sample_type')) {
+      const v = req.body.sampleType ?? req.body.sample_type
+      activeSampleType = v === null || v === undefined || v === '' ? null : String(v)
     }
     selectArr = select
     if (typeof req.body.fileName === 'string') req.body.fileName = decodeField(req.body.fileName)
@@ -1371,9 +1532,16 @@ app.post('/startCol', async (req, res) => {
 
     const sensorArr = Object.keys(dataMap).map((a) => dataMap[a].type)
 
-    const length = sensorArr.filter((a) => a.includes(file)).length
-    console.log(sensorArr, file, length)
-    if (length > 0) {
+    // 原始逻辑：检查 file 类型是否有对应的在线设备
+    const lengthByFile = sensorArr.filter((a) => a && a.includes(file)).length
+    // 新增逻辑：检查 activeSendTypes 中的类型是否有对应的在线设备
+    const lengthBySendTypes = activeSendTypes && activeSendTypes.length
+      ? sensorArr.filter((a) => a && activeSendTypes.includes(a)).length
+      : 0
+    const canStart = lengthByFile > 0 || lengthBySendTypes > 0
+    console.log('[startCol] sensorArr=%s, file=%s, lengthByFile=%d, activeSendTypes=%s, lengthBySendTypes=%d, canStart=%s',
+      JSON.stringify(sensorArr), file, lengthByFile, JSON.stringify(activeSendTypes), lengthBySendTypes, canStart)
+    if (canStart) {
       colFlag = true
       colName = (req.body.date || req.body.colName || '')
       colPersonName = req.body.fileName || req.body.name || req.body.collectName || ''
@@ -1392,11 +1560,13 @@ app.post('/startCol', async (req, res) => {
 app.post('/setActiveMode', (req, res) => {
   try {
     const { mode } = req.body || {}
+    console.log('[setActiveMode] 收到请求: mode=%s, 当前activeSendTypes=%s', mode, JSON.stringify(activeSendTypes))
     const result = applyActiveMode(mode)
     if (!result) {
       res.json(new HttpResult(1, {}, 'invalid mode'))
       return
     }
+    console.log('[setActiveMode] 切换完成: activeSendTypes=%s, activeSampleType=%s', JSON.stringify(activeSendTypes), activeSampleType)
     res.json(new HttpResult(0, result, 'success'))
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setActiveMode failed'))
@@ -1406,8 +1576,11 @@ app.post('/setActiveMode', (req, res) => {
 
 // 鍋滄閲囬泦
 app.get('/endCol', async (req, res) => {
+  console.log('[endCol] 收到请求: 当前assessmentId=%s', activeAssessmentId)
   colFlag = false
-  res.json(new HttpResult(0, 'success', '鍋滄閲囬泦'));
+  // 停止采集时立即刷入缓冲区剩余数据
+  flushStorageBuffer()
+  res.json(new HttpResult(0, 'success', '偁止采集'));
 })
 
 // 鑾峰彇鏁版嵁搴撴墍鏈夊瓨鍙栧垪琛?
@@ -1497,7 +1670,153 @@ app.post('/downlaod', async (req, res) => {
   }
 })
 
-// 鍒犻櫎鏁版嵁搴撴煇涓枃浠?
+// ─── 导出采集数据为CSV并返回下载链接 ───
+app.post('/exportCsv', async (req, res) => {
+  try {
+    const { assessmentId, sampleType, assessmentIds } = req.body || {}
+
+    // 支持多个 assessmentId（如握力左右手）
+    const ids = Array.isArray(assessmentIds) && assessmentIds.length
+      ? assessmentIds.filter(Boolean)
+      : assessmentId ? [assessmentId] : []
+
+    if (!ids.length) {
+      res.json(new HttpResult(1, {}, 'missing assessmentId'))
+      return
+    }
+
+    // 查询所有匹配的行
+    let allRows = []
+    for (const aid of ids) {
+      const rows = await new Promise((resolve, reject) => {
+        const sql = sampleType
+          ? 'SELECT * FROM matrix WHERE assessment_id=? AND sample_type=?'
+          : 'SELECT * FROM matrix WHERE assessment_id=?'
+        const params = sampleType ? [aid, String(sampleType)] : [aid]
+        currentDb.all(sql, params, (err, data) => {
+          if (err) return reject(err)
+          resolve(data || [])
+        })
+      })
+      allRows = allRows.concat(rows)
+    }
+
+    if (!allRows.length) {
+      res.json(new HttpResult(1, {}, 'no data found'))
+      return
+    }
+
+    // 解析所有行，收集所有数据 key
+    const keySet = new Set()
+    const parsedRows = allRows.map(row => {
+      try {
+        const obj = JSON.parse(row.data || '{}')
+        Object.keys(obj).forEach(k => keySet.add(k))
+        return obj
+      } catch {
+        return {}
+      }
+    })
+    const dataKeys = Array.from(keySet)
+
+    // 构建 CSV 表头
+    const headers = ['timestamp', 'date', 'assessment_id', 'sample_type']
+    dataKeys.forEach(key => {
+      headers.push(`${key}_pressure`, `${key}_area`, `${key}_max`, `${key}_min`, `${key}_avg`, `${key}_data`)
+    })
+
+    // 构建 CSV 行
+    const csvLines = [headers.join(',')]
+    allRows.forEach((row, idx) => {
+      const rowObj = parsedRows[idx] || {}
+      const line = [
+        row.timestamp || '',
+        (row.date || '').replace(/,/g, ' '),
+        (row.assessment_id || '').replace(/,/g, ' '),
+        row.sample_type || '',
+      ]
+      dataKeys.forEach(key => {
+        const item = rowObj[key]
+        const arr = Array.isArray(item) ? item : (item && item.arr ? item.arr : null)
+        if (Array.isArray(arr)) {
+          const pressure = arr.reduce((a, b) => a + b, 0)
+          const area = arr.filter(v => v > 0).length
+          const max = Math.max(...arr)
+          const positives = arr.filter(v => v > 0)
+          const min = positives.length ? Math.min(...positives) : 0
+          const avg = area > 0 ? (pressure / area).toFixed(2) : '0'
+          // 用双引号包裹 data 数组，防止逗号干扰
+          line.push(pressure, area, max, min, avg, `"${JSON.stringify(arr)}"`)
+        } else {
+          line.push('', '', '', '', '', '')
+        }
+      })
+      csvLines.push(line.join(','))
+    })
+
+    const csvContent = csvLines.join('\n')
+
+    // 生成文件名
+    const safeId = ids.join('_').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 80)
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)
+    const fileName = `export_${safeId}_${ts}.csv`
+
+    // 确保 data 目录存在
+    const csvDir = path.join(storageBase, 'data')
+    if (!fs.existsSync(csvDir)) {
+      fs.mkdirSync(csvDir, { recursive: true })
+    }
+    const csvFilePath = path.join(csvDir, fileName)
+    fs.writeFileSync(csvFilePath, '\uFEFF' + csvContent, 'utf-8')  // BOM for Excel
+    console.log('[exportCsv] CSV exported:', csvFilePath, 'rows:', allRows.length)
+
+    res.json(new HttpResult(0, {
+      fileName,
+      filePath: csvFilePath,
+      rowCount: allRows.length,
+      dataKeys,
+    }, 'export success'))
+  } catch (e) {
+    console.error('[exportCsv] failed:', e)
+    res.json(new HttpResult(1, {}, 'exportCsv failed: ' + e.message))
+  }
+})
+
+// ─── CSV 文件下载 ───
+app.get('/downloadCsvFile/:name', (req, res) => {
+  try {
+    const rawName = req.params.name || ''
+    const safeName = rawName.replace(/[\\/]/g, '').replace(/[\x00-\x1F<>:"|?*]/g, '')
+    if (!safeName || !safeName.endsWith('.csv')) {
+      res.status(400).send('Invalid file name')
+      return
+    }
+    const csvDir = path.join(storageBase, 'data')
+    const filePath = path.join(csvDir, safeName)
+    const resolvedPath = path.resolve(filePath)
+    const resolvedBase = path.resolve(csvDir) + path.sep
+    if (!resolvedPath.startsWith(resolvedBase)) {
+      res.status(403).send('Forbidden')
+      return
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      res.status(404).send('File not found')
+      return
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}"`)
+    res.sendFile(resolvedPath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(err.statusCode || 500).send('Download failed')
+      }
+    })
+  } catch (e) {
+    console.error('[downloadCsvFile] failed:', e)
+    if (!res.headersSent) res.status(500).send('Server Error')
+  }
+})
+
+// 鍒犻櫎鏁版嵁搴撴煇涓枃浠??
 app.post('/delete', async (req, res) => {
   try {
     const { fileArr } = req.body
@@ -1558,7 +1877,7 @@ app.post('/getDbHistory', async (req, res) => {
   if (dataArr['foot']) {
     // const peak_frame = await callPy("get_peak_frame", { sensor_data: dataArr['foot'] })
     // console.log(peak_frame)
-    const copData = await callPy("replay_server", { sensor_data: dataArr['foot'] })
+    const copData = await callAlgorithm("replay_server", { sensor_data: dataArr['foot'] })
     copData.length = length
     res.json(new HttpResult(0, copData, 'success'));
     return
@@ -1640,7 +1959,7 @@ app.post('/getDbHeatmap', async (req, res) => {
       pdfArrData = sensor
       let renderData = null
       try {
-        renderData = await callPy('generate_standing_render_report', {
+        renderData = await callAlgorithm('generate_standing_render_report', {
           data_array: sensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
@@ -1791,10 +2110,12 @@ app.post('/changeDbplaySpeed', async (req, res) => {
 app.post('/changeSystemType', async (req, res) => {
   const { system } = req.body
   file = system
-  baudRate = constantObj.baudRateObj[system] ? constantObj.baudRateObj[system] : 1000000
+  // 波特率由 detectBaudRate 自动探测
+  baudRate = 1000000
   const { db } = initDb(file, dbPath)
   currentDb = db
   ensureMatrixNameColumn(currentDb)
+  ensureHistoryTable(currentDb)
   console.log(baudRate)
   // stopPort()
   socketSendData(server, JSON.stringify({ sitData: {} }))
@@ -1945,7 +2266,7 @@ app.post('/getSysconfig', async (req, res) => {
 // 鏌ユ壘pyConfig
 app.get('/getPyConfig', async (req, res) => {
 
-  const obj = await callPy('getParam',)
+  const obj = await callAlgorithm('getParam')
   res.json(new HttpResult(0, obj, 'success'));
 })
 
@@ -1954,7 +2275,7 @@ app.post('/changePy', async (req, res) => {
   let object = {}
   object[path] = JSON.parse(value)
   console.log(object, 'object')
-  const obj = await callPy('setParam', { obj: object })
+  const obj = await callAlgorithm('setParam', { obj: object })
   res.json(new HttpResult(0, obj, 'success'));
 })
 
@@ -1980,13 +2301,332 @@ app.post('/changePy', async (req, res) => {
 
 
 
-app.listen(port, () => {
+// ==================== 历史记录模块 ====================
+
+/**
+ * 确保 assessment_history 表存在
+ */
+function ensureHistoryTable(db) {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS assessment_history (
+      id TEXT PRIMARY KEY,
+      patient_name TEXT,
+      patient_gender TEXT,
+      patient_age INTEGER,
+      patient_weight REAL,
+      institution TEXT,
+      assessments TEXT,
+      date TEXT,
+      date_str TEXT,
+      updated_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `, (err) => {
+    if (err) console.error('[History] 创建 assessment_history 表失败:', err)
+    else console.log('[History] assessment_history 表已就绪')
+  })
+}
+
+// 初始化历史记录表
+ensureHistoryTable(currentDb)
+
+/**
+ * POST /api/history/save
+ * 保存或更新一条评估记录
+ * Body: { patientInfo: { name, gender, age, weight }, institution, assessments: { grip: {...}, ... } }
+ */
+app.post('/api/history/save', (req, res) => {
+  try {
+    const { patientInfo, institution, assessments } = req.body || {}
+    if (!patientInfo || !patientInfo.name) {
+      return res.json(new HttpResult(1, {}, 'missing patientInfo.name'))
+    }
+
+    const now = new Date()
+    const dateStr = formatDateStr(now)
+
+    // 查找今天同一患者的记录
+    currentDb.get(
+      'SELECT * FROM assessment_history WHERE patient_name = ? AND date_str = ?',
+      [patientInfo.name, dateStr],
+      (err, existingRow) => {
+        if (err) {
+          console.error('[History] 查询失败:', err)
+          return res.json(new HttpResult(1, {}, 'database error'))
+        }
+
+        if (existingRow) {
+          // 更新已有记录：合并 assessments
+          let existingAssessments = {}
+          try { existingAssessments = JSON.parse(existingRow.assessments || '{}') } catch {}
+
+          for (const [type, data] of Object.entries(assessments || {})) {
+            if (data && data.completed) {
+              existingAssessments[type] = {
+                completed: true,
+                report: data.report || null,
+                completedAt: now.toISOString(),
+              }
+            }
+          }
+
+          currentDb.run(
+            'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ? WHERE id = ?',
+            [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, existingRow.id],
+            function (err2) {
+              if (err2) {
+                console.error('[History] 更新失败:', err2)
+                return res.json(new HttpResult(1, {}, 'update failed'))
+              }
+              res.json(new HttpResult(0, { id: existingRow.id, updated: true }, 'success'))
+            }
+          )
+        } else {
+          // 创建新记录
+          const id = generateHistoryId()
+          const assessmentData = {}
+          for (const [type, data] of Object.entries(assessments || {})) {
+            assessmentData[type] = {
+              completed: data?.completed || false,
+              report: data?.completed ? (data.report || null) : null,
+              completedAt: data?.completed ? now.toISOString() : null,
+            }
+          }
+
+          currentDb.run(
+            `INSERT INTO assessment_history (id, patient_name, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, patientInfo.name, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
+            function (err2) {
+              if (err2) {
+                console.error('[History] 插入失败:', err2)
+                return res.json(new HttpResult(1, {}, 'insert failed'))
+              }
+              res.json(new HttpResult(0, { id, updated: false }, 'success'))
+            }
+          )
+        }
+      }
+    )
+  } catch (e) {
+    console.error('[History] save error:', e)
+    res.json(new HttpResult(1, {}, 'save failed'))
+  }
+})
+
+/**
+ * POST /api/history/list
+ * 搜索+分页查询历史记录
+ * Body: { keyword, date, page, pageSize }
+ */
+app.post('/api/history/list', (req, res) => {
+  try {
+    const { keyword, date, page = 1, pageSize = 10 } = req.body || {}
+
+    let countSql = 'SELECT COUNT(*) as total FROM assessment_history WHERE 1=1'
+    let dataSql = 'SELECT * FROM assessment_history WHERE 1=1'
+    const params = []
+
+    if (keyword) {
+      const likeClause = ' AND (patient_name LIKE ? OR institution LIKE ?)'
+      countSql += likeClause
+      dataSql += likeClause
+      params.push(`%${keyword}%`, `%${keyword}%`)
+    }
+
+    if (date) {
+      const dateClause = ' AND date_str LIKE ?'
+      countSql += dateClause
+      dataSql += dateClause
+      // 支持 YYYY-MM-DD 或 YYYY/MM/DD 格式
+      const normalizedDate = date.replace(/-/g, '/')
+      params.push(`%${normalizedDate}%`)
+    }
+
+    dataSql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+
+    // 先查总数
+    currentDb.get(countSql, params, (err, countRow) => {
+      if (err) {
+        console.error('[History] count error:', err)
+        return res.json(new HttpResult(1, {}, 'query failed'))
+      }
+
+      const total = countRow?.total || 0
+      const totalPages = Math.ceil(total / pageSize)
+      const offset = (page - 1) * pageSize
+
+      // 再查数据
+      currentDb.all(dataSql, [...params, pageSize, offset], (err2, rows) => {
+        if (err2) {
+          console.error('[History] list error:', err2)
+          return res.json(new HttpResult(1, {}, 'query failed'))
+        }
+
+        const items = (rows || []).map(row => ({
+          id: row.id,
+          patientName: row.patient_name,
+          patientGender: row.patient_gender,
+          patientAge: row.patient_age,
+          patientWeight: row.patient_weight,
+          institution: row.institution,
+          assessments: safeParseJSON(row.assessments),
+          date: row.date,
+          dateStr: row.date_str,
+          updatedAt: row.updated_at,
+        }))
+
+        res.json(new HttpResult(0, { items, total, totalPages, page }, 'success'))
+      })
+    })
+  } catch (e) {
+    console.error('[History] list error:', e)
+    res.json(new HttpResult(1, {}, 'list failed'))
+  }
+})
+
+/**
+ * POST /api/history/get
+ * 获取单条历史记录
+ * Body: { id }
+ */
+app.post('/api/history/get', (req, res) => {
+  try {
+    const { id } = req.body || {}
+    if (!id) {
+      return res.json(new HttpResult(1, {}, 'missing id'))
+    }
+
+    currentDb.get('SELECT * FROM assessment_history WHERE id = ?', [id], (err, row) => {
+      if (err) {
+        console.error('[History] get error:', err)
+        return res.json(new HttpResult(1, {}, 'query failed'))
+      }
+
+      if (!row) {
+        return res.json(new HttpResult(1, {}, 'record not found'))
+      }
+
+      const record = {
+        id: row.id,
+        patientName: row.patient_name,
+        patientGender: row.patient_gender,
+        patientAge: row.patient_age,
+        patientWeight: row.patient_weight,
+        institution: row.institution,
+        assessments: safeParseJSON(row.assessments),
+        date: row.date,
+        dateStr: row.date_str,
+        updatedAt: row.updated_at,
+      }
+
+      res.json(new HttpResult(0, record, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] get error:', e)
+    res.json(new HttpResult(1, {}, 'get failed'))
+  }
+})
+
+/**
+ * POST /api/history/delete
+ * 删除单条历史记录
+ * Body: { id }
+ */
+app.post('/api/history/delete', (req, res) => {
+  try {
+    const { id } = req.body || {}
+    if (!id) {
+      return res.json(new HttpResult(1, {}, 'missing id'))
+    }
+
+    currentDb.run('DELETE FROM assessment_history WHERE id = ?', [id], function (err) {
+      if (err) {
+        console.error('[History] delete error:', err)
+        return res.json(new HttpResult(1, {}, 'delete failed'))
+      }
+      res.json(new HttpResult(0, { deleted: this.changes }, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] delete error:', e)
+    res.json(new HttpResult(1, {}, 'delete failed'))
+  }
+})
+
+/**
+ * POST /api/history/clear
+ * 清空所有历史记录
+ */
+app.post('/api/history/clear', (req, res) => {
+  try {
+    currentDb.run('DELETE FROM assessment_history', function (err) {
+      if (err) {
+        console.error('[History] clear error:', err)
+        return res.json(new HttpResult(1, {}, 'clear failed'))
+      }
+      res.json(new HttpResult(0, { deleted: this.changes }, 'success'))
+    })
+  } catch (e) {
+    console.error('[History] clear error:', e)
+    res.json(new HttpResult(1, {}, 'clear failed'))
+  }
+})
+
+// 工具函数
+function generateHistoryId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
+}
+
+function formatDateStr(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}/${m}/${d}`
+}
+
+function safeParseJSON(str) {
+  try { return JSON.parse(str || '{}') } catch { return {} }
+}
+
+// ==================== 历史记录模块结束 ====================
+
+
+const httpServer = app.listen(port, () => {
   process.send?.({ type: 'ready', port });
   console.log(`Example app listening on port ${port}`)
 })
 
 
 const server = new WebSocket.Server({ port: 19999 });
+
+// 进程退出时清理所有端口和连接
+function cleanupAndExit() {
+  console.log('[cleanup] 正在关闭所有服务...')
+  // 关闭所有串口
+  Object.keys(parserArr).forEach((path) => {
+    const item = parserArr[path]
+    if (item && item.port && item.port.isOpen) {
+      try { item.port.close() } catch (e) { /* ignore */ }
+    }
+  })
+  // 关闭 WebSocket 服务器 (端口 19999)
+  try {
+    server.clients.forEach((ws) => ws.terminate())
+    server.close()
+  } catch (e) { /* ignore */ }
+  // 关闭 Express HTTP 服务器 (端口 19245)
+  try { httpServer.close() } catch (e) { /* ignore */ }
+  // 清除定时器
+  if (playtimer) clearInterval(playtimer)
+  console.log('[cleanup] 清理完成')
+  process.exit(0)
+}
+
+// 监听父进程发送的退出信号
+process.on('SIGTERM', cleanupAndExit)
+process.on('SIGINT', cleanupAndExit)
+// 父进程断开时自动退出（防止孤儿进程）
+process.on('disconnect', cleanupAndExit)
 
 server.on("open", function open() {
   console.log("connected");
@@ -2098,7 +2738,7 @@ const newSerialPortLink = ({ path, parser, baudRate = 1000000 }) => {
  * @param {object} objs 
  * @returns 瑙ｆ瀽钃濈墮鍒嗗寘鏁版嵁
  */
-function parseData(parserArr, objs, type) {
+function parseData(parserArr, objs) {
 
   let json = {}
     Object.keys(objs).forEach((key) => {
@@ -2111,29 +2751,8 @@ function parseData(parserArr, objs, type) {
         return
       }
       if (obj.port.isOpen) {
-      let blueArr = []
-      // console.log(data.type)
-      if (data.type && (data.type == 'HL' || data.type == 'HR')) {
-
-        const { order } = constantObj
-        const lastData = data[order[1]]
-        const nextData = data[order[2]]
-
-        if (lastData && lastData.length && nextData && nextData.length) {
-          blueArr = [...lastData, ...nextData]
-        }
-      }
-      else if (type == 'blue') {
-        const { order } = constantObj
-        const lastData = data[order[1]]
-        const nextData = data[order[2]]
-
-        if (lastData && lastData.length && nextData && nextData.length) {
-          blueArr = [...lastData, ...nextData]
-        }
-      } else if (type == 'highHZ') {
-        blueArr = data.arr
-      }
+      // 统一使用 data.arr（手套在 packet2 到达时已合并，其他设备直接赋值 arr）
+      let blueArr = data.arr && data.arr.length ? data.arr : []
       // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
       const dataStamp = new Date().getTime() - data.stamp
       json[data.type] = {}
@@ -2203,20 +2822,10 @@ async function connectPort() {
 
 
       const { path } = portInfo
-      const manufacturer = (portInfo.manufacturer || '').toLowerCase()
-      const friendlyName = (portInfo.friendlyName || '').toLowerCase()
-      const isCh340 = friendlyName.includes('ch340')
       let portBaudRate = baudRate
-      if (manufacturer.includes('wch.cn')) {
-        portBaudRate = 921600
-      }
     // parserArr[path]
       const parserItem = parserArr[path] = parserArr[path] ? parserArr[path] : {}
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
-      if (isCh340) {
-        dataItem.type = 'sit'
-        parserItem.typeLocked = true
-      }
       parserItem.baudRate = portBaudRate
       // parserItem 
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
@@ -2242,6 +2851,19 @@ async function connectPort() {
         }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
         parserItem.baudRate = portBaudRate
+        // 根据探测到的波特率自动设置设备大类
+        const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
+        if (deviceCategory) {
+          if (deviceCategory === 'sit') {
+            dataItem.type = 'sit'
+            dataItem.premission = true
+          } else if (deviceCategory === 'foot') {
+            // 脚垫类型需要通过 AT 指令获取 MAC 地址后再细分 foot1-4
+            dataItem.type = 'foot'
+          }
+          // hand 类型由帧内类型位（130字节帧）动态设置为 HL/HR
+          console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
+        }
         const port = newSerialPortLink({ path, parser: parserItem.parser, baudRate: portBaudRate })
 
       // linkIngPort.push(port)
@@ -2352,33 +2974,35 @@ async function connectPort() {
               version
             }
 
-            if (parserItem.typeLocked) {
+            // 根据波特率确定的设备大类进行处理
+            const deviceCat = BAUD_DEVICE_MAP[parserItem.baudRate]
+            if (deviceCat === 'hand' || deviceCat === 'sit') {
+              // 手套和起坐垫：获取到 MAC 即确认授权
               dataItem.premission = true
-            } else {
-              const mappedType = parserItem.baudRate === 921600 ? null : getTypeFromSerialCache(uniqueId)
+            } else if (deviceCat === 'foot') {
+              // 脚垫：通过 MAC 地址查映射表确定 foot1-4
+              const mappedType = getTypeFromSerialCache(uniqueId)
               if (mappedType) {
                 dataItem.type = String(mappedType).trim()
                 dataItem.premission = true
+                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type}`)
               } else {
+                // MAC 未在本地缓存中，尝试从服务器查询
                 try {
                   const response = await axios.get(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
-                  const time = await axios.get(`http://sensor.bodyta.com:8080/rcv/login/getSystemTime`)
-
-                  // ??????
-                  if (!response.data.data) {
-                    dataItem.premission = false
-                  } else {
-                    const expireTime = response.data.data.expireTime
-                    const nowTime = time.data.time
-                    if (nowTime < expireTime) {
-                      dataItem.premission = true
-                    }
+                  if (response.data.data) {
                     dataItem.type = JSON.parse(response.data.data.typeInfo)[0]
+                    dataItem.premission = true
+                  } else {
+                    dataItem.premission = false
                   }
                 } catch (err) {
-                  console.log(err, 'err')
+                  console.log('[foot] 服务器查询失败:', err.message)
+                  dataItem.premission = false
                 }
               }
+            } else {
+              dataItem.premission = true
             }
             if (Object.keys(macInfo).length == ports.length) {
               // console.log(macInfo)
@@ -2391,67 +3015,35 @@ async function connectPort() {
         // console.log(pointArr.length)
         // 闄€铻轰华
         if (pointArr.length == 18) {
+          if (!global._18count) global._18count = 0
+          global._18count++
+          if (global._18count <= 5) console.log('[IMU-DEBUG] 收到18字节帧(独立IMU)! count=%d', global._18count)
           const length = pointArr.length
           const arr = pointArr.splice(2, length)
           dataItem.rotate = bytes4ToInt10(arr)
         }
-        // 256鐭╅樀鍒嗗寘
+        // Packet1: 130字节 = 2(order+type) + 128(sensor前半)
+        // 参考 serial_parser_two.py: 缓存 packet1，等待 packet2 到达后合并
         else if (pointArr.length == 130) {
-          // 瑙ｆ瀽鍖呮暟鎹? 绫诲瀷+鍓嶅悗甯х被鍨?128鐭╅樀
-          const length = pointArr.length
-          const order = pointArr[0]
-          const type = pointArr[1]
-          // console.log(constantObj.type[type], order, path, pointArr.length, new Date().getTime())
+          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const sensorData = pointArr.slice(2)  // 128 字节 sensor 前半
 
-          const arr = pointArr.splice(2, length)
-          const orderName = constantObj.order[order]
-          // 鍓嶅悗甯ц祴鍊?绫诲瀷璧嬪€?
-          dataItem[orderName] = arr
-            dataItem.type = constantObj.type[type]
-            dataItem.stamp = new Date().getTime()
-          } else if (pointArr.length == 1024) {
-          // ret
-          // if (!dataItem.premission) return
-          // dataItem.type = 'hand'
-          // dataItem[path]
-            if (!dataItem.type) {
-              dataItem.type = 'sit'
-            }
-            let matrix
-          if (dataItem.type == 'hand' || dataItem.type == 'sit') {
-            matrix = hand(pointArr)
-          } else if (dataItem.type == 'bed') {
-            matrix = jqbed(pointArr)
-          } else if (dataItem.type == 'car-back') {
-            matrix = jqbed(pointArr)
-          } else {
-            matrix = pointArr
+          dataItem.type = constantObj.type[sensorType]
+          dataItem.stamp = new Date().getTime()
+
+          // 按 sensorType 缓存 packet1
+          glovePacket1Cache[sensorType] = {
+            data: sensorData,
+            stamp: dataItem.stamp,
           }
-
-          // 璁惧鍨嬪彿璺熶紶鎰熷櫒绫诲瀷鍖归厤涓?
+        } else if (pointArr.length == 1024) {
+          // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
+          if (!dataItem.type) {
+            dataItem.type = 'sit'
+          }
+          const matrix = hand(pointArr)
 
           dataItem.arr = matrix
-
-
-
-          // 濡傛灉鏄剼鍨? 娣诲姞绠楁硶鍖匔OP鏁版嵁
-          if (file == 'foot') {
-            // console.log(matrix)
-            if (!dataItem.arrList) {
-              dataItem.arrList = []
-            } else {
-              if (dataItem.arrList.length < 60) {
-                dataItem.arrList.push(matrix)
-              } else {
-                dataItem.arrList.shift()
-                dataItem.arrList.push(matrix)
-              }
-
-              // dataItem.cop = await callPy('cal_cop_fromData', { data: dataItem.arrList })
-            }
-
-            // console.log(dataItem.cop)
-          }
 
 
           const stamp = new Date().getTime()
@@ -2493,78 +3085,40 @@ async function connectPort() {
           // }
 
 
-        } else if (pointArr.length == 1025) {
-          const type = pointArr.shift()
-          dataItem.premission = true
+        // 1025字节帧已删除（旧设备类型 car-back/car-sit/bed 不再使用）
 
-          if (!Object.keys(constantObj.typeConfig).includes(String(type))) {
-            dataItem.premission = false
-            return
-          }
-          let matrix
-            dataItem.type = constantObj.typeConfig[type]
+        // Packet2: 146字节 = 2(order+type) + 128(sensor后半) + 16(IMU)
+        // 参考 serial_parser_two.py: 到达时立即与缓存的 packet1 合并
+        } else if (pointArr.length == 146) {
+          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const sensorData = pointArr.slice(2, 130)  // 中间 128 字节 = sensor 后半
+          const imuRaw = pointArr.slice(130)          // 最后 16 字节 = IMU
 
-          if (constantObj.typeConfig[type] == 'car-back') {
-            matrix = jqbed(pointArr)
-          } else if (constantObj.typeConfig[type] == 'car-sit') {
-            matrix = jqbed(pointArr)
-          } else if (constantObj.typeConfig[type] == 'bed') {
-            matrix = jqbed(pointArr)
-          }
-          dataItem.arr = matrix
-
+          dataItem.type = constantObj.type[sensorType] || dataItem.type
           const stamp = new Date().getTime()
           dataItem.stamp = stamp
 
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            if (dataItem.HZ < 50) {
-              return
-            }
-            if (!MaxHZ && oldTimeObj[dataItem.type]) {
-              MaxHZ = Math.floor(1000 / dataItem.HZ)
-              HZ = MaxHZ
-              console.log('playtimer', HZ)
-              if (!activeSendTypes || !activeSendTypes.length) {
-                if (playtimer) {
-                  clearInterval(playtimer)
-                }
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 80)
-              }
-            }
+          // 与缓存的 Packet1 合并为完整 256 字节 sensor 数据
+          const cached = glovePacket1Cache[sensorType]
+          if (cached) {
+            dataItem.arr = [...cached.data, ...sensorData]
+            delete glovePacket1Cache[sensorType]
+          } else {
+            dataItem.arr = sensorData
           }
 
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
+          // 解析并校验四元数
+          const rawQuat = bytes4ToInt10(imuRaw)
+          dataItem.rotate = validateQuaternion(rawQuat) || rawQuat
 
-
-        }
-
-        else if (pointArr.length == 146) {
-          const length = pointArr.length
-          const arr = pointArr.splice(length - 16, length)
-          // console.log(pointArr[0], pointArr[1])
-          
-          // dataItem.type = pointArr[1] == 1 ? 'leftHand' : 'rightHand'
-          pointArr.splice(0, 2)
-          // 涓嬩竴甯ц祴鍊? 鏃堕棿鎴宠祴鍊?鍥涘厓鏁拌祴鍊?
-
-          const stamp = new Date().getTime()
-
+          // 帧率计算
           if (sendDataLength < 30) {
             sendDataLength++
           }
           if (oldTimeObj[dataItem.type]) {
             dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            // console.log(dataItem.HZ , 'hz')
-            if (!MaxHZ && sendDataLength == 30) {
+            if (!MaxHZ && sendDataLength >= 30) {
               MaxHZ = Math.floor(1000 / dataItem.HZ)
-              console.log(MaxHZ)
               HZ = MaxHZ
               if (!activeSendTypes || !activeSendTypes.length) {
                 playtimer = setInterval(() => {
@@ -2574,49 +3128,24 @@ async function connectPort() {
               sendDataLength = 0
             }
           }
-          dataItem.stamp = stamp
-
-          // if (!oldTimeObj[dataItem.type]) {
-          oldTimeObj[dataItem.type] = dataItem.stamp
+          oldTimeObj[dataItem.type] = stamp
           maybeLockSensorHz()
           if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
             updateSendTimerForActiveTypes()
           }
-
-          dataItem.next = pointArr
-          // const stamp = new Date().getTime()
-          dataItem.stamp = stamp
-          dataItem.rotate = bytes4ToInt10(arr)
         } else if (pointArr.length == 4096) {
-          // if (!dataItem.premission) return
+          // 4096字节帧 = 脚垫 (foot/foot1-4)，64x64 矩阵
           dataItem.premission = true
-            if (!dataItem.type) {
-              dataItem.type = 'foot'
-            }
-          if (!dataItem.premission) {
-            dataItem.status = 'expired'
-          } else {
-            if (parserItem.baudRate === 3000000) {
-              zeroBelowThreshold(pointArr, 8)
-              removeSmallIslands64x64(pointArr, 12)
-            }
-            if (dataItem.type == 'endi-sit') {
-              dataItem.arr = endiSit(pointArr)
-            } else if (dataItem.type == 'endi-back') {
-              dataItem.arr = endiBack(pointArr)
-            } else if (dataItem.type == 'foot') {
-              dataItem.arr = pointArr
-              if (lastFootPointArr.length) {
-                dataItem.cop = await callPy('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
-              }
-
-            } else if (dataItem.type === 'foot1' || dataItem.type === 'foot2' || dataItem.type === 'foot3' || dataItem.type === 'foot4') {
-              dataItem.arr = flipFoot64x64Horizontal(pointArr)
-            } else {
-              dataItem.arr = pointArr
-            }
-            lastFootPointArr = pointArr
+          if (!dataItem.type) {
+            dataItem.type = 'foot'
           }
+          zeroBelowThreshold(pointArr, 8)
+          removeSmallIslands64x64(pointArr, 12)
+          dataItem.arr = pointArr
+          if (dataItem.type === 'foot' && lastFootPointArr.length) {
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: pointArr, data_prev: lastFootPointArr })
+          }
+          lastFootPointArr = pointArr
           // console.log(444)
           const stamp = new Date().getTime()
 
@@ -2664,176 +3193,7 @@ async function connectPort() {
           //   // console.log(dataItem.arrList, pointArr.length, dataItem.cop)
           // }
 
-        } else if (pointArr.length == 4097) {
-          // if (!dataItem.premission) return
-          // dataItem.type = 'sit'
-
-          const type = pointArr.shift()
-          dataItem.premission = true
-
-          if (!Object.keys(constantObj.typeConfig).includes(String(type))) {
-            dataItem.premission = false
-            return
-          }
-
-          dataItem.type = constantObj.typeConfig[type]
-
-          if (parserItem.baudRate === 3000000) {
-            zeroBelowThreshold(pointArr, 5)
-            removeSmallIslands64x64(pointArr, 9)
-          }
-
-          if (dataItem.type == 'endi-sit') {
-            dataItem.arr = endiSit(pointArr)
-          } else if (dataItem.type == 'endi-back') {
-            dataItem.arr = endiBack(pointArr)
-          } else {
-            dataItem.arr = pointArr
-          }
-
-          const stamp = new Date().getTime()
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = stamp - oldTimeObj[dataItem.type]
-            if (!MaxHZ) {
-              MaxHZ = Math.floor(1000 / dataItem.HZ)
-              HZ = MaxHZ
-              if (!activeSendTypes || !activeSendTypes.length) {
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 1000 / HZ)
-              }
-            }
-          }
-          dataItem.stamp = stamp
-          // if (!oldTimeObj[dataItem.type]) {
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
-          // } else {
-
-          // }
-
-          if (!dataItem.arrList) {
-            dataItem.arrList = []
-          } else {
-            if (dataItem.arrList.length < 3) {
-              dataItem.arrList.push(pointArr)
-            } else {
-              dataItem.arrList.shift()
-              dataItem.arrList.push(pointArr)
-            }
-
-            // dataItem.cop = await callPy('cal_cop_fromData', { data_array: dataItem.arrList })
-            // console.log(dataItem.arrList, pointArr.length, dataItem.cop)
-          }
-
-        } else if (pointArr.length == 144) {
-
-          const stamp = new Date().getTime()
-          dataItem.stamp = stamp
-          dataItem.type = 'carAir'
-          // if (!dataItem.premission) {
-          //   dataItem.status = 'expired'
-          // } else {
-          dataItem.arr = pointArr
-          // }
-
-
-
-
-          // console.log(444)
-
-          if (sendDataLength < 1) {
-            sendDataLength++
-          }
-          if (oldTimeObj[dataItem.type]) {
-            dataItem.HZ = parseInt(1000 / (stamp - oldTimeObj[dataItem.type]))
-            if (!MaxHZ && sendDataLength == 1) {
-              MaxHZ = dataItem.HZ
-              HZ = MaxHZ
-              if (!activeSendTypes || !activeSendTypes.length) {
-                playtimer = setInterval(() => {
-                  colAndSendData()
-                }, 87)
-              }
-              sendDataLength = 0
-            }
-          }
-
-          oldTimeObj[dataItem.type] = dataItem.stamp
-          maybeLockSensorHz()
-          if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
-            updateSendTimerForActiveTypes()
-          }
-          algorData = await callPy('server', { sensor_data: pointArr })
-          if (algorData.control_command) {
-            control_command = algorData.control_command
-          }
-          // console.log(algorData?.frame_count)
-
-        } else if (pointArr.length == 51) {
-          // 鏀跺埌ecu鍙戦€佹暟鎹?
-          console.log('pointArr', pointArr)
-          console.log('buffer', buffer)
-          if (pointArr[50] == 1) {
-
-            // 鎵嬪姩妯″紡
-            if (pointArr[49] == 1) {
-
-              controlMode = HANDLE
-
-              let max = 24, controlArr = []
-              for (let i = 0; i < max; i++) {
-                controlArr.push(pointArr[2 * i + 2])
-              }
-
-
-              server.clients.forEach(function each(client) {
-                if (port?.isOpen) {
-
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ handle: controlArr }));
-                  }
-                }
-              });
-
-            }
-            // 鑷姩妯″紡
-            else {
-
-
-
-              controlMode = ALGOR
-
-              if (oldControlMode == HANDLE && controlMode == ALGOR) {
-                await callPy('resetMessage')
-              }
-
-              let max = 24, controlArr = []
-              for (let i = 0; i < max; i++) {
-                controlArr.push(pointArr[2 * i + 2])
-              }
-
-
-              server.clients.forEach(function each(client) {
-                if (port?.isOpen) {
-
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ algorFeed: controlArr }));
-                  }
-                }
-              });
-            }
-
-            oldControlMode = controlMode
-          }
-        }
-
-
-        else if (![18, 1024, 130].includes(pointArr.length)) {
-
+        // 4097/144/51字节帧已删除（旧设备类型 endi/carAir/ECU 不再使用）
         }
       })
     }
@@ -2960,10 +3320,8 @@ function colAndSendData() {
  */
 function sendData() {
   let obj
-  // 统一解析所有设备数据：
-  // parseData 对 HL/HR 会自动用 last+next 拼接（不受 type 参数影响）
-  // 对其他设备在 highHZ 模式下用 data.arr
-  obj = parseData(parserArr, JSON.parse(JSON.stringify({ ...dataMap })), 'highHZ')
+  // 统一解析所有设备数据（直接传引用，parseData 只读不写，无需深拷贝）
+  obj = parseData(parserArr, dataMap)
 
   // 根据 activeSendTypes 过滤（按评估模式只推送对应设备数据）
   obj = filterDataByTypes(obj, activeSendTypes)
@@ -3034,42 +3392,66 @@ function ensureMatrixNameColumn(db) {
         if (e) console.error('ALTER TABLE add sample_type failed:', e)
       })
     }
+    const hasTimestamp = rows.some((r) => r.name === 'timestamp')
+    if (!hasTimestamp) {
+      db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
+        if (e) console.error('ALTER TABLE add timestamp failed:', e)
+      })
+    }
+    const hasSelect = rows.some((r) => r.name === 'select')
+    if (!hasSelect) {
+      db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
+        if (e) console.error('ALTER TABLE add select failed:', e)
+      })
+    }
   })
 }
 
 /**
  * 灏嗘敹鍒扮殑
  */
+// 存储写入缓冲区：攒一批再写，减少 SQLite I/O 次数
+const storageBuffer = []
+const STORAGE_FLUSH_INTERVAL = 200  // 每 200ms 批量写入一次
+let storageFlushTimer = null
+
 function storageData(data) {
-  const rawAssessmentId = activeAssessmentId
-  const parsedAssessmentId = rawAssessmentId !== null && rawAssessmentId !== undefined ? Number(rawAssessmentId) : NaN
   const timestamp = Date.now()
-  // const date = saveTime;
 
-
-  // const newData = Object.keys(data)
-  const newData = { ...data }
-  for (let i = 0; i < Object.keys(data).length; i++) {
-    const key = Object.keys(data)[i]
-    if (newData[key].status) delete newData[key].status
+  // 构建存储数据（去掉 status 字段）
+  const newData = {}
+  for (const key of Object.keys(data)) {
+    if (!data[key]) continue
+    const item = { ...data[key] }
+    delete item.status
+    newData[key] = item
   }
 
-  const insertQuery =
-    "INSERT INTO matrix (data, timestamp,date ,`select`, name, assessment_id, sample_type) VALUES (?, ?,? ,?, ?, ?, ?)";
   const assessmentId = activeAssessmentId || null
   const sampleType = activeSampleType || null
 
-  currentDb.run(
-    insertQuery,
-    [JSON.stringify(newData), timestamp, colName, JSON.stringify(selectArr), colPersonName, assessmentId, sampleType],
-    function (err) {
-      if (err) {
-        console.error(err);
-        return;
-      }
-      console.log(`Event inserted with ID ${this.lastID}`);
-    }
-  );
+  storageBuffer.push([JSON.stringify(newData), timestamp, colName, JSON.stringify(selectArr), colPersonName, assessmentId, sampleType])
+
+  // 启动批量写入定时器（如果还没启动）
+  if (!storageFlushTimer) {
+    storageFlushTimer = setTimeout(flushStorageBuffer, STORAGE_FLUSH_INTERVAL)
+  }
+}
+
+function flushStorageBuffer() {
+  storageFlushTimer = null
+  if (!storageBuffer.length || !currentDb) return
+
+  const rows = storageBuffer.splice(0)
+  const insertQuery = "INSERT INTO matrix (data, timestamp, date, `select`, name, assessment_id, sample_type) VALUES (?, ?, ?, ?, ?, ?, ?)"
+
+  currentDb.run('BEGIN TRANSACTION')
+  for (const row of rows) {
+    currentDb.run(insertQuery, row)
+  }
+  currentDb.run('COMMIT', (err) => {
+    if (err) console.error('[storageData] batch commit error:', err)
+  })
 }
 
 // 鍋氫竴涓畾鏃跺櫒浠诲姟  鐩戝惉鏄惁瀛樺湪鎰忓鎯呭喌涓插彛鏂紑杩炴帴 鐒跺悗閲嶆柊杩炴帴 

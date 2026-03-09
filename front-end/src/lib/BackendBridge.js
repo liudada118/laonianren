@@ -188,6 +188,152 @@ class BackendBridge {
     return res.json();
   }
 
+  /* ─── 报告生成 API ─── */
+
+  /**
+   * 获取握力报告数据
+   * @param {object} params - { timestamp, collectName, leftAssessmentId, rightAssessmentId }
+   * @returns {Promise<object>} { code, data: { render_data: { left, right, activeHand } }, msg }
+   */
+  async getGripReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getHandPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取站立评估报告数据
+   * @param {object} params - { timestamp, assessmentId, fps, threshold_ratio }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getStandingReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getDbHeatmap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取步态评估报告数据
+   * @param {object} params - { timestamp, assessmentId, collectName, body_weight_kg }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getGaitReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getFootPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取起坐评估报告数据
+   * @param {object} params - { timestamp, assessmentId, collectName }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async getSitStandReport(params = {}) {
+    const res = await fetch(`${this.httpUrl}/getSitAndFootPdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 导出采集数据为CSV文件
+   * @param {object} params - { assessmentId, assessmentIds, sampleType }
+   * @returns {Promise<object>} { code, data: { fileName, filePath, rowCount, dataKeys }, msg }
+   */
+  async exportCsv(params = {}) {
+    const res = await fetch(`${this.httpUrl}/exportCsv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取CSV文件下载URL
+   * @param {string} fileName - CSV文件名
+   * @returns {string} 下载URL
+   */
+  getCsvDownloadUrl(fileName) {
+    return `${this.httpUrl}/downloadCsvFile/${encodeURIComponent(fileName)}`;
+  }
+
+  /* ─── 历史记录 API ─── */
+
+  /**
+   * 保存评估历史记录到后端数据库
+   * @param {object} params - { patientInfo, institution, assessments }
+   */
+  async saveHistory(params = {}) {
+    const res = await fetch(`${this.httpUrl}/api/history/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 搜索历史记录（分页）
+   * @param {object} params - { keyword, date, page, pageSize }
+   */
+  async listHistory(params = {}) {
+    const res = await fetch(`${this.httpUrl}/api/history/list`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
+   * 获取单条历史记录
+   * @param {string} id - 记录ID
+   */
+  async getHistory(id) {
+    const res = await fetch(`${this.httpUrl}/api/history/get`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    return res.json();
+  }
+
+  /**
+   * 删除单条历史记录
+   * @param {string} id - 记录ID
+   */
+  async deleteHistory(id) {
+    const res = await fetch(`${this.httpUrl}/api/history/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    return res.json();
+  }
+
+  /**
+   * 清空所有历史记录
+   */
+  async clearHistory() {
+    const res = await fetch(`${this.httpUrl}/api/history/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.json();
+  }
+
   async bindKey(key) {
     const res = await fetch(`${this.httpUrl}/bindKey`, {
       method: 'POST',

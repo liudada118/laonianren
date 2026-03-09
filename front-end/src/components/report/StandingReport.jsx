@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useMemo } from 'react';
 import * as echarts from 'echarts';
 import InteractiveArchChart from './InteractiveArchChart';
 import InteractiveCOPChart from './InteractiveCOPChart';
+import { parseFrameData } from '../../lib/FootAnalysis';
 
 /* ─── 蔡司风格 EChart 封装（增量更新，避免闪烁） ─── */
 function EChart({ option, height = 280 }) {
@@ -29,7 +30,6 @@ const SECTIONS = [
   { id: 'arch-zones', label: '足弓区域分布图' },
   { id: 'pressure', label: '区域压力分布' },
   { id: 'cop-heatmap', label: 'COP 压力中心轨迹' },
-  { id: 'cop-trajectory', label: 'COP 轨迹' },
   { id: 'cop-ellipse', label: 'COP 置信椭圆' },
   { id: 'cop-velocity', label: 'COP 速度时间序列' },
   { id: 'cop-params', label: 'COP 参数表' },
@@ -37,10 +37,12 @@ const SECTIONS = [
   { id: 'summary', label: '综合评估' },
 ];
 
-export default function StandingReport({ reportData, patientInfo, onClose }) {
+export default function StandingReport({ reportData, patientInfo, onClose, pythonResult, pythonImages }) {
   const [activeSection, setActiveSection] = useState('overview');
   const contentRef = useRef(null);
   const data = useMemo(() => {
+    // 优先使用 Python 分析结果
+    if (pythonResult) return convertPythonResultToReport(pythonResult);
     if (!reportData) return generateMockReport();
     // 将 generateFootReport 输出转换为报告组件期望的格式
     const r = reportData;
@@ -319,16 +321,29 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     const velocity = data.copTimeSeries?.velocitySeries || [];
     const timePoints = data.copTimeSeries?.timePoints || [];
     const chartData = velocity.map((v, i) => [timePoints[i] || i * 0.024, v]);
+    const avgV = data.copTimeSeries?.avgVelocity || 0;
     return {
       tooltip: { trigger: 'axis', ...tooltipStyle, formatter: (p) => `时间: ${p[0]?.value?.[0]?.toFixed(2)}s<br/>速度: ${p[0]?.value?.[1]?.toFixed(2)} mm/s` },
-      grid: { top: 30, bottom: 40, left: 60, right: 20 },
+      grid: { top: 30, bottom: 70, left: 60, right: 20 },
       xAxis: { name: '时间 (s)', type: 'value', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
       yAxis: { name: '速度 (mm/s)', type: 'value', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
-      series: [{
-        type: 'line', data: chartData, showSymbol: false,
-        lineStyle: { color: '#0066CC', width: 1.5 },
-        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#0066CC30' }, { offset: 1, color: '#0066CC05' }]) }
-      }]
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+        { type: 'slider', xAxisIndex: 0, bottom: 10, height: 20, borderColor: gridLine, textStyle: { color: chartText } }
+      ],
+      series: [
+        {
+          type: 'line', data: chartData, showSymbol: false,
+          lineStyle: { color: '#0066CC', width: 1.5 },
+          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#0066CC30' }, { offset: 1, color: '#0066CC05' }]) }
+        },
+        avgV > 0 ? {
+          type: 'line', markLine: {
+            silent: true, symbol: 'none',
+            data: [{ yAxis: avgV, label: { formatter: `平均 ${avgV.toFixed(1)} mm/s`, color: '#D97706', fontSize: 10 }, lineStyle: { color: '#D97706', type: 'dashed', width: 1 } }]
+          }, data: []
+        } : null
+      ].filter(Boolean)
     };
   }, [data]);
 
@@ -547,6 +562,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
                     peakFrameData={data.rawData.peakFrameFlat}
                     leftSectionCoords={data.rawData.leftSectionCoords}
                     rightSectionCoords={data.rawData.rightSectionCoords}
+                    peakMatrix={data.rawData.peakFrameFlat?.length === 4096 ? parseFrameData(data.rawData.peakFrameFlat) : null}
                   />
                 ) : (
                   <div className="text-center py-12 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -556,33 +572,25 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
               </div>
             </section>
 
-            {/* ═══════════ 第2页：COP 轨迹 ═══════════ */}
-            <section id="standing-cop-trajectory">
-              <SectionHeader title="COP 轨迹" subtitle="COP trajectory" />
-              <div className="zeiss-card p-4">
-                <EChart option={copTrajectoryOption} height={400} />
-              </div>
-            </section>
-
             {/* ═══════════ COP 置信椭圆 ═══════════ */}
             <section id="standing-cop-ellipse">
-              <SectionHeader title="COP 置信椭圆" subtitle="COP confidence ellipse" />
+              <SectionHeader title="COP 置信椭圆" subtitle="COP Confidence Ellipse" />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="zeiss-card p-4">
-                  <EChart option={copEllipseOption} height={380} />
+                  <EChart option={copEllipseOption} height={320} />
                 </div>
-                <div className="zeiss-card p-5">
-                  <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>椭圆参数</div>
-                  <div className="space-y-2">
-                    <DataRow label="左脚95%面积" value={`${(data.ellipseData?.left?.area_cm2 || 0).toFixed(4)} cm²`} />
-                    <DataRow label="右脚95%面积" value={`${(data.ellipseData?.right?.area_cm2 || 0).toFixed(4)} cm²`} />
-                    <DataRow label="左脚椭圆宽度" value={`${(data.ellipseData?.left?.width || 0).toFixed(2)}`} />
-                    <DataRow label="左脚椭圆高度" value={`${(data.ellipseData?.left?.height || 0).toFixed(2)}`} />
-                    <DataRow label="右脚椭圆宽度" value={`${(data.ellipseData?.right?.width || 0).toFixed(2)}`} />
-                    <DataRow label="右脚椭圆高度" value={`${(data.ellipseData?.right?.height || 0).toFixed(2)}`} />
-                  </div>
+                <div className="zeiss-card p-5 space-y-3">
+                  <div className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>椭圆参数</div>
+                  <DataRow label="左脚95%面积" value={`${(data.ellipseData?.left?.area_cm2 || 0).toFixed(4)} cm²`} />
+                  <DataRow label="右脚95%面积" value={`${(data.ellipseData?.right?.area_cm2 || 0).toFixed(4)} cm²`} />
+                  <DataRow label="左脚椭圆宽度" value={`${((data.ellipseData?.left?.width || 0) * 0.7).toFixed(2)} mm`} />
+                  <DataRow label="右脚椭圆宽度" value={`${((data.ellipseData?.right?.width || 0) * 0.7).toFixed(2)} mm`} />
+                  <DataRow label="左脚椭圆高度" value={`${((data.ellipseData?.left?.height || 0) * 0.7).toFixed(2)} mm`} />
+                  <DataRow label="右脚椭圆高度" value={`${((data.ellipseData?.right?.height || 0) * 0.7).toFixed(2)} mm`} />
+                  <DataRow label="左脚椭圆角度" value={`${(data.ellipseData?.left?.angle || 0).toFixed(1)}°`} />
+                  <DataRow label="右脚椭圆角度" value={`${(data.ellipseData?.right?.angle || 0).toFixed(1)}°`} />
                   {/* 风险等级色条 */}
-                  <div className="mt-4 p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                  <div className="mt-3 p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>风险预警</div>
                     <div className="h-3 rounded-full" style={{ background: 'linear-gradient(to right, #87CEEB, #003366)' }} />
                     <div className="flex justify-between mt-1">
@@ -846,6 +854,123 @@ function generateMockReport() {
     },
     additionalData: {
       copResults: { distLeftToBoth: 9.95, distRightToBoth: 10.49, leftForward: 2.37 }
+    }
+  };
+}
+
+/* ═══════════ Python 分析结果转换 ═══════════ */
+function convertPythonResultToReport(result) {
+  const arch = result.arch_features || {};
+  const ad = result.additional_data || {};
+  const cts = result.cop_time_series || {};
+  const leftArch = arch.left_foot || {};
+  const rightArch = arch.right_foot || {};
+
+  // 压力分布（Python 返回 0~1 小数）
+  const lp = ad.left_pressure || {};
+  const rp = ad.right_pressure || {};
+
+  // 面积信息
+  const la = ad.left_area || {};
+  const ra = ad.right_area || {};
+
+  // COP 轨迹（从 api_server 额外返回的字段）
+  const leftCop = result.left_cop_trajectory || [];
+  const rightCop = result.right_cop_trajectory || [];
+  const velocitySeries = cts.velocity_series || [];
+  const timePoints = cts.time_points || [];
+
+  // 置信椭圆（从 api_server 额外返回的 draw_confidence_ellipse 结果）
+  const le = result.left_ellipse_params || {};
+  const re = result.right_ellipse_params || {};
+
+  return {
+    left: {
+      archIndex: leftArch.area_index,
+      length: ad.left_length || 0,
+      width: ad.left_width || 0,
+      totalArea: la.total_area_cm2 || 0,
+      forefootArea: la.area_cm2?.[0] || 0,
+      midfootArea: la.area_cm2?.[1] || 0,
+      hindfootArea: la.area_cm2?.[2] || 0,
+      forefootPressure: (lp['前足'] || 0) * 100,
+      midfootPressure: (lp['中足'] || 0) * 100,
+      hindfootPressure: (lp['后足'] || 0) * 100,
+      regionPressure: {
+        forefoot: (lp['前足'] || 0) * 100,
+        midfoot: (lp['中足'] || 0) * 100,
+        hindfoot: (lp['后足'] || 0) * 100,
+      },
+    },
+    right: {
+      archIndex: rightArch.area_index,
+      length: ad.right_length || 0,
+      width: ad.right_width || 0,
+      totalArea: ra.total_area_cm2 || 0,
+      forefootArea: ra.area_cm2?.[0] || 0,
+      midfootArea: ra.area_cm2?.[1] || 0,
+      hindfootArea: ra.area_cm2?.[2] || 0,
+      forefootPressure: (rp['前足'] || 0) * 100,
+      midfootPressure: (rp['中足'] || 0) * 100,
+      hindfootPressure: (rp['后足'] || 0) * 100,
+      regionPressure: {
+        forefoot: (rp['前足'] || 0) * 100,
+        midfoot: (rp['中足'] || 0) * 100,
+        hindfoot: (rp['后足'] || 0) * 100,
+      },
+    },
+    bilateral: {
+      leftPressureRatio: cts.left_pressure_ratio != null ? cts.left_pressure_ratio : 50,
+      rightPressureRatio: cts.right_pressure_ratio != null ? cts.right_pressure_ratio : 50,
+    },
+    copData: { leftCop, rightCop },
+    ellipseData: {
+      left: {
+        center: le.center || [0, 0],
+        width: le.width || 0,
+        height: le.height || 0,
+        angle: le.angle || 0,
+        area_cm2: le.area_cm2 || 0,
+      },
+      right: {
+        center: re.center || [0, 0],
+        width: re.width || 0,
+        height: re.height || 0,
+        angle: re.angle || 0,
+        area_cm2: re.area_cm2 || 0,
+      },
+    },
+    copTimeSeries: {
+      velocitySeries,
+      timePoints,
+      pathLength: cts.path_length || 0,
+      contactArea: cts.contact_area || 0,
+      lsRatio: cts.ls_ratio || 0,
+      eccentricity: cts.eccentricity || 0,
+      deltaY: cts.delta_y || 0,
+      deltaX: cts.delta_x || 0,
+      majorAxis: cts.major_axis || 0,
+      minorAxis: cts.minor_axis || 0,
+      maxDisplacement: cts.max_displacement || 0,
+      minDisplacement: cts.min_displacement || 0,
+      avgVelocity: cts.avg_velocity || 0,
+      rmsDisplacement: cts.rms_displacement || 0,
+      stdY: cts.std_y || 0,
+      stdX: cts.std_x || 0,
+    },
+    rawData: {
+      leftSectionCoords: leftArch.section_coords || null,
+      rightSectionCoords: rightArch.section_coords || null,
+      leftCopTrajectory: leftCop,
+      rightCopTrajectory: rightCop,
+      peakFrameFlat: arch.peak_frame_data || [],
+    },
+    additionalData: {
+      copResults: {
+        distLeftToBoth: ad.cop_results?.dist_left_to_both || ad.cop_results?.['左脚COP到整体COP距离(cm)'] || 0,
+        distRightToBoth: ad.cop_results?.dist_right_to_both || ad.cop_results?.['右脚COP到整体COP距离(cm)'] || 0,
+        leftForward: ad.cop_results?.left_forward || ad.cop_results?.['左脚前移量(cm)'] || 0,
+      }
     }
   };
 }

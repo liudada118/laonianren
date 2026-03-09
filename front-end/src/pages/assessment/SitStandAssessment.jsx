@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
-import { usePressureScene } from '../../hooks/usePressureScene';
 import EChart from '../../components/ui/EChart';
-import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
+import {
+  PressureScene3D, matrixStats, calculateCoP,
+} from '../../lib/pressure-sensor';
+import { backendBridge } from '../../lib/BackendBridge';
+import SitStandReport from '../../components/report/SitStandReport';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
-const ttStyle = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332', fontSize: 11 }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
 /* ─── 左侧数据面板 ─── */
 function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHistory, footpadHistory, isRecording, timer, fmtTime }) {
@@ -73,7 +75,7 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
       <div className="zeiss-card overflow-hidden">
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.blue }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>坐垫压力 (32×32)</h3>
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>坐垫压力 (32x32)</h3>
         </div>
         <div className="h-[90px] px-1"><EChart option={seatLineOpt} height={90} /></div>
         <div className="px-4 py-2.5 space-y-1.5">
@@ -90,7 +92,7 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
       <div className="zeiss-card overflow-hidden">
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.green }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>脚垫压力 (64×64)</h3>
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>脚垫压力 (64x64)</h3>
         </div>
         <div className="h-[90px] px-1"><EChart option={footLineOpt} height={90} /></div>
         <div className="px-4 py-2.5 space-y-1.5">
@@ -150,242 +152,33 @@ function SceneControlPanel({ config, onConfigChange }) {
   );
 }
 
-/* ─── 起坐报告组件（真实数据版） ─── */
-function SitStandReport({ patientInfo, reportData: propsReportData }) {
-  const sections = [
-    { id: 'overview', title: '基本信息' },
-    { id: 'summary', title: '总体指标' },
-    { id: 'stand-evo', title: '站立压力演变' },
-    { id: 'stand-cop', title: '站立COP轨迹' },
-    { id: 'sit-evo', title: '坐姿压力演变' },
-    { id: 'sit-cop', title: '坐姿COP轨迹' },
-    { id: 'force-curve', title: '力-时间曲线' },
-    { id: 'conclusion', title: '综合评估' },
-  ];
-  const [activeSection, setActiveSection] = useState('overview');
-  const [reportData, setReportData] = useState(null);
-  const [loading, setLoading] = useState(!propsReportData);
-
-  // 优先使用 props 传入的报告数据（采集数据生成），否则从 JSON 文件加载
-  useEffect(() => {
-    if (propsReportData) {
-      setReportData(propsReportData);
-      setLoading(false);
-      return;
-    }
-    fetch('/sitstand_report_data/sitstand_report.json')
-      .then(r => r.json())
-      .then(data => { setReportData(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [propsReportData]);
-
-  const scrollToSection = (id) => {
-    document.getElementById(`sit-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setActiveSection(id);
-  };
-
-  const BASE = '/sitstand_report_data/';
-  const d = reportData;
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <div className="w-10 h-10 border-3 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--zeiss-blue)', borderTopColor: 'transparent' }} />
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载报告数据...</p>
-      </div>
-    </div>
-  );
-
-  if (!d) return (
-    <div className="flex items-center justify-center h-full">
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>报告数据加载失败</p>
-    </div>
-  );
-
-  return (
-    <div className="flex h-full">
-      <nav className="w-48 shrink-0 p-4 sticky top-0" style={{ borderRight: '1px solid var(--border-light)' }}>
-        <h3 className="text-xs font-semibold mb-4 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>报告目录</h3>
-        {sections.map(s => (
-          <button key={s.id} onClick={() => scrollToSection(s.id)}
-            className={`zeiss-nav-item mb-1 ${activeSection === s.id ? 'active' : ''}`}>
-            {s.title}
-          </button>
-        ))}
-      </nav>
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* ── 基本信息 ── */}
-        <section id="sit-overview">
-          <div className="zeiss-section-title">基本信息</div>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { l: '姓名', v: patientInfo?.name || '---' },
-              { l: '测试类型', v: '五次起坐测试' },
-              { l: '测试时间', v: d.test_date || new Date().toLocaleString() },
-              { l: '完成周期', v: `${d.duration_stats?.num_cycles || 5}次` },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-4">
-                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-                <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ── 总体指标 ── */}
-        <section id="sit-summary">
-          <div className="zeiss-section-title">总体指标</div>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { l: '总时长', v: `${d.duration_stats?.total_duration?.toFixed(1) || '--'}s`, c: C.blue },
-              { l: '起坐周期数', v: `${d.duration_stats?.num_cycles || '--'}次`, c: C.green },
-              { l: '平均周期时长', v: `${d.duration_stats?.avg_duration?.toFixed(2) || '--'}s`, c: '#0891B2' },
-            ].map((item, i) => (
-              <div key={i} className="zeiss-card-inner p-5 text-center">
-                <div className="text-3xl font-bold" style={{ color: item.c }}>{item.v}</div>
-                <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ── 站立足底压力演变 ── */}
-        <section id="sit-stand-evo">
-          <div className="zeiss-section-title">站立足底压力演变</div>
-          <div className="zeiss-card p-4">
-            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>站立过程中左右脚足底压力分布随时间的变化（0%~100%）</p>
-            {/* 标签行 */}
-            <div className="flex gap-1 mb-1 pl-12">
-              {(d.stand_evolution?.labels || []).map((label, i) => (
-                <div key={i} className="flex-1 text-center text-[10px] font-medium" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
-              ))}
-            </div>
-            {/* 左脚行 */}
-            <div className="flex items-center gap-1 mb-1">
-              <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: 'var(--zeiss-blue)' }}>左脚</div>
-              <div className="flex gap-1 flex-1">
-                {(d.stand_evolution?.heatmaps || []).filter(h => h.foot === 'left').sort((a, b) => a.col - b.col).map((h, i) => (
-                  <div key={i} className="flex-1">
-                    <img src={`${BASE}${h.file}`} alt={`左脚 ${d.stand_evolution.labels[h.col]}`}
-                      className="w-full rounded" style={{ background: '#f8f9fa' }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* 右脚行 */}
-            <div className="flex items-center gap-1">
-              <div className="w-12 text-right text-xs font-medium shrink-0" style={{ color: 'var(--success)' }}>右脚</div>
-              <div className="flex gap-1 flex-1">
-                {(d.stand_evolution?.heatmaps || []).filter(h => h.foot === 'right').sort((a, b) => a.col - b.col).map((h, i) => (
-                  <div key={i} className="flex-1">
-                    <img src={`${BASE}${h.file}`} alt={`右脚 ${d.stand_evolution.labels[h.col]}`}
-                      className="w-full rounded" style={{ background: '#f8f9fa' }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── 站立COP轨迹 ── */}
-        <section id="sit-stand-cop">
-          <div className="zeiss-section-title">站立COP轨迹</div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="zeiss-card p-4 text-center">
-              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>左脚 COP 轨迹</div>
-              <img src={`${BASE}${d.stand_cop?.left_image}`} alt="左脚COP" className="mx-auto rounded-lg" style={{ maxHeight: 360, objectFit: 'contain' }} />
-            </div>
-            <div className="zeiss-card p-4 text-center">
-              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>右脚 COP 轨迹</div>
-              <img src={`${BASE}${d.stand_cop?.right_image}`} alt="右脚COP" className="mx-auto rounded-lg" style={{ maxHeight: 360, objectFit: 'contain' }} />
-            </div>
-          </div>
-        </section>
-
-        {/* ── 坐姿压力演变 ── */}
-        <section id="sit-sit-evo">
-          <div className="zeiss-section-title">坐姿压力演变</div>
-          <div className="zeiss-card p-4">
-            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>坐姿过程中坐垫压力分布随时间的变化（Start~End）</p>
-            <div className="flex gap-1 mb-1">
-              {(d.sit_evolution?.labels || []).map((label, i) => (
-                <div key={i} className="flex-1 text-center text-[10px] font-medium" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              {(d.sit_evolution?.heatmaps || []).sort((a, b) => a.col - b.col).map((h, i) => (
-                <div key={i} className="flex-1">
-                  <img src={`${BASE}${h.file}`} alt={`坐姿 ${d.sit_evolution.labels[h.col]}`}
-                    className="w-full rounded" style={{ background: '#f8f9fa' }} />
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── 坐姿COP轨迹 ── */}
-        <section id="sit-sit-cop">
-          <div className="zeiss-section-title">坐姿COP轨迹</div>
-          <div className="zeiss-card p-4 text-center">
-            <img src={`${BASE}${d.sit_cop?.image}`} alt="坐姿COP" className="mx-auto rounded-lg" style={{ maxHeight: 400, objectFit: 'contain' }} />
-          </div>
-        </section>
-
-        {/* ── 力-时间曲线 ── */}
-        <section id="sit-force-curve">
-          <div className="zeiss-section-title">力-时间曲线</div>
-          <div className="grid grid-cols-1 gap-4">
-            <div className="zeiss-card p-4">
-              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>站立脚垫 - 总力随时间变化</div>
-              <img src={`${BASE}${d.force_curves?.stand_curve}`} alt="站立力曲线" className="w-full rounded-lg" />
-            </div>
-            <div className="zeiss-card p-4">
-              <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>坐姿坐垫 - 总力随时间变化</div>
-              <img src={`${BASE}${d.force_curves?.sit_curve}`} alt="坐姿力曲线" className="w-full rounded-lg" />
-            </div>
-          </div>
-        </section>
-
-        {/* ── 综合评估 ── */}
-        <section id="sit-conclusion">
-          <div className="zeiss-section-title">综合评估</div>
-          <div className="zeiss-card-inner p-5">
-            <h5 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>评估结论</h5>
-            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              受试者完成五次起坐测试，总时长 {d.duration_stats?.total_duration?.toFixed(1) || '--'} 秒，
-              共 {d.duration_stats?.num_cycles || '--'} 个完整周期，
-              平均周期时长 {d.duration_stats?.avg_duration?.toFixed(2) || '--'} 秒。
-              站立过程中足底压力分布显示左右脚受力基本对称，COP轨迹集中在足部中心区域，表明站立稳定性良好。
-              坐姿压力分布均匀，重心控制稳定。根据国际肌少症工作组(EWGSOP2)标准，
-              五次起坐测试时间{(d.duration_stats?.total_duration || 0) < 15 ? '小于' : '大于'}15秒，
-              {(d.duration_stats?.total_duration || 0) < 15 ? '该受试者下肢肌力正常' : '建议进一步评估下肢肌力'}。
-            </p>
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   主组件
-   ═══════════════════════════════════════════ */
+/* ===============================================
+   主组件 — 纯 BackendBridge 模式
+   =============================================== */
 export default function SitStandAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
-  const [reportMode, setReportMode] = useState('static');
+  const assessmentIdRef = useRef(`sitstand_${Date.now()}`);
+  const [csvExporting, setCsvExporting] = useState(false);
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const [showComplete, setShowComplete] = useState(false);
-  const [sitstandReportData, setSitstandReportData] = useState(null);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
+  const [analysisError, setAnalysisError] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
 
   const [seatPressureHistory, setSeatPressureHistory] = useState([]);
   const [footpadPressureHistory, setFootpadPressureHistory] = useState([]);
+
+  const [pythonResult, setPythonResult] = useState(
+    viewReportMode ? (assessments.sitstand?.report?.reportData || assessments.sitstand?.data?.pythonResult || null) : null
+  );
 
   const [sceneConfig, setSceneConfig] = useState({
     showHeatmap: true,
@@ -393,80 +186,156 @@ export default function SitStandAssessment() {
     smoothness: 0.5,
   });
 
-  const {
-    containerRef,
-    isSeatConnected,
-    isFootpadConnected,
-    isSimulating,
-    seatStats,
-    footpadStats,
-    seatCoP,
-    footpadCoP,
-    connectSeat,
-    connectFootpad,
-    startSimulation,
-    stopSimulation,
-    updateConfig,
-    isBackendMode,
-  } = usePressureScene({
-    sceneConfig,
-    isGlobalConnected,
-    backendMode: 3, // 模式3：坐垫+脚垫
-    onSeatData: useCallback((frame, stats) => {
+  /* ─── 3D 场景与数据状态 ─── */
+  const containerRef = useRef(null);
+  const sceneRef = useRef(null);
+  const [seatStats, setSeatStats] = useState(null);
+  const [footpadStats, setFootpadStats] = useState(null);
+  const [seatCoP, setSeatCoP] = useState(null);
+  const [footpadCoP, setFootpadCoP] = useState(null);
+
+  /** 过滤点状噪音 */
+  const denoiseMatrix = useCallback((matrix, minNeighbors = 2, threshold = 5) => {
+    const rows = matrix.length, cols = matrix[0].length;
+    const result = matrix.map(row => [...row]);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (matrix[r][c] <= 0 || matrix[r][c] > threshold) continue;
+        let neighbors = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && matrix[nr][nc] > 0) neighbors++;
+          }
+        }
+        if (neighbors < minNeighbors) result[r][c] = 0;
+      }
+    }
+    return result;
+  }, []);
+
+  /** flat 数组转 2D 矩阵 */
+  const flatToMatrix = useCallback((flat, size) => {
+    const matrix = [];
+    for (let r = 0; r < size; r++) matrix.push(flat.slice(r * size, (r + 1) * size));
+    return matrix;
+  }, []);
+
+  /** 顺时针旋转90° */
+  const rotateCW90 = useCallback((matrix) => {
+    const rows = matrix.length, cols = matrix[0]?.length || 0;
+    const result = [];
+    for (let c = 0; c < cols; c++) {
+      const newRow = [];
+      for (let r = rows - 1; r >= 0; r--) newRow.push(matrix[r][c]);
+      result.push(newRow);
+    }
+    return result;
+  }, []);
+
+  /** 旋转180° */
+  const rotate180 = useCallback((matrix) => {
+    return matrix.slice().reverse().map(row => [...row].reverse());
+  }, []);
+
+  /** 处理传感器数据 */
+  const processSensorData = useCallback((matrix, role) => {
+    const scene = sceneRef.current;
+    const stats = matrixStats(matrix);
+    const cop = calculateCoP(matrix);
+    if (role === 'seat') {
+      if (scene) scene.updateSeatData(rotateCW90(matrix));
+      setSeatStats(stats);
+      setSeatCoP(cop);
       setSeatPressureHistory(prev => {
         const next = [...prev, stats.totalPressure];
         return next.length > 100 ? next.slice(-100) : next;
       });
-    }, []),
-    onFootpadData: useCallback((frame, stats) => {
+    } else {
+      if (scene) scene.updateFootpadData(rotate180(matrix));
+      setFootpadStats(stats);
+      setFootpadCoP(cop);
       setFootpadPressureHistory(prev => {
         const next = [...prev, stats.totalPressure];
         return next.length > 100 ? next.slice(-100) : next;
       });
-    }, []),
-  });
+    }
+  }, [rotateCW90, rotate180]);
 
-  const deviceConnected = isSeatConnected || isFootpadConnected || isSimulating || isBackendMode;
+  // ─── 初始化 3D 场景 ───
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const scene = new PressureScene3D(sceneConfig);
+    scene.mount(containerRef.current);
+    sceneRef.current = scene;
+    return () => { scene.unmount(); sceneRef.current = null; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConfigChange = useCallback((cfg) => {
-    setSceneConfig(prev => { const n = { ...prev, ...cfg }; updateConfig(cfg); return n; });
-  }, [updateConfig]);
+    setSceneConfig(prev => { const n = { ...prev, ...cfg }; sceneRef.current?.updateConfig(cfg); return n; });
+  }, []);
 
-  const handleConnectSeat = useCallback(async () => { await connectSeat(); }, [connectSeat]);
-  const handleConnectFootpad = useCallback(async () => { await connectFootpad(); }, [connectFootpad]);
-  const handleSimulate = useCallback(async () => { await startSimulation(); }, [startSimulation]);
+  // ─── 后端数据监听 ───
+  useEffect(() => {
+    if (!isGlobalConnected) return;
 
-  const start = () => {
-    if (!deviceConnected) return;
-    setPhase('recording'); setTimer(0);
-    setSeatPressureHistory([]); setFootpadPressureHistory([]);
-    timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
-  };
-
-  const stop = () => {
-    clearInterval(timerRef.current);
-    stopSimulation(); // 停止模拟数据更新
-    setPhase('processing');
-    // 生成报告数据
-    setTimeout(() => {
-      try {
-        const report = generateSitStandReportData(
-          seatPressureHistory, footpadPressureHistory,
-          seatStats, footpadStats, seatCoP, footpadCoP, timer
-        );
-        console.log('[SitStand] 报告数据已生成:', report);
-        setSitstandReportData(report);
-      } catch (e) {
-        console.error('[SitStand] 报告生成失败:', e);
+    const handleSitData = (arr) => {
+      const size = Math.round(Math.sqrt(arr.length));
+      const matrix = flatToMatrix(arr, size);
+      // 后端 hand() 已处理线序修正和左右镜像，前端只需转置
+      const transposed = [];
+      for (let c = 0; c < size; c++) {
+        const newRow = [];
+        for (let r = 0; r < size; r++) newRow.push(matrix[r][c]);
+        transposed.push(newRow);
       }
-      setShowComplete(true);
-    }, 2000);
-  };
+      const mat = denoiseMatrix(transposed, 3, 15);
+      processSensorData(mat, 'seat');
+    };
 
-  const viewReport = () => {
-    stopSimulation(); // 停止模拟，释放3D场景资源
-    setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('sitstand', { completed: true }, { seatPressureHistory, footpadPressureHistory });
+    const handleFoot1Data = (arr) => {
+      const size = Math.round(Math.sqrt(arr.length));
+      const raw = flatToMatrix(arr, size);
+      const cols = raw[0].length, rows = raw.length;
+      const rotated = [];
+      for (let c = cols - 1; c >= 0; c--) {
+        const newRow = [];
+        for (let r = 0; r < rows; r++) newRow.push(raw[r][c]);
+        rotated.push(newRow);
+      }
+      const mirrored = rotated.map(row => [...row].reverse());
+      const flipped = [...mirrored].reverse();
+      const mat = denoiseMatrix(flipped, 3, 12);
+      processSensorData(mat, 'footpad');
+    };
+
+    backendBridge.on('sitData', handleSitData);
+    backendBridge.on('foot1Data', handleFoot1Data);
+
+    return () => {
+      backendBridge.off('sitData', handleSitData);
+      backendBridge.off('foot1Data', handleFoot1Data);
+    };
+  }, [isGlobalConnected, flatToMatrix, denoiseMatrix, processSensorData]);
+
+  // ─── CSV 导出 ───
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: 'sitstand' });
+      if (resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = resp.data.fileName;
+        a.click();
+      }
+    } catch (e) {
+      console.error('CSV导出失败:', e);
+    } finally {
+      setCsvExporting(false);
+    }
   };
 
   const fmtTime = (t) => {
@@ -474,7 +343,67 @@ export default function SitStandAssessment() {
     return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   };
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+  /* ─── 开始采集 ─── */
+  const start = async () => {
+    if (!isGlobalConnected) return;
+    setPhase('recording'); setTimer(0);
+    setSeatPressureHistory([]); setFootpadPressureHistory([]);
+    setPythonResult(null); setAnalysisError('');
+
+    try {
+      await backendBridge.setActiveMode(3); // 3=坐垫+脚垫模式
+      await backendBridge.startCol({
+        name: patientInfo?.name || '未知',
+        assessmentId: assessmentIdRef.current,
+        date: new Date().toISOString().split('T')[0],
+        colName: 'sitstand_assessment',
+      });
+    } catch (e) {
+      console.error('后端采集启动失败:', e);
+    }
+
+    timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
+  };
+
+  /* ─── 停止采集 ─── */
+  const stop = async () => {
+    clearInterval(timerRef.current);
+    setPhase('processing');
+    setAnalyzing(true);
+    setAnalysisError('');
+
+    try {
+      await backendBridge.endCol();
+      await new Promise(r => setTimeout(r, 500));
+      const resp = await backendBridge.getSitStandReport({
+        timestamp: new Date().toISOString(),
+        assessmentId: assessmentIdRef.current,
+        collectName: 'sitstand_assessment',
+      });
+      if (resp?.data?.render_data) {
+        setPythonResult(resp.data.render_data);
+        completeAssessment('sitstand', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data });
+      } else {
+        throw new Error('后端未返回报告数据');
+      }
+    } catch (e) {
+      console.error('报告生成失败:', e);
+      setAnalysisError(e.message || '报告生成失败');
+    } finally {
+      setAnalyzing(false);
+      setShowComplete(true);
+    }
+  };
+
+  const viewReport = () => {
+    setShowComplete(false); setPhase('report');
+    completeAssessment('sitstand', { completed: true, reportData: pythonResult }, { seatPressureHistory, footpadPressureHistory, pythonResult });
+  };
+
+  // ─── 组件卸载清理 ───
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
 
   /* ─── 报告模式 ─── */
   if (phase === 'report') {
@@ -490,49 +419,27 @@ export default function SitStandAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-              <button onClick={() => setReportMode('static')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'static' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'static' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                静态报告
-              </button>
-              <button onClick={() => setReportMode('dynamic')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'dynamic' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'dynamic' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                动态报告
-              </button>
-            </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="zeiss-btn-secondary text-xs py-2 px-4">
+              {csvExporting ? '导出中...' : '保存CSV'}
+            </button>
             <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary text-xs py-2 px-3 md:px-4">返回首页</button>
           </div>
         </header>
         <main className="flex-1 min-h-0 overflow-auto">
-          {reportMode === 'dynamic' ? (
-            <div className="flex items-center justify-center h-full p-6">
-              <div className="zeiss-card p-6 max-w-4xl w-full">
-                <video src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
-              </div>
-            </div>
-          ) : (
-            <SitStandReport patientInfo={patientInfo} reportData={sitstandReportData} />
-          )}
+          <SitStandReport patientInfo={patientInfo} reportData={pythonResult} />
         </main>
       </div>
     );
   }
 
-  /* ═══════════════════════════════════════════
-     采集模式 — 统一布局：
-     ┌──────────── header ────────────┐
-     │  左侧数据面板  │  3D 场景     │
-     │  (坐垫+脚垫    │  (占满右侧)  │
-     │   曲线+指标     │  + 浮动控件  │
-     │   +CoP图)       │              │
-     └──────────────────────────────┘
-     ═══════════════════════════════════════════ */
+  /* ===============================================
+     采集模式布局
+     =============================================== */
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
-      {/* ── 顶部栏 ── */}
+      {/* 顶部栏 */}
       <header className="assessment-header">
         <div className="flex items-center gap-2 md:gap-4 min-w-0">
           <button onClick={() => navigate('/dashboard')} className="w-8 h-8 flex items-center justify-center rounded-lg shrink-0" style={{ color: 'var(--text-muted)' }}>
@@ -543,62 +450,45 @@ export default function SitStandAssessment() {
           </h1>
         </div>
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          {/* 传感器连接状态 */}
+          {/* 设备连接状态 */}
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-            <div className={`zeiss-status-dot ${isSeatConnected ? 'connected' : 'disconnected'}`} />
-            <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>坐垫</span>
-            <div className={`zeiss-status-dot ${isFootpadConnected ? 'connected' : 'disconnected'}`} style={{ marginLeft: 4 }} />
-            <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>脚垫</span>
-
-            {/* 连接/模拟按钮：只要还有未连接的设备且不在模拟中就显示 */}
-            {!isSimulating && (!isSeatConnected || !isFootpadConnected) && (
-              <>
-                <span style={{ color: 'var(--border-medium)', margin: '0 2px' }}>|</span>
-                {!isSeatConnected && (
-                  <button onClick={handleConnectSeat} className="text-[10px] font-medium" style={{ color: 'var(--zeiss-blue)' }}>连接坐垫</button>
-                )}
-                {!isFootpadConnected && (
-                  <button onClick={handleConnectFootpad} className="text-[10px] font-medium" style={{ color: 'var(--zeiss-blue)' }}>连接脚垫</button>
-                )}
-                {!isSeatConnected && !isFootpadConnected && (
-                  <>
-                    <span style={{ color: 'var(--border-medium)', margin: '0 2px' }}>|</span>
-                    <button onClick={handleSimulate} className="text-[10px] font-medium" style={{ color: 'var(--success)' }}>模拟</button>
-                  </>
-                )}
-              </>
-            )}
-            {isSimulating && (
-              <>
-                <span className="text-[10px] font-medium" style={{ color: 'var(--success)' }}>模拟中</span>
-                <button onClick={stopSimulation} className="text-[10px] font-medium" style={{ color: 'var(--danger, #DC2626)' }}>停止</button>
-              </>
-            )}
+            <div className={`zeiss-status-dot ${isGlobalConnected ? 'connected' : 'disconnected'}`} />
+            <span className="text-[10px]" style={{ color: isGlobalConnected ? 'var(--success)' : 'var(--text-muted)' }}>
+              {isGlobalConnected ? '设备已连接' : '设备未连接'}
+            </span>
           </div>
           <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
         </div>
       </header>
 
-      {/* ── 完成弹窗 ── */}
+      {/* 完成弹窗 */}
       {showComplete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
           <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-            </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
+            {pythonResult ? (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
+                <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#FEF3C7' }}>
+                <svg className="w-7 h-7" fill="none" stroke="#D97706" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+              </div>
+            )}
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : analysisError ? '采集完成，分析失败' : '采集完成'}</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : analysisError || '可返回首页继续其他评估'}</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true }, { seatPressureHistory, footpadPressureHistory }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: pythonResult }, { seatPressureHistory, footpadPressureHistory, pythonResult }); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              {pythonResult && (
+                <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 主内容区：左侧面板 + 右侧3D场景 ── */}
+      {/* 主内容区：左侧面板 + 右侧3D场景 */}
       <main className="flex-1 flex min-h-0">
         {/* 左侧数据面板 */}
         <div className="assessment-side-panel">
@@ -620,24 +510,19 @@ export default function SitStandAssessment() {
               <SceneControlPanel config={sceneConfig} onConfigChange={handleConfigChange} />
             </div>
 
-            {/* 浮动：传感器信息 - 左上角 */}
+            {/* 浮动：设备状态 - 左上角 */}
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1">
-              {[
-                { label: '坐垫 32×32', connected: isSeatConnected },
-                { label: '脚垫 64×64', connected: isFootpadConnected },
-              ].map(({ label, connected }) => (
-                <div key={label} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium"
-                  style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)', color: isBackendMode ? '#7C3AED' : connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : 'var(--text-muted)' }}>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: isBackendMode ? '#7C3AED' : connected ? 'var(--success)' : isSimulating ? 'var(--warning, #D97706)' : '#D1D9E0' }} />
-                  {label} {isBackendMode ? '(后端)' : connected ? '(硬件)' : isSimulating ? '(模拟)' : '(未连接)'}
-                </div>
-              ))}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium"
+                style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)', color: isGlobalConnected ? 'var(--success)' : 'var(--text-muted)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: isGlobalConnected ? 'var(--success)' : '#D1D9E0' }} />
+                坐垫+脚垫 {isGlobalConnected ? '(已连接)' : '(未连接)'}
+              </div>
             </div>
 
             {/* 浮动：操作按钮 - 底部居中 */}
             {phase !== 'processing' && (
               <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4">
-                {phase === 'idle' && deviceConnected && (
+                {phase === 'idle' && isGlobalConnected && (
                   <div className="flex flex-col items-center gap-1.5">
                     <button onClick={start} className="w-14 h-14 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform shadow-lg" style={{ borderColor: 'var(--border-medium)', background: 'rgba(255,255,255,0.9)' }}>
                       <div className="w-10 h-10 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
@@ -645,21 +530,12 @@ export default function SitStandAssessment() {
                     <span className="text-xs font-medium px-3 py-1 rounded-full" style={{ color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)' }}>开始采集</span>
                   </div>
                 )}
-                {phase === 'idle' && !deviceConnected && (
+                {phase === 'idle' && !isGlobalConnected && (
                   <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>请先连接传感器</span>
-                    <button onClick={handleConnectSeat} className="zeiss-btn-secondary text-[11px] py-1.5 px-2.5">连接坐垫</button>
-                    <button onClick={handleConnectFootpad} className="zeiss-btn-secondary text-[11px] py-1.5 px-2.5">连接脚垫</button>
-                    <button onClick={handleSimulate} className="text-[11px] py-1.5 px-3 rounded-md font-medium" style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }}>模拟</button>
-                  </div>
-                )}
-                {phase === 'idle' && deviceConnected && !isSimulating && (!isSeatConnected || !isFootpadConnected) && (
-                  <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {isSeatConnected ? '坐垫已连接' : '脚垫已连接'}，还需连接{isSeatConnected ? '脚垫' : '坐垫'}
-                    </span>
-                    {!isSeatConnected && <button onClick={handleConnectSeat} className="zeiss-btn-secondary text-[11px] py-1.5 px-2.5">连接坐垫</button>}
-                    {!isFootpadConnected && <button onClick={handleConnectFootpad} className="zeiss-btn-secondary text-[11px] py-1.5 px-2.5">连接脚垫</button>}
+                    <svg className="w-4 h-4" style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>请先在首页连接设备</span>
                   </div>
                 )}
                 {phase === 'recording' && (
@@ -675,14 +551,14 @@ export default function SitStandAssessment() {
                 )}
               </div>
             )}
-
-            {/* 处理中遮罩 */}
             {phase === 'processing' && (
               <div className="absolute inset-0 flex flex-col items-center justify-center zeiss-overlay rounded-xl">
                 <div className="w-64 h-2 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border-light)' }}>
                   <div className="h-full rounded-full progress-animate" style={{ background: 'linear-gradient(to right, var(--zeiss-blue), #0891B2)' }} />
                 </div>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>正在生成报告，请稍候...</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  {analyzing ? '正在分析采集数据，请稍候...' : '正在生成报告，请稍候...'}
+                </p>
               </div>
             )}
           </div>

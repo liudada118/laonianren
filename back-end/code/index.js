@@ -6,15 +6,16 @@ const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
-const { startWorker, callPy } = require('./pyWorker')
+// const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
 const devWebRoot = path.join(__dirname, 'client', 'dist')
 const prodWebRoot = path.join(__dirname, '..', 'build')
 const webRoot = isPackaged ? prodWebRoot : devWebRoot
-const defaultDevPort = process.env.VITE_DEV_PORT || '5555'
+const defaultDevPort = process.env.VITE_DEV_PORT || '5173'
 let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaultDevPort}`
 let viteProcess = null
+let apiChild = null  // serialServer 子进程引用
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
@@ -35,20 +36,40 @@ async function checkDevServerOnce(url, timeoutMs = 1000) {
 
 async function waitForDevServer(url, timeoutMs = 20000) {
   const start = Date.now()
+  console.log('[vite] waiting for dev server at:', url)
   while (Date.now() - start < timeoutMs) {
     // eslint-disable-next-line no-await-in-loop
     const ok = await checkDevServerOnce(url, 1000)
-    if (ok) return true
+    if (ok) {
+      console.log('[vite] dev server is reachable at:', url)
+      return true
+    }
     // eslint-disable-next-line no-await-in-loop
     await wait(500)
   }
+  // 如果默认端口不可达，扫描附近端口
+  const basePort = parseInt(new URL(url).port, 10) || 5173
+  console.log('[vite] default port not reachable, scanning ports', basePort, '-', basePort + 20)
+  for (let p = basePort + 1; p <= basePort + 20; p++) {
+    const tryUrl = url.replace(':' + basePort, ':' + p)
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await checkDevServerOnce(tryUrl, 500)
+    if (ok) {
+      console.log('[vite] found dev server at port:', p)
+      devServerUrl = tryUrl
+      return true
+    }
+  }
+  console.log('[vite] dev server not found on any port')
   return false
 }
 
 function startViteDevServer() {
   if (viteProcess) return Promise.resolve()
 
-  const clientDir = path.join(__dirname, 'client')
+  // 前端项目在 front-end 目录
+  const clientDir = path.join(__dirname, '..', '..', 'front-end')
+  console.log('[vite] frontend dir:', clientDir)
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const viteArgs = ['run', 'dev', '--', '--port', defaultDevPort]
   const viteBin = path.join(
@@ -57,12 +78,24 @@ function startViteDevServer() {
     '.bin',
     process.platform === 'win32' ? 'vite.cmd' : 'vite'
   )
+
+  // 所有 spawn 策略统一使用 shell: true 以兼容 Windows
   const attempts = [
-    () => spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'] }),
-    () => spawn(`${npmCmd} ${viteArgs.join(' ')}`, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true }),
-    () => fs.existsSync(viteBin)
-      ? spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'] })
-      : null
+    () => {
+      console.log('[vite] attempt 1: npm run dev (shell)')
+      return spawn(npmCmd, viteArgs, { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    },
+    () => {
+      if (!fs.existsSync(viteBin)) return null
+      console.log('[vite] attempt 2: direct vite bin')
+      return spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    },
+    () => {
+      // 最后兜底：用 npx vite
+      console.log('[vite] attempt 3: npx vite')
+      const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+      return spawn(npxCmd, ['vite', '--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    }
   ]
 
   return new Promise((resolve) => {
@@ -104,6 +137,7 @@ function startViteDevServer() {
 
       const ready = () => {
         cleanup()
+        console.log('[vite] ready, devServerUrl =', devServerUrl)
         finish()
       }
 
@@ -113,9 +147,9 @@ function startViteDevServer() {
           process.stdout.write(`[vite] ${text}`)
         }
         const localMatch =
-          text.match(/https?:\/\/localhost:\d+/i) ||
-          text.match(/https?:\/\/127\.0\.0\.1:\d+/i) ||
-          text.match(/https?:\/\/\[::1\]:\d+/i)
+          text.match(/https?:\/\/localhost:(\d+)/i) ||
+          text.match(/https?:\/\/127\.0\.0\.1:(\d+)/i) ||
+          text.match(/https?:\/\/\[::1\]:(\d+)/i)
         const anyMatch = text.match(/https?:\/\/[^\s]+/i)
         if (localMatch) {
           devServerUrl = localMatch[0]
@@ -255,12 +289,14 @@ function startApiChild() {
     const child = fork(path.join(__dirname, './server/serialServer.js'), {
       silent: false,
       env: {
+        ...process.env,
         isPackaged: isPackaged,
         appPath: app.getAppPath(),
         userData: app.getPath('userData'),
         resourcesPath: process.resourcesPath
       }
     })
+    apiChild = child  // 保存引用以便退出时清理
 
     const readyTimer = setTimeout(() => {
       reject(new Error('API child not ready in time'));
@@ -326,13 +362,20 @@ const createWindow = async () => {
   }
 
   if (!isPackaged) {
-    await startViteDevServer()
-    const ok = await waitForDevServer(devServerUrl, 20000)
+    console.log('[window] checking dev server first:', devServerUrl)
+    let ok = await waitForDevServer(devServerUrl, 3000)
+    if (!ok) {
+      console.log('[window] starting vite dev server...')
+      await startViteDevServer()
+      console.log('[window] vite started, devServerUrl =', devServerUrl)
+      ok = await waitForDevServer(devServerUrl, 20000)
+    }
+    console.log('[window] waitForDevServer result:', ok, 'url:', devServerUrl)
     if (!ok) {
       const safeUrl = devServerUrl
       const msg = encodeURIComponent(
         `Vite dev server not reachable: ${safeUrl}\n\n` +
-        `Please run: npm run dev -- --port ${defaultDevPort} (in ./client) and keep it running.`
+        `Please run: npm run start (in ../front-end) and keep it running.`
       )
       win.loadURL(`data:text/plain;charset=utf-8,${msg}`)
 
@@ -468,7 +511,7 @@ app.whenReady().then(async () => {
   // 开始本地api线程
   await startApiChild()
   // 开启python线程
-  startWorker(); // 
+  // startWorker(); // [已迁移到JS算法] Python子进程不再需要
   await createWindow()
 
   Menu.setApplicationMenu(null);
@@ -520,9 +563,31 @@ app.whenReady().then(async () => {
   // }
 })
 
+app.on('window-all-closed', () => {
+  app.quit()
+})
+
 app.on('before-quit', () => {
+  // 清理 Vite 开发服务器子进程
   if (viteProcess) {
     viteProcess.kill()
+    viteProcess = null
+  }
+  // 清理 serialServer 子进程（占用端口 19245 + 19999）
+  if (apiChild) {
+    apiChild.kill()
+    apiChild = null
+  }
+})
+
+// 兜底：确保进程退出时强制清理所有子进程
+app.on('will-quit', () => {
+  if (apiChild && !apiChild.killed) {
+    apiChild.kill('SIGKILL')
+    apiChild = null
+  }
+  if (viteProcess && !viteProcess.killed) {
+    viteProcess.kill('SIGKILL')
     viteProcess = null
   }
 })

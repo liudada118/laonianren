@@ -70,6 +70,39 @@ def generate_grip_report(sensor_data, hand_type, times=None, imu_data=None):
 
 
 def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=None):
+    # 传感器面积参数
+    SENSOR_AREA_MM2 = 24.0  # 4mm x 6mm
+
+    # 离散传感器索引映射 (1-based，与 LeftHand/RightHand 类一致，排除 -1 和指尖行)
+    LEFT_HAND_INDICES = {
+        'thumb':         [19, 18, 17, 3, 2, 1, 243, 242, 241, 227, 226, 225],
+        'index_finger':  [22, 21, 20, 6, 5, 4, 246, 245, 244, 230, 229, 228],
+        'middle_finger': [25, 24, 23, 9, 8, 7, 249, 248, 247, 233, 232, 231],
+        'ring_finger':   [28, 27, 26, 12, 11, 10, 252, 251, 250, 236, 235, 234],
+        'little_finger': [31, 30, 29, 15, 14, 13, 255, 254, 253, 239, 238, 237],
+        'palm': [
+            207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196,
+            191, 190, 189, 188, 187, 186, 185, 184, 183, 182, 181, 180, 179, 178, 177,
+            175, 174, 173, 172, 171, 170, 169, 168, 167, 166, 165, 164, 163, 162, 161,
+            159, 158, 157, 156, 155, 154, 153, 152, 151, 150, 149, 148, 147, 146, 145,
+            143, 142, 141, 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
+        ],
+    }
+    RIGHT_HAND_INDICES = {
+        'thumb':         [240, 239, 238, 256, 255, 254, 16, 15, 14, 32, 31, 30],
+        'index_finger':  [237, 236, 235, 253, 252, 251, 13, 12, 11, 29, 28, 27],
+        'middle_finger': [234, 233, 232, 250, 249, 248, 10, 9, 8, 26, 25, 24],
+        'ring_finger':   [231, 230, 229, 247, 246, 245, 7, 6, 5, 23, 22, 21],
+        'little_finger': [228, 227, 226, 244, 243, 242, 4, 3, 2, 20, 19, 18],
+        'palm': [
+            61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50,
+            80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66,
+            96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82,
+            112, 111, 110, 109, 108, 107, 106, 105, 104, 103, 102, 101, 100, 99, 98,
+            128, 127, 126, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114,
+        ],
+    }
+
     arr = np.asarray(sensor_data, dtype=float)
     if arr.ndim == 1:
         arr = arr.reshape(1, -1)
@@ -91,14 +124,9 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         if t.shape[0] != n:
             t = np.arange(n, dtype=float) * 0.01
 
-    part_slices = {
-        'thumb': (0, 42),
-        'index_finger': (42, 84),
-        'middle_finger': (84, 126),
-        'ring_finger': (126, 168),
-        'little_finger': (168, 210),
-        'palm': (210, 256),
-    }
+    # 使用正确的离散传感器索引映射（与 LeftHand/RightHand 类一致）
+    hand_indices = LEFT_HAND_INDICES if hand_type == '左手' else RIGHT_HAND_INDICES
+    part_keys = ['thumb', 'index_finger', 'middle_finger', 'ring_finger', 'little_finger', 'palm']
     part_names = {
         'thumb': 'Thumb',
         'index_finger': 'Index',
@@ -107,12 +135,23 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         'little_finger': 'Little',
         'palm': 'Palm',
     }
+    part_indices = {key: hand_indices[key] for key in part_keys}
 
+    # 计算各区域力-时间序列（使用离散索引）
     force_time_series = {}
-    for k, (a, b) in part_slices.items():
-        force_time_series[k] = arr[:, a:b].sum(axis=1)
+    for k in part_keys:
+        indices = part_indices[k]
+        series = np.zeros(n, dtype=float)
+        for i in range(n):
+            s = 0.0
+            for idx in indices:
+                array_idx = idx - 1
+                if 0 <= array_idx < 256 and arr[i, array_idx] > 0:
+                    s += arr[i, array_idx]
+            series[i] = s
+        force_time_series[k] = series
     total_force_series = np.zeros(n, dtype=float)
-    for k in part_slices:
+    for k in part_keys:
         total_force_series += force_time_series[k]
     force_time_series['total'] = total_force_series
 
@@ -163,16 +202,23 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
             last_shake_t = ti
 
     peak_frame = arr[peak_idx]
-    sensor_area_mm2 = 24.0
+    sensor_area_mm2 = SENSOR_AREA_MM2
     fingers = []
     total_force = 0.0
     total_area = 0
-    for key, (a, b) in part_slices.items():
-        section = peak_frame[a:b]
-        force = float(np.sum(section))
-        nonzero = int(np.count_nonzero(section > 0))
+    for key in part_keys:
+        indices = part_indices[key]
+        force = 0.0
+        nonzero = 0
+        adc_sum = 0
+        for idx in indices:
+            array_idx = idx - 1
+            if 0 <= array_idx < 256 and peak_frame[array_idx] > 0:
+                force += float(peak_frame[array_idx])
+                nonzero += 1
+                adc_sum += peak_frame[array_idx]
         area = int(nonzero * sensor_area_mm2)
-        adc = int(round(float(np.mean(section[section > 0])))) if nonzero else 0
+        adc = int(round(adc_sum / nonzero)) if nonzero else 0
         total_force += force
         total_area += area
         fingers.append(
@@ -182,14 +228,14 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
                 'force': round(force, 2),
                 'area': area,
                 'adc': adc,
-                'points': f'{nonzero}/{b - a}',
+                'points': f'{nonzero}/{len(indices)}',
             }
         )
 
     step = max(1, n // 500)
-    sampled_t = t[::step].tolist()
-    sampled_force = {k: force_time_series[k][::step].tolist() for k in part_slices}
-    sampled_force['total'] = force_time_series['total'][::step].tolist()
+    sampled_t = [round(float(x), 3) for x in t[::step]]
+    sampled_force = {k: [round(float(x), 2) for x in force_time_series[k][::step]] for k in part_keys}
+    sampled_force['total'] = [round(float(x), 2) for x in force_time_series['total'][::step]]
 
     return {
         'handType': hand_type,
@@ -197,8 +243,8 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         'totalFrames': n,
         'timeRange': f'{float(t[0]):.3f}s ~ {float(t[-1]):.3f}s',
         'peakInfo': {
-            'peak_force': peak_force,
-            'peak_time': peak_time,
+            'peak_force': round(peak_force, 2),
+            'peak_time': round(peak_time, 3),
         },
         'timeAnalysis': [
             {'label': 'Grip Start', 'value': f'{grip_start_time:.3f} s'},
@@ -216,11 +262,11 @@ def _fallback_generate_grip_report(sensor_data, hand_type, times=None, imu_data=
         'times': sampled_t,
         'forceTimeSeries': sampled_force,
         'eulerData': {
-            'roll': euler_roll[::step].tolist(),
-            'pitch': euler_pitch[::step].tolist(),
-            'yaw': euler_yaw[::step].tolist(),
+            'roll': [round(float(x), 2) for x in euler_roll[::step]],
+            'pitch': [round(float(x), 2) for x in euler_pitch[::step]],
+            'yaw': [round(float(x), 2) for x in euler_yaw[::step]],
         },
-        'angularVelocity': angular_velocity[::step].tolist(),
+        'angularVelocity': [round(float(x), 2) for x in angular_velocity[::step]],
     }
 
 

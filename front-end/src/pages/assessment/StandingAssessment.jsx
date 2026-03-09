@@ -1,16 +1,14 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
 import InsoleScene from '../../components/three/InsoleScene';
-import { serialService } from '../../lib/SerialService';
-import { backendBridge } from '../../lib/BackendBridge';
 import {
   splitLeftRight, calculateCOP, calculateTotalPressure, calculateContactArea,
-  getValidCoords, divideXRegions, calculateRegionPressure, processFrameRealtime,
-  generateFootReport, parseFrameData
+  getValidCoords, divideXRegions, calculateRegionPressure, parseFrameData
 } from '../../lib/FootAnalysis';
+import { backendBridge } from '../../lib/BackendBridge';
 
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
 
@@ -143,18 +141,24 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   );
 }
 
-/* ─── 主组件 ─── */
+/* ===============================================
+   主组件 — 纯 BackendBridge 模式
+   =============================================== */
 export default function StandingAssessment() {
   const navigate = useNavigate();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus } = useAssessment();
+  const location = useLocation();
+  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
+  const viewReportMode = location.state?.viewReport && assessments.standing?.completed;
 
-  // 设备与连接状态
-  const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
-  const [phase, setPhase] = useState('idle'); // idle | recording | processing | report
+  const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
+  const assessmentIdRef = useRef(`standing_${Date.now()}`);
+  const [csvExporting, setCsvExporting] = useState(false);
   const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
   const timerRef = useRef(null);
 
   // 3D 场景参数
@@ -164,148 +168,26 @@ export default function StandingAssessment() {
   const [filterThreshold, setFilterThreshold] = useState(0);
 
   // 实时数据
-  const insoleDataRef = useRef(null); // 直接通过 ref 传递给 InsoleScene，避免 memo 阻止更新
-  const [realtimeMatrix, setRealtimeMatrix] = useState(null); // 64×64 矩阵 → 用于左侧面板数据计算
+  const insoleDataRef = useRef(null);
   const [copTrajectory, setCopTrajectory] = useState([]);
   const [leftPressure, setLeftPressure] = useState({ forefoot: 0, midfoot: 0, hindfoot: 0 });
   const [rightPressure, setRightPressure] = useState({ forefoot: 0, midfoot: 0, hindfoot: 0 });
   const [realtimeData, setRealtimeData] = useState({ leftTotal: 0, rightTotal: 0, leftArea: 0, rightArea: 0, balance: 50 });
 
-  // 采集数据缓存
-  const collectedFrames = useRef([]);
-  const prevFrame = useRef(null);
-  const isRecordingRef = useRef(false);
-
   // 报告数据
-  const [reportData, setReportData] = useState(null);
+  const [pythonResult, setPythonResult] = useState(
+    viewReportMode ? (assessments.standing?.report?.reportData || assessments.standing?.data?.pythonResult || null) : null
+  );
+  const [pythonImages, setPythonImages] = useState(null);
 
-  // 后端模式
-  const [isBackendMode, setIsBackendMode] = useState(false);
-  const backendCleanupRef = useRef(null);
-
-  // 模拟定时器
-  const simIntervalRef = useRef(null);
-  const simDataRef = useRef(null);  // 真实模拟数据缓存
-  const simFrameIdx = useRef(0);    // 当前回放帧索引
-  const currentRawFlat = useRef(null); // 当前帧的原始flat数据（未经parseFrameData变换）
-
-  // ─── 串口数据回调 ───
-  const handleSerialData = useCallback((matrix) => {
-    // 更新 3D 可视化（通过 ref 直接更新，绕过 memo）
-    insoleDataRef.current = matrix;
-    setRealtimeMatrix(matrix);
-
-    // 分离左右脚
-    const { left: leftMatrix, right: rightMatrix } = splitLeftRight(matrix);
-
-    // 计算压力
-    const leftTotal = calculateTotalPressure(leftMatrix);
-    const rightTotal = calculateTotalPressure(rightMatrix);
-    const totalPressure = leftTotal + rightTotal;
-    const leftArea = calculateContactArea(leftMatrix);
-    const rightArea = calculateContactArea(rightMatrix);
-
-    // 计算区域压力
-    const leftCoords = getValidCoords(leftMatrix);
-    const rightCoords = getValidCoords(rightMatrix);
-    const leftSections = divideXRegions(leftCoords);
-    const rightSections = divideXRegions(rightCoords);
-    const leftRegion = calculateRegionPressure(leftMatrix, leftSections);
-    const rightRegion = calculateRegionPressure(rightMatrix, rightSections);
-
-    setLeftPressure({
-      forefoot: leftRegion.forefoot.percent,
-      midfoot: leftRegion.midfoot.percent,
-      hindfoot: leftRegion.hindfoot.percent
-    });
-    setRightPressure({
-      forefoot: rightRegion.forefoot.percent,
-      midfoot: rightRegion.midfoot.percent,
-      hindfoot: rightRegion.hindfoot.percent
-    });
-    setRealtimeData({
-      leftTotal, rightTotal, leftArea, rightArea,
-      balance: totalPressure > 0 ? (leftTotal / totalPressure) * 100 : 50
-    });
-
-    // COP 轨迹
-    const cop = calculateCOP(matrix);
-    if (cop) {
-      setCopTrajectory(prev => {
-        const next = [...prev, cop];
-        return next.length > 500 ? next.slice(-500) : next;
-      });
-    }
-
-    // 采集中保存帧数据
-    if (isRecordingRef.current) {
-      // 如果有原始flat数据（模拟模式），使用原始数据；否则用matrix.flat()（真实硬件模式）
-      const frameToSave = currentRawFlat.current || matrix.flat();
-      collectedFrames.current.push(frameToSave);
-    }
-
-    prevFrame.current = matrix.flat();
-  }, []);
-
-  // ─── 停止模拟 ───
-  const stopSimulation = useCallback(() => {
-    if (simIntervalRef.current) {
-      clearInterval(simIntervalRef.current);
-      simIntervalRef.current = null;
-    }
-  }, []);
-
-  // ─── 连接真实设备 ───
-  const handleConnect = useCallback(async () => {
-    // 连接前先停止模拟，防止数据冲突
-    stopSimulation();
-    // 清空3D显示（白板）
-    insoleDataRef.current = null;
-    setDeviceStatus('connecting');
-    try {
-      serialService.setOnData(handleSerialData);
-      serialService.setOnLog((msg, type) => {
-        console.log(`[Serial ${type}] ${msg}`);
-      });
-      serialService.setOnStatus((status) => {
-        if (status === 'connected') setDeviceStatus('connected');
-        else if (status === 'disconnected') setDeviceStatus('disconnected');
-        else if (status === 'error') setDeviceStatus('disconnected');
-      });
-      const ok = await serialService.connect();
-      if (!ok) setDeviceStatus('disconnected');
-    } catch (err) {
-      console.error('连接失败:', err);
-      setDeviceStatus('disconnected');
-    }
-  }, [handleSerialData, stopSimulation]);
-
-  // ─── 断开连接 ───
-  const handleDisconnect = useCallback(async () => {
-    // 停止模拟定时器
-    stopSimulation();
-    await serialService.disconnect();
-    setDeviceStatus('disconnected');
-    setRealtimeMatrix(null);
-    // 清空3D显示（白板）
-    insoleDataRef.current = null;
-    // 重置所有实时数据
-    setCopTrajectory([]);
-    setLeftPressure({ forefoot: 0, midfoot: 0, hindfoot: 0 });
-    setRightPressure({ forefoot: 0, midfoot: 0, hindfoot: 0 });
-    setRealtimeData({ leftTotal: 0, rightTotal: 0, leftArea: 0, rightArea: 0, balance: 50 });
-  }, [stopSimulation]);
-
-   // ─── 噪音过滤（连通域分析） ───
+  // ─── 噪音过滤（连通域分析） ───
   const denoiseMatrix = useCallback((matrix, threshold = 12, minArea = 15) => {
     const rows = matrix.length;
     const cols = matrix[0]?.length || 0;
     if (rows === 0 || cols === 0) return matrix;
 
-    // 步骤1：低压力置零
     const cleaned = matrix.map(row => row.map(v => v < threshold ? 0 : v));
 
-    // 步骤2：BFS 连通域分析
     const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
     const regions = [];
     const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
@@ -331,7 +213,6 @@ export default function StandingAssessment() {
       }
     }
 
-    // 步骤3：小区域置零
     for (const cells of regions) {
       if (cells.length < minArea) {
         for (const [r, c] of cells) cleaned[r][c] = 0;
@@ -340,153 +221,153 @@ export default function StandingAssessment() {
     return cleaned;
   }, []);
 
-  // ─── 模拟数据（使用真CSV数据回放） ───
-  const handleSimulate = useCallback(async () => {
-    setDeviceStatus('connected');
-    if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+  // ─── 处理传感器数据 ───
+  const handleSensorData = useCallback((matrix) => {
+    insoleDataRef.current = matrix;
 
-    // 加载真实数据（如果尚未加载）
-    if (!simDataRef.current) {
-      try {
-        const resp = await fetch('/standing_sim_data.json');
-        simDataRef.current = await resp.json();
-        console.log(`[模拟] 加载真实数据: ${simDataRef.current.length} 帧`);
-      } catch (err) {
-        console.error('[模拟] 加载数据失败，使用随机数据:', err);
-        simDataRef.current = null;
-      }
+    const { left: leftMatrix, right: rightMatrix } = splitLeftRight(matrix);
+    const leftTotal = calculateTotalPressure(leftMatrix);
+    const rightTotal = calculateTotalPressure(rightMatrix);
+    const totalPressure = leftTotal + rightTotal;
+    const leftArea = calculateContactArea(leftMatrix);
+    const rightArea = calculateContactArea(rightMatrix);
+
+    const leftCoords = getValidCoords(leftMatrix);
+    const rightCoords = getValidCoords(rightMatrix);
+    const leftSections = divideXRegions(leftCoords);
+    const rightSections = divideXRegions(rightCoords);
+    const leftRegion = calculateRegionPressure(leftMatrix, leftSections);
+    const rightRegion = calculateRegionPressure(rightMatrix, rightSections);
+
+    setLeftPressure({
+      forefoot: leftRegion.forefoot.percent,
+      midfoot: leftRegion.midfoot.percent,
+      hindfoot: leftRegion.hindfoot.percent
+    });
+    setRightPressure({
+      forefoot: rightRegion.forefoot.percent,
+      midfoot: rightRegion.midfoot.percent,
+      hindfoot: rightRegion.hindfoot.percent
+    });
+    setRealtimeData({
+      leftTotal, rightTotal, leftArea, rightArea,
+      balance: totalPressure > 0 ? (leftTotal / totalPressure) * 100 : 50
+    });
+
+    const cop = calculateCOP(matrix);
+    if (cop) {
+      setCopTrajectory(prev => {
+        const next = [...prev, cop];
+        return next.length > 500 ? next.slice(-500) : next;
+      });
     }
+  }, []);
 
-    simFrameIdx.current = 0;
-
-    simIntervalRef.current = setInterval(() => {
-      let matrix;
-      if (simDataRef.current && simDataRef.current.length > 0) {
-        // 使用真实数据循环回放 - 数据是原始flat数组，需要parseFrameData变换
-        const flatData = simDataRef.current[simFrameIdx.current % simDataRef.current.length];
-        currentRawFlat.current = flatData; // 保存原始数据供采集时使用
-        matrix = parseFrameData(flatData);
-        simFrameIdx.current++;
-      } else {
-        currentRawFlat.current = null; // 随机数据没有原始flat
-        // 降级：生成随机模拟数据
-        matrix = [];
-        const t = Date.now() * 0.001;
-        for (let i = 0; i < 64; i++) {
-          const row = [];
-          for (let j = 0; j < 64; j++) {
-            let val = 0;
-            if (j < 32) {
-              const cx = 32, cy = 16;
-              const dx = (i - cx) / 20, dy = (j - cy) / 12;
-              const dist = dx * dx + dy * dy;
-              if (dist < 1.2) val = Math.max(0, (1 - dist) * 80 + Math.sin(t * 2 + i * 0.1 + j * 0.1) * 15 + Math.random() * 5);
-            } else {
-              const cx = 32, cy = 48;
-              const dx = (i - cx) / 20, dy = (j - cy) / 12;
-              const dist = dx * dx + dy * dy;
-              if (dist < 1.2) val = Math.max(0, (1 - dist) * 75 + Math.sin(t * 2.2 + i * 0.1 + j * 0.1) * 15 + Math.random() * 5);
-            }
-            row.push(Math.min(255, Math.round(val)));
-          }
-          matrix.push(row);
-        }
-      }
-      // 应用噪音过滤
-      matrix = denoiseMatrix(matrix, 12, 15);
-      handleSerialData(matrix);
-    }, 50); // 20fps
-  }, [handleSerialData, denoiseMatrix]);
-
-  // ─── 后端数据通道：全局一键连接后自动启用 ───
+  // ─── 后端数据监听 ───
   useEffect(() => {
     if (!isGlobalConnected) return;
-    if (backendCleanupRef.current) return; // 已在监听
 
-    // 设置脚垫模式，后端只推送 foot1-4 数据
-    backendBridge.setActiveMode(5).then(() => {
-      console.log('[StandingAssessment] 已设置后端模式 mode=5');
-    }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
-
-    setIsBackendMode(true);
-    setDeviceStatus('connected');
-
-    // 监听后端推送的脚垫数据（使用 foot1 作为主数据源）
-    const handleBackendFootData = (arr) => {
-      if (!arr || arr.length === 0) return;
-      // 后端推送的是 4096 个值的 flat 数组
-      currentRawFlat.current = arr;
+    const handleFoot1Data = (arr) => {
       const matrix = parseFrameData(arr);
-      // 应用噪音过滤
-      const filtered = denoiseMatrix(matrix, 12, 15);
-      handleSerialData(filtered);
+      const denoised = denoiseMatrix(matrix, 12, 15);
+      handleSensorData(denoised);
     };
 
-    const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
-
-    backendCleanupRef.current = () => {
-      unsubFoot1();
-      setIsBackendMode(false);
-    };
-
-    console.log('[StandingAssessment] 后端数据通道已建立');
+    backendBridge.on('foot1Data', handleFoot1Data);
 
     return () => {
-      if (backendCleanupRef.current) {
-        backendCleanupRef.current();
-        backendCleanupRef.current = null;
-      }
+      backendBridge.off('foot1Data', handleFoot1Data);
     };
-  }, [isGlobalConnected, handleSerialData, denoiseMatrix]);
+  }, [isGlobalConnected, handleSensorData, denoiseMatrix]);
 
-  // ─── 滤波阈值 ───
-  useEffect(() => {
-    serialService.setFilterThreshold(filterThreshold);
-  }, [filterThreshold]);
+  // ─── CSV 导出 ───
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: 'standing' });
+      if (resp?.data?.fileName) {
+        const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = resp.data.fileName;
+        a.click();
+      }
+    } catch (e) {
+      console.error('CSV导出失败:', e);
+    } finally {
+      setCsvExporting(false);
+    }
+  };
 
-  // ─── 开始采集 ───
-  const startRecording = () => {
+  const handleClose = () => navigate('/dashboard');
+  const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+
+  /* ─── 开始采集 ─── */
+  const startRecording = async () => {
     setPhase('recording');
     setTimer(0);
     setCopTrajectory([]);
-    collectedFrames.current = [];
-    isRecordingRef.current = true;
+    setAnalysisError('');
+
+    try {
+      await backendBridge.setActiveMode(4); // 4=静态站立评估（仅foot1）
+      await backendBridge.startCol({
+        name: patientInfo?.name || '未知',
+        assessmentId: assessmentIdRef.current,
+        date: new Date().toISOString().split('T')[0],
+        colName: 'standing_assessment',
+      });
+    } catch (e) {
+      console.error('后端采集启动失败:', e);
+    }
+
     timerRef.current = setInterval(() => setTimer(p => p + 1), 100);
   };
 
-  // ─── 结束采集 ───
-  const stopRecording = () => {
+  /* ─── 停止采集 ─── */
+  const stopRecording = async () => {
     clearInterval(timerRef.current);
     timerRef.current = null;
-    isRecordingRef.current = false;
     setPhase('processing');
+    setAnalyzing(true);
+    setAnalysisError('');
 
-    // 停止模拟
-    if (simIntervalRef.current) {
-      clearInterval(simIntervalRef.current);
-      simIntervalRef.current = null;
-    }
-
-    // 生成报告
-    setTimeout(() => {
-      if (collectedFrames.current.length > 0) {
-        const report = generateFootReport(collectedFrames.current);
-        console.log('分析报告:', report);
-        setReportData(report);
+    try {
+      await backendBridge.endCol();
+      await new Promise(r => setTimeout(r, 500));
+      const resp = await backendBridge.getStandingReport({
+        timestamp: new Date().toISOString(),
+        assessmentId: assessmentIdRef.current,
+        fps: 20,
+        threshold_ratio: 0.05,
+      });
+      if (resp?.data?.render_data) {
+        setPythonResult(resp.data.render_data);
+        setPythonImages(resp.data.render_data?.images || null);
+        completeAssessment('standing', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data });
+      } else {
+        throw new Error('后端未返回报告数据');
       }
+    } catch (e) {
+      console.error('报告生成失败:', e);
+      setAnalysisError(e.message || '报告生成失败');
+    } finally {
+      setAnalyzing(false);
       setShowCompleteDialog(true);
-    }, 2000);
+    }
   };
 
-  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); setReportMode('static'); completeAssessment('standing', { completed: true }); };
-  const handleClose = () => navigate('/dashboard');
-  const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+  const viewReport = () => {
+    setShowCompleteDialog(false);
+    setPhase('report');
+    setReportMode('static');
+    completeAssessment('standing', { completed: true, reportData: pythonResult }, { pythonResult });
+  };
 
   // 清理
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
     };
   }, []);
 
@@ -517,6 +398,10 @@ export default function StandingAssessment() {
               </button>
             </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+            <button onClick={handleExportCsv} disabled={csvExporting}
+              className="zeiss-btn-secondary text-xs py-2 px-4">
+              {csvExporting ? '导出中...' : '保存CSV'}
+            </button>
             <button onClick={handleClose} className="zeiss-btn-primary text-xs py-2 px-3 md:px-4">返回首页</button>
           </div>
         </header>
@@ -528,14 +413,14 @@ export default function StandingAssessment() {
               </div>
             </div>
           ) : (
-            <StandingReport reportData={reportData} patientInfo={patientInfo} />
+            <StandingReport patientInfo={patientInfo} pythonResult={pythonResult} pythonImages={pythonImages} reportDataFromBackend={pythonResult} />
           )}
         </main>
       </div>
     );
   }
 
-  /* ─── 采集模式 — 左侧数据面板 + 右侧3D InsoleScene ─── */
+  /* ─── 采集模式 ─── */
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
       <header className="assessment-header">
@@ -548,21 +433,12 @@ export default function StandingAssessment() {
           </h1>
         </div>
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
+          {/* 设备连接状态 */}
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-            <div className={`zeiss-status-dot ${deviceStatus}`} />
-            <span className="text-xs" style={{ color: isBackendMode ? '#7C3AED' : 'var(--text-tertiary)' }}>
-              {isBackendMode ? '后端已连接' : deviceStatus === 'connected' ? '已连接' : deviceStatus === 'connecting' ? '连接中...' : '未连接'}
+            <div className={`zeiss-status-dot ${isGlobalConnected ? 'connected' : 'disconnected'}`} />
+            <span className="text-xs" style={{ color: isGlobalConnected ? 'var(--success)' : 'var(--text-muted)' }}>
+              {isGlobalConnected ? '设备已连接' : '设备未连接'}
             </span>
-            {!isBackendMode && deviceStatus === 'disconnected' && (
-              <>
-                <button onClick={handleConnect} className="text-xs font-medium ml-1" style={{ color: 'var(--zeiss-blue)' }}>连接</button>
-                <span style={{ color: 'var(--border-medium)' }}>|</span>
-                <button onClick={handleSimulate} className="text-xs font-medium" style={{ color: 'var(--success)' }}>模拟</button>
-              </>
-            )}
-            {!isBackendMode && deviceStatus === 'connected' && (
-              <button onClick={handleDisconnect} className="text-xs font-medium ml-1" style={{ color: C.red }}>断开</button>
-            )}
           </div>
           <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
@@ -573,16 +449,23 @@ export default function StandingAssessment() {
       {showCompleteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
           <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-            </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>共采集 {collectedFrames.current.length} 帧数据</p>
+            {pythonResult ? (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
+                <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#FEF3C7' }}>
+                <svg className="w-7 h-7" fill="none" stroke="#D97706" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+              </div>
+            )}
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : analysisError ? '采集完成，分析失败' : '采集完成'}</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : analysisError || '可返回首页继续其他评估'}</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('standing', { completed: true }); navigate('/dashboard'); }}
+              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('standing', { completed: true, reportData: pythonResult }, { pythonResult }); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport}
-                className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              {pythonResult && (
+                <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              )}
             </div>
           </div>
         </div>
@@ -599,7 +482,7 @@ export default function StandingAssessment() {
           />
         </div>
 
-        {/* 右侧3D区域 - huisheng-sdk InsoleScene */}
+        {/* 右侧3D区域 */}
         <div className="flex-1 min-w-0 flex flex-col items-center justify-center relative overflow-hidden">
           <div className="relative w-full h-full model-container m-3 rounded-xl overflow-hidden">
             <InsoleScene
@@ -637,13 +520,24 @@ export default function StandingAssessment() {
               </div>
             </div>
 
+            {/* 浮动：设备状态 - 左上角 */}
+            <div className="absolute top-3 left-3 z-10">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium"
+                style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(4px)', color: isGlobalConnected ? 'var(--success)' : 'var(--text-muted)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: isGlobalConnected ? 'var(--success)' : '#D1D9E0' }} />
+                脚垫 64x64 {isGlobalConnected ? '(已连接)' : '(未连接)'}
+              </div>
+            </div>
+
             {/* 处理中遮罩 */}
             {phase === 'processing' && (
               <div className="absolute inset-0 flex flex-col items-center justify-center zeiss-overlay rounded-xl">
                 <div className="w-64 h-2 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border-light)' }}>
                   <div className="h-full rounded-full progress-animate" style={{ background: 'linear-gradient(to right, var(--zeiss-blue), #0891B2)' }} />
                 </div>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>正在分析足底压力数据，请稍候...</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  {analyzing ? '正在分析足底压力数据，请稍候...' : '正在生成报告，请稍候...'}
+                </p>
               </div>
             )}
           </div>
@@ -651,7 +545,7 @@ export default function StandingAssessment() {
           {/* 底部操作按钮 */}
           {phase !== 'processing' && (
             <div className="absolute bottom-10 z-20 flex flex-col items-center gap-3">
-              {phase === 'idle' && deviceStatus === 'connected' && (
+              {phase === 'idle' && isGlobalConnected && (
                 <>
                   <button onClick={startRecording} className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
@@ -659,10 +553,13 @@ export default function StandingAssessment() {
                   <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集</span>
                 </>
               )}
-              {phase === 'idle' && deviceStatus !== 'connected' && (
-                <span className="text-sm px-5 py-2.5 rounded-lg" style={{ color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)' }}>
-                  请先连接设备或选择模拟模式
-                </span>
+              {phase === 'idle' && !isGlobalConnected && (
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
+                  <svg className="w-4 h-4" style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>请先在首页连接设备</span>
+                </div>
               )}
               {phase === 'recording' && (
                 <>

@@ -4,7 +4,7 @@ const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const fs = require('fs');
 const { timeStampTo_Date } = require("./time");
 const constantObj = require("./config");
-const { sitYToX, backYToX } = require("./line");
+// const { sitYToX, backYToX } = require("./line"); // 旧设备类型已移除
 
 /**
  * 输入当前系统名  返回可执行数据库
@@ -32,18 +32,19 @@ const initDb = (fileStr, filePath) => {
  * @returns 数据库
  */
 function genDb(file, filePath) {
+  let db
   if (fs.existsSync(file)) {
-
-    const db = new sqlite3.Database(file);
-    console.log('true')
-    return db
-
+    db = new sqlite3.Database(file);
   } else {
     console.log(file, filePath, 'err')
     let data = fs.readFileSync(`${filePath}/init.db`);
     fs.writeFileSync(file, data);
-    return db = new sqlite3.Database(file);
+    db = new sqlite3.Database(file);
   }
+  // 启用 WAL 模式：提升并发写入性能，减少采集时卡顿
+  db.run('PRAGMA journal_mode=WAL')
+  db.run('PRAGMA synchronous=NORMAL')
+  return db
 }
 
 function isAllDigits(str) {
@@ -108,18 +109,6 @@ function dbload(db, param, file, isPackaged, byAssessmentId = false) {
             newData[`${key}min`] = min
             newData[`${key}aver`] = aver
             newData[`${key}realData`] = JSON.stringify(data)
-
-            if (key == 'car-back') {
-              newData[`${key}max`] = backYToX(max)
-              newData[`${key}min`] = backYToX(min)
-              newData[`${key}aver`] = backYToX(aver)
-            }
-
-            if(key == 'car-sit'){
-              newData[`${key}max`] = sitYToX(max)
-              newData[`${key}min`] = sitYToX(min)
-              newData[`${key}aver`] = sitYToX(aver)
-            }
           }
 
 
@@ -361,12 +350,13 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
         })
         const keyArr = Array.from(keySet)
 
-        let pressValue = {}, areaValue = {} , dataValue = {}
+        let pressValue = {}, areaValue = {} , dataValue = {}, rotateValue = {}
         for (let j = 0; j < keyArr.length; j++) {
           const key = keyArr[j]
           pressValue[key] = []
           areaValue[key] = []
           dataValue[key] = []
+          rotateValue[key] = []
         }
         for (let i = 0; i < rows.length; i++) {
           const rowObj = parsedRows[i] || {}
@@ -378,9 +368,13 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
             dataValue[key].push(data)
             pressValue[key].push(data.reduce((a, b) => a + b, 0))
             areaValue[key].push(data.filter((a) => a > 0).length)
+            // 提取 IMU 四元数数据 (rotate)，保持与 dataValue 长度一致
+            if (item?.rotate && Array.isArray(item.rotate)) {
+              rotateValue[key].push(item.rotate)
+            } else {
+              rotateValue[key].push(null)
+            }
           }
-          // press.push(pressValue);
-          // area.push(areaValue);
         }
 
         resolve({
@@ -388,6 +382,7 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
           pressArr: pressValue,
           areaArr: areaValue,
           dataArr : dataValue,
+          rotateArr: rotateValue,
           rows: rows
         })
 

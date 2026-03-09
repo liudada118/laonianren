@@ -1,0 +1,14 @@
+{
+  "//": "定义文件路径变更到测试模块的映射规则。串口相关文件变更触发 API 和 WebSocket 测试。",
+  "mapping": {
+    "server/serialServer.js": ["api", "ws"],
+    "util/config.js": ["api", "ws"],
+    "util/serialport.js": ["api", "ws"],
+    "util/line.js": ["api", "ws"],
+    "util/db.js": ["api"],
+    "algorithms/**/*.js": ["api"],
+    "algorithms/**/*.py": ["api"],
+    "python/**/*.py": ["api"],
+    "index.js": ["all"]
+  }
+}

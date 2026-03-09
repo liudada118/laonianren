@@ -27,23 +27,35 @@ except Exception:
     legacy_process_frame_realtime = None
     legacy_process_playback_batch = None
 
+# ============================================================
+# algorithms 目录路径（新版算法统一存放位置）
+# ============================================================
+_ALGORITHMS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'algorithms')
+
+# 确保 algorithms 目录在 sys.path 中，以便内部模块互相导入
+if _ALGORITHMS_DIR not in sys.path:
+    sys.path.insert(0, _ALGORITHMS_DIR)
+
 _RENDER_MODULES = {}
 
+# ============================================================
+# 渲染报告配置 - 全部指向 algorithms/ 目录
+# ============================================================
 _RENDER_CONFIG = {
     'grip': {
-        'path_parts': ['frontendReport', '\u63e1\u529b', 'glove_render_data.py'],
+        'path_parts': ['algorithms', 'glove_render_data.py'],
         'func_name': 'generate_grip_report',
     },
     'sit_stand': {
-        'path_parts': ['frontendReport', '\u8d77\u5750', 'sit_stand_render_data.py'],
+        'path_parts': ['algorithms', 'sit_stand_render_data.py'],
         'func_name': 'generate_sit_stand_report',
     },
     'standing': {
-        'path_parts': ['frontendReport', '\u7ad9\u7acb', 'one_step_render_data.py'],
+        'path_parts': ['algorithms', 'one_step_render_data.py'],
         'func_name': 'generate_standing_report',
     },
     'gait': {
-        'path_parts': ['frontendReport', '\u6b65\u6001', 'gait_render_data.py'],
+        'path_parts': ['algorithms', 'gait_render_data.py'],
         'func_name': 'generate_gait_report',
     },
 }
@@ -66,7 +78,7 @@ def _load_render_module(cache_key):
         return module
 
     module_path = _resolve_render_file(cache_key)
-    spec = importlib.util.spec_from_file_location(f'frontend_report_{cache_key}', module_path)
+    spec = importlib.util.spec_from_file_location(f'algorithms_report_{cache_key}', module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f'Cannot load module spec: {module_path}')
 
@@ -185,6 +197,7 @@ def generate_glove_video_safe(*args, **kwargs):
 
 
 def generate_grip_render_report(sensor_data, hand_type, times=None, imu_data=None):
+    """握力评估渲染报告 - 使用 algorithms/ 目录下的算法"""
     with contextlib.redirect_stdout(sys.stderr):
         return _call_render_function(
             'grip',
@@ -196,6 +209,7 @@ def generate_grip_render_report(sensor_data, hand_type, times=None, imu_data=Non
 
 
 def generate_sit_stand_render_report(stand_data, sit_data, username='user'):
+    """起坐评估渲染报告 - 使用 algorithms/ 目录下的算法"""
     with contextlib.redirect_stdout(sys.stderr):
         return _call_render_function(
             'sit_stand',
@@ -206,6 +220,7 @@ def generate_sit_stand_render_report(stand_data, sit_data, username='user'):
 
 
 def generate_standing_render_report(data_array, fps=42, threshold_ratio=0.8):
+    """静态站立评估渲染报告 - 使用 algorithms/ 目录下的算法"""
     with contextlib.redirect_stdout(sys.stderr):
         return _call_render_function(
             'standing',
@@ -215,19 +230,21 @@ def generate_standing_render_report(data_array, fps=42, threshold_ratio=0.8):
         )
 
 
-def generate_gait_render_report(d1, d2, d3, d4, t1, t2, t3, t4, body_weight_kg=80):
+def generate_gait_render_report(board_data, board_times):
+    """
+    步态评估渲染报告 - 使用 algorithms/ 目录下的算法
+    参数:
+        board_data: list[list[str]], 4块传感器板数据
+            board_data[0]~[3] 对应第1~4块板
+            每块: list[str], 每个元素是 "[v0,v1,...,v4095]" 格式字符串
+        board_times: list[list[str]], 4块传感器板时间戳
+            每块: list[str], 每个元素是 "2025/12/06 17:07:33:840" 格式
+    """
     with contextlib.redirect_stdout(sys.stderr):
         return _call_render_function(
             'gait',
-            d1=d1,
-            d2=d2,
-            d3=d3,
-            d4=d4,
-            t1=t1,
-            t2=t2,
-            t3=t3,
-            t4=t4,
-            body_weight_kg=body_weight_kg,
+            board_data=board_data,
+            board_times=board_times,
         )
 
 

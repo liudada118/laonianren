@@ -19,11 +19,22 @@ if (typeof process.env.isPackaged !== 'undefined') {
 const _resPath = process.resourcesPath || __dirname
 console.log(_resPath, path.join(__dirname,  'python', 'app', 'server.py') ,path.join(_resPath, 'python', 'app', 'server.py'), !isPackaged , isPackaged , 'isPackaged')
 function pythonBin() {
+  const envPython = (process.env.PYTHON_EXE || '').trim();
+  if (envPython) return envPython;
+
   const isDev = !isPackaged;
   if (process.platform === 'win32') {
-    return isDev
-      ? path.join(__dirname,  'python', 'Python311', 'python.exe')
-      : path.join(process.resourcesPath, 'python', 'Python311', 'python.exe');
+    if (isDev) {
+      const venvPy = path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe');
+      if (fs.existsSync(venvPy)) return venvPy;
+
+      const legacyPy = path.join(__dirname, 'python', 'Python311', 'python.exe');
+      if (fs.existsSync(legacyPy)) return legacyPy;
+
+      return 'python';
+    }
+
+    return path.join(process.resourcesPath, 'python', 'Python311', 'python.exe');
   }
   return isDev
     ? path.join(__dirname,  'python', 'venv', 'bin', 'python')
@@ -53,7 +64,7 @@ function startWorker() {
   const py = pythonBin();
   const sv = serverPy();
   console.log('[PY] start:', py, sv);
-  if (!fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
+  if (py !== 'python' && !fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
   if (!fs.existsSync(sv)) console.error('[PY] serverPy  NOT FOUND:', sv);
 
   child = spawn(py, ['-u', sv], {
@@ -105,6 +116,17 @@ function startWorker() {
     const s = d.toString();
     pushErr(s);
     console.error('[PY:stderr]', s.trim());
+  });
+
+  child.on('error', (err) => {
+    console.error('[PY] worker spawn error:', err.message);
+    for (const [id, rec] of pending) {
+      clearTimeout(rec.timer);
+      rec.reject(new Error(`python worker spawn error: ${err.message}`));
+    }
+    pending.clear();
+    child = null;
+    setTimeout(startWorker, 1000);
   });
 
   child.on('exit', (code, sig) => {

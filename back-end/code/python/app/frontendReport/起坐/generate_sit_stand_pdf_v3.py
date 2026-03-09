@@ -1211,13 +1211,14 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     if not duration_stats:
         raise ValueError("无法计算周期统计信息")
 
-    # 3. 用 PIL 快速生成热力图 base64 PNG（保留 scipy 上采样质量，跳过 matplotlib）
-    import base64
+    # 3. 生成热力图矩阵数据和COP坐标数据（前端渲染，不再生成base64图片）
+    from datetime import datetime as _dt
     upf = LC.ImageConfig.UPSCALE_FACTOR
     sig = LC.ImageConfig.SIGMA
 
-    print(" 生成站立演变热力图 (PIL)...")
-    stand_evo_images = []
+    # ── 站立演变热力图：返回矩阵数据 ──
+    print(" 生成站立演变热力图矩阵数据...")
+    stand_evo_data = []  # [{label, sublabel, matrix: [[float]]}]
     if len(stand_peaks) >= 2:
         l_mask, r_mask, l_bbox, r_bbox = get_foot_masks_and_bbox(stand_data)
         start_idx, end_idx = stand_peaks[0], stand_peaks[1]
@@ -1230,61 +1231,54 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             ]):
                 crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
                 smooth = get_smooth_heatmap(crop, upscale_factor=upf, sigma=sig)
-                b64 = matrix_to_base64_png(smooth)
-                if b64:
-                    stand_evo_images.append({'label': row_idx, 'sublabel': col_idx, 'image': b64})
+                # 降采样到合理尺寸（最大64x64），减少传输量
+                h, w = smooth.shape
+                if max(h, w) > 64:
+                    scale = 64.0 / max(h, w)
+                    smooth = zoom(smooth, scale, order=1)
+                stand_evo_data.append({
+                    'label': row_idx,
+                    'sublabel': col_idx,
+                    'matrix': np.round(smooth, 1).tolist(),
+                })
 
-    print(" 生成站立COP图 (PIL)...")
-    stand_cop_left_b64 = None
-    stand_cop_right_b64 = None
+    # ── 站立COP轨迹：返回坐标数据 + 背景矩阵 ──
+    print(" 生成站立COP坐标数据...")
+    stand_cop_data = {'left': None, 'right': None}
     if len(stand_peaks) >= 2:
         peak_frames = stand_data[stand_peaks]
         avg_peak = np.mean(peak_frames, axis=0)
         for foot_name, mask, bbox in [("left", l_mask, l_bbox), ("right", r_mask, r_bbox)]:
             bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
             bg_smooth = get_smooth_heatmap(bg, sigma=sig)
-            # 背景热力图
-            h_bg, w_bg = bg_smooth.shape
-            mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
-            norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
-            rgb = _JET_LUT[norm]
-            alpha = np.where(bg_smooth > 1, int(255*0.8), 0).astype(np.uint8)
-            rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
-            img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
-            # 绘制 COP 轨迹
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(img)
-            colors_arr = np.linspace(0, 1, max(len(stand_peaks)-1, 1))
+            # 降采样背景矩阵
+            h, w = bg_smooth.shape
+            if max(h, w) > 64:
+                scale = 64.0 / max(h, w)
+                bg_smooth = zoom(bg_smooth, scale, order=1)
+            # 计算COP轨迹坐标
+            trajectories = []
             for i in range(len(stand_peaks)-1):
                 seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
                 l_cops, r_cops = calculate_split_cop(seg, l_mask, r_mask)
                 cops = l_cops if foot_name == "left" else r_cops
                 pts = []
                 for c_pt in cops:
-                    x = (c_pt[0] - bbox[2]) * upf
-                    y = (c_pt[1] - bbox[0]) * upf
+                    x = c_pt[0] - bbox[2]
+                    y = c_pt[1] - bbox[0]
                     if not (np.isnan(x) or np.isnan(y)):
-                        pts.append((x, y))
+                        pts.append([round(float(x), 2), round(float(y), 2)])
                 if len(pts) > 1:
-                    t = colors_arr[i]
-                    cr = 255
-                    cg = int(255 * (1 - t))
-                    cb = int(255 * t)
-                    draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 4))
-                    if pts:
-                        x0, y0 = pts[0]
-                        r = max(3, upf // 3)
-                        draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
-            buf = io.BytesIO()
-            img.save(buf, format='PNG', optimize=True)
-            b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
-            if foot_name == "left":
-                stand_cop_left_b64 = b64
-            else:
-                stand_cop_right_b64 = b64
+                    trajectories.append(pts)
+            stand_cop_data[foot_name] = {
+                'bg_matrix': np.round(bg_smooth, 1).tolist(),
+                'trajectories': trajectories,
+                'bbox': [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
+            }
 
-    print(" 生成坐姿演变热力图 (PIL)...")
-    sit_evo_images = []
+    # ── 坐姿演变热力图：返回矩阵数据 ──
+    print(" 生成坐姿演变热力图矩阵数据...")
+    sit_evo_data = []  # [{label, matrix: [[float]]}]
     if len(stand_peaks) >= 2:
         stand_times_val = stand_times.values
         sit_times_val = sit_times.values
@@ -1301,12 +1295,18 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             if frame_idx < len(rep_segment):
                 frame = rep_segment[frame_idx]
                 smooth = get_smooth_heatmap(frame, upscale_factor=upf, sigma=sig)
-                b64 = matrix_to_base64_png(smooth)
-                if b64:
-                    sit_evo_images.append({'label': col_idx, 'image': b64})
+                h, w = smooth.shape
+                if max(h, w) > 64:
+                    scale = 64.0 / max(h, w)
+                    smooth = zoom(smooth, scale, order=1)
+                sit_evo_data.append({
+                    'label': col_idx,
+                    'matrix': np.round(smooth, 1).tolist(),
+                })
 
-    print(" 生成坐姿COP图 (PIL)...")
-    sit_cop_b64 = None
+    # ── 坐姿COP轨迹：返回坐标数据 + 背景矩阵 ──
+    print(" 生成坐姿COP坐标数据...")
+    sit_cop_data_result = None
     if len(stand_peaks) >= 2:
         sit_force_curve = np.sum(sit_data, axis=(1, 2))
         global_max_val = np.max(sit_force_curve) if len(sit_force_curve) > 0 else 1
@@ -1327,47 +1327,24 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
                 if segment_force[fi] > THRESHOLD:
                     cx, cy = calculate_sit_cop(frame)
                     if not np.isnan(cx):
-                        cycle_xs.append(cx * upf)
-                        cycle_ys.append(cy * upf)
+                        cycle_xs.append(round(float(cx), 2))
+                        cycle_ys.append(round(float(cy), 2))
                         valid_frames_accumulator.append(frame)
                         has_valid = True
             if has_valid and len(cycle_xs) > 1:
-                all_cycles_cops.append((cycle_xs, cycle_ys))
+                all_cycles_cops.append([[x, y] for x, y in zip(cycle_xs, cycle_ys)])
         if len(all_cycles_cops) > 0 and len(valid_frames_accumulator) > 0:
             avg_frame = np.mean(valid_frames_accumulator, axis=0)
             bg_smooth = get_smooth_heatmap(avg_frame, upscale_factor=upf, sigma=sig)
-            h_bg, w_bg = bg_smooth.shape
-            mx = np.max(bg_smooth) if np.max(bg_smooth) > 0 else 1
-            norm = np.clip(bg_smooth / mx * 255, 0, 255).astype(np.uint8)
-            rgb = _JET_LUT[norm]
-            alpha = np.where(bg_smooth > 1, int(255*0.9), 0).astype(np.uint8)
-            rgba = np.dstack([rgb, alpha[:,:,np.newaxis] if alpha.ndim == 2 else alpha])
-            img = PILImage.fromarray(rgba.astype(np.uint8), 'RGBA')
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(img)
-            colors_arr = np.linspace(0, 1, max(len(all_cycles_cops), 2))
-            for i, (xs, ys) in enumerate(all_cycles_cops):
-                pts = [(x, y) for x, y in zip(xs, ys) if not (np.isnan(x) or np.isnan(y))]
-                if len(pts) > 1:
-                    t = colors_arr[i]
-                    cr, cg, cb = 255, int(255*(1-t)), int(255*t)
-                    draw.line(pts, fill=(cr, cg, cb, 200), width=max(2, upf // 3))
-                    x0, y0 = pts[0]
-                    r = max(3, upf // 2)
-                    draw.ellipse([x0-r, y0-r, x0+r, y0+r], fill=(0, 255, 0, 255))
-            buf = io.BytesIO()
-            img.save(buf, format='PNG', optimize=True)
-            sit_cop_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii')
-
-    images = {
-        'stand_evolution': stand_evo_images,
-        'stand_cop_left': stand_cop_left_b64,
-        'stand_cop_right': stand_cop_right_b64,
-        'sit_evolution': sit_evo_images,
-        'sit_cop': sit_cop_b64,
-    }
-
-    # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
+            h, w = bg_smooth.shape
+            if max(h, w) > 64:
+                scale = 64.0 / max(h, w)
+                bg_smooth = zoom(bg_smooth, scale, order=1)
+            sit_cop_data_result = {
+                'bg_matrix': np.round(bg_smooth, 1).tolist(),
+                'trajectories': all_cycles_cops,
+            }
+    # 4. 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
     stand_force = np.sum(stand_data, axis=(1, 2)).tolist()
     sit_force = np.sum(sit_data, axis=(1, 2)).tolist()
     t0_stand = stand_times.iloc[0] if len(stand_times) > 0 else None
@@ -1375,24 +1352,84 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     stand_time_list = [(t - t0_stand).total_seconds() for t in stand_times] if t0_stand is not None else []
     sit_time_list = [(t - t0_sit).total_seconds() for t in sit_times] if t0_sit is not None else []
 
-    # 5. 构建返回结果
+    # 4.5 补充统计字段（与 fallback 一致）
+    stand_peaks_list = stand_peaks.tolist() if isinstance(stand_peaks, np.ndarray) else (list(stand_peaks) if stand_peaks else [])
+    stand_force_np = np.array(stand_force)
+    sit_force_np = np.array(sit_force)
+
+    # 周期时长明细
+    cycle_durations = []
+    for i in range(len(stand_peaks_list) - 1):
+        d_val = stand_time_list[stand_peaks_list[i + 1]] - stand_time_list[stand_peaks_list[i]]
+        cycle_durations.append(round(d_val, 2))
+
+    # 各周期峰值力
+    cycle_peak_forces = [round(float(stand_force_np[p]), 1) for p in stand_peaks_list if p < len(stand_force_np)]
+
+    # 左右脚对称性
+    left_total = float(stand_data[:, :, :32].sum()) if stand_data.ndim == 3 else 0
+    right_total = float(stand_data[:, :, 32:].sum()) if stand_data.ndim == 3 else 0
+    if stand_data.ndim != 3:
+        stand_3d = stand_data.reshape(-1, 64, 64) if stand_data.shape[1] == 4096 else stand_data
+        if stand_3d.ndim == 3:
+            left_total = float(stand_3d[:, :, :32].sum())
+            right_total = float(stand_3d[:, :, 32:].sum())
+    symmetry_ratio = (min(left_total, right_total) / max(left_total, right_total) * 100
+                      if max(left_total, right_total) > 0 else 0.0)
+
+    # 压力统计
+    foot_max = float(stand_force_np.max()) if len(stand_force_np) > 0 else 0
+    foot_avg = float(stand_force_np.mean()) if len(stand_force_np) > 0 else 0
+    sit_max = float(sit_force_np.max()) if len(sit_force_np) > 0 else 0
+    sit_avg = float(sit_force_np.mean()) if len(sit_force_np) > 0 else 0
+    max_foot_rate = float(np.max(np.abs(np.diff(stand_force_np)))) if len(stand_force_np) > 1 else 0
+    max_sit_rate = float(np.max(np.abs(np.diff(sit_force_np)))) if len(sit_force_np) > 1 else 0
+
+    # 5. 构建返回结果（所有可视化数据均为原始数据，前端渲染）
     return {
         'duration_stats': {
             'total_duration': round(duration_stats['total_duration'], 2),
             'num_cycles': duration_stats['num_cycles'],
             'avg_duration': round(duration_stats['avg_duration'], 2),
+            'cycle_durations': cycle_durations,
+            'min_cycle_duration': round(min(cycle_durations), 2) if cycle_durations else 0,
+            'max_cycle_duration': round(max(cycle_durations), 2) if cycle_durations else 0,
         },
         'stand_frames': len(stand_data),
         'sit_frames': len(sit_data),
-        'stand_peaks': len(stand_peaks) if stand_peaks is not None else 0,
+        'stand_peaks': len(stand_peaks_list),
         'username': username,
-        'images': images,
+        'test_date': _dt.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'symmetry': {
+            'left_right_ratio': round(symmetry_ratio, 1),
+            'left_total': round(left_total, 0),
+            'right_total': round(right_total, 0),
+        },
+        'pressure_stats': {
+            'sit_max': round(sit_max, 0),
+            'sit_avg': round(sit_avg, 0),
+            'foot_max': round(foot_max, 0),
+            'foot_avg': round(foot_avg, 0),
+            'max_sit_change_rate': round(max_sit_rate, 1),
+            'max_foot_change_rate': round(max_foot_rate, 1),
+        },
+        'cycle_peak_forces': cycle_peak_forces,
+        # 热力图和COP数据（前端用Canvas/ECharts渲染）
+        'heatmap_data': {
+            'stand_evolution': stand_evo_data,
+            'sit_evolution': sit_evo_data,
+        },
+        'cop_data': {
+            'stand_left': stand_cop_data.get('left'),
+            'stand_right': stand_cop_data.get('right'),
+            'sit': sit_cop_data_result,
+        },
         'force_curves': {
             'stand_times': stand_time_list,
             'stand_force': stand_force,
             'sit_times': sit_time_list,
             'sit_force': sit_force,
-            'stand_peaks_idx': stand_peaks.tolist() if isinstance(stand_peaks, np.ndarray) else (list(stand_peaks) if stand_peaks else []),
+            'stand_peaks_idx': stand_peaks_list,
         },
     }
 
