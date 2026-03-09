@@ -3438,19 +3438,54 @@ function storageData(data) {
   }
 }
 
+let isFlushingStorage = false  // 事务锁，防止并发写入
+
 function flushStorageBuffer() {
   storageFlushTimer = null
   if (!storageBuffer.length || !currentDb) return
 
+  // 如果上一次事务还在进行中，延迟重试
+  if (isFlushingStorage) {
+    if (!storageFlushTimer) {
+      storageFlushTimer = setTimeout(flushStorageBuffer, STORAGE_FLUSH_INTERVAL)
+    }
+    return
+  }
+
+  isFlushingStorage = true
   const rows = storageBuffer.splice(0)
   const insertQuery = "INSERT INTO matrix (data, timestamp, date, `select`, name, assessment_id, sample_type) VALUES (?, ?, ?, ?, ?, ?, ?)"
 
-  currentDb.run('BEGIN TRANSACTION')
-  for (const row of rows) {
-    currentDb.run(insertQuery, row)
-  }
-  currentDb.run('COMMIT', (err) => {
-    if (err) console.error('[storageData] batch commit error:', err)
+  currentDb.serialize(() => {
+    currentDb.run('BEGIN TRANSACTION', (err) => {
+      if (err) {
+        console.error('[storageData] BEGIN error:', err)
+        // BEGIN 失败，把数据放回缓冲区，下次重试
+        storageBuffer.unshift(...rows)
+        isFlushingStorage = false
+        return
+      }
+    })
+    for (const row of rows) {
+      currentDb.run(insertQuery, row, (err) => {
+        if (err) console.error('[storageData] INSERT error:', err)
+      })
+    }
+    currentDb.run('COMMIT', (err) => {
+      if (err) {
+        console.error('[storageData] COMMIT error:', err)
+        // COMMIT 失败时尝试回滚
+        currentDb.run('ROLLBACK', () => {
+          isFlushingStorage = false
+        })
+      } else {
+        isFlushingStorage = false
+      }
+      // 如果缓冲区中还有数据（可能是等待期间新积累的），继续刷入
+      if (storageBuffer.length && !storageFlushTimer) {
+        storageFlushTimer = setTimeout(flushStorageBuffer, STORAGE_FLUSH_INTERVAL)
+      }
+    })
   })
 }
 
