@@ -1521,7 +1521,12 @@ app.get('/rescanPort', async (req, res) => {
       if (!item || !item.port || !item.port.isOpen) {
         deadPaths.push(path)
         if (item && item.port) {
-          try { item.port.close(); } catch (e) {}
+          // 只有端口仍然 open 时才调用 close，避免 "Port is not open" 错误
+          if (item.port.isOpen) {
+            try { item.port.close((err) => { if (err) console.warn('[rescanPort] close error:', path, err.message); }); } catch (e) {}
+          }
+          // 移除所有事件监听器，防止后续 error 事件导致崩溃
+          try { item.port.removeAllListeners(); } catch (e) {}
         }
         delete parserArr[path]
         delete dataMap[path]
