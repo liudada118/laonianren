@@ -239,6 +239,8 @@ export default function Dashboard() {
   const [showResetConfirm, setShowResetConfirm] = useState(null);
   const [showGripTip, setShowGripTip] = useState(false);
   const [gripTipPath, setGripTipPath] = useState('');
+  const [showSitStandTip, setShowSitStandTip] = useState(false);
+  const [sitStandTipPath, setSitStandTipPath] = useState('');
 
   const handleStart = (path) => {
     if (patientInfo) {
@@ -246,6 +248,9 @@ export default function Dashboard() {
       if (path === '/assessment/grip') {
         setGripTipPath(path);
         setShowGripTip(true);
+      } else if (path === '/assessment/sitstand') {
+        setSitStandTipPath(path);
+        setShowSitStandTip(true);
       } else {
         navigate(path);
       }
@@ -262,6 +267,9 @@ export default function Dashboard() {
     if (pendingPath === '/assessment/grip') {
       setGripTipPath(pendingPath);
       setShowGripTip(true);
+    } else if (pendingPath === '/assessment/sitstand') {
+      setSitStandTipPath(pendingPath);
+      setShowSitStandTip(true);
     } else {
       navigate(pendingPath);
     }
@@ -461,6 +469,34 @@ export default function Dashboard() {
                 onClick={() => { setShowGripTip(false); navigate(gripTipPath); }}
                 className="flex-1 py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
                 style={{ background: 'var(--zeiss-blue)' }}>
+                已准备好，开始评估
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 起坐评估提示弹窗 */}
+      {showSitStandTip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[460px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-16 h-16 mx-auto mb-5 rounded-full flex items-center justify-center"
+              style={{ background: '#ECFDF5' }}>
+              <svg className="w-8 h-8" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐能力评估准备</h3>
+            <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
+              请被评估者坐在椅子上，双手交叉放于胸前。<br/>
+              评估开始后，请用最快速度完成<span className="font-semibold" style={{ color: '#059669' }}>起坐 5 次</span>。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSitStandTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+              <button
+                onClick={() => { setShowSitStandTip(false); navigate(sitStandTipPath); }}
+                className="flex-1 py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+                style={{ background: '#059669' }}>
                 已准备好，开始评估
               </button>
             </div>

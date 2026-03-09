@@ -172,6 +172,7 @@ export default function SitStandAssessment() {
   const [csvExporting, setCsvExporting] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
+  const [showGuideTip, setShowGuideTip] = useState(!viewReportMode);
 
   const [seatPressureHistory, setSeatPressureHistory] = useState([]);
   const [footpadPressureHistory, setFootpadPressureHistory] = useState([]);
@@ -445,6 +446,30 @@ export default function SitStandAssessment() {
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
         </div>
       </header>
+
+      {/* ── 起坐指导弹窗 ── */}
+      {showGuideTip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[420px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-full flex items-center justify-center"
+              style={{ background: '#ECFDF5' }}>
+              <svg className="w-7 h-7" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐评估指导</h3>
+            <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
+              请用最快速度<span className="font-bold" style={{ color: '#059669' }}>起坐 5 次</span>
+            </p>
+            <button
+              onClick={() => setShowGuideTip(false)}
+              className="w-full py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+              style={{ background: '#059669' }}>
+              我知道了
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── 完成弹窗 ── */}
       {showComplete && (
