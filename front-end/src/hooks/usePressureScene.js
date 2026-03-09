@@ -243,11 +243,22 @@ export function usePressureScene(options = {}) {
 
     // 处理后端推送的脚垫数据（合并 foot1-4 为一个 64x64 矩阵）
     const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
+    let footDebugCounter = 0;
     const handleFootData = (type) => (arr) => {
       const scene = sceneRef.current;
       if (!scene || !arr || arr.length === 0) return;
 
       footBuffers[type] = arr;
+
+      // 调试日志：每 30 帧输出一次数据分布
+      footDebugCounter++;
+      if (footDebugCounter % 30 === 1) {
+        const nonZero = arr.filter(v => v > 0).length;
+        const gt8 = arr.filter(v => v > 8).length;
+        const maxVal = Math.max(...arr);
+        const available = Object.entries(footBuffers).filter(([, v]) => v && v.length > 0);
+        console.log(`[footDebug] type=${type}, arr.length=${arr.length}, nonZero=${nonZero}, gt8=${gt8}, max=${maxVal}, available=${available.map(([k])=>k).join(',')}`);
+      }
 
       // 当所有4个脚垫都有数据时，合并为 64x64 矩阵
       // 每个脚垫是 32x32 = 1024 个值（从4096中提取有效区域）
