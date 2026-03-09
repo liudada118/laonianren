@@ -121,9 +121,9 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
       )}
 
       {/* 左手数据 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
+      <div className={`zeiss-card overflow-hidden transition-opacity ${leftData.length > 0 || isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: isLeftActive ? '#0066CC' : 'var(--border-light)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: leftData.length > 0 || isLeftActive ? '#0066CC' : 'var(--border-light)' }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左手 · 压力曲线</h3>
         </div>
         <div className="h-[90px] px-1"><EChart option={leftLineOpt} height={90} /></div>
@@ -135,9 +135,9 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
       </div>
 
       {/* 左手正态分布 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
+      <div className={`zeiss-card overflow-hidden transition-opacity ${leftData.length > 0 || isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: isLeftActive ? '#0891B2' : 'var(--border-light)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: leftData.length > 0 || isLeftActive ? '#0891B2' : 'var(--border-light)' }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左手 · 正态分布</h3>
         </div>
         <div className="h-[80px] px-1"><EChart option={leftNormalOpt} height={80} /></div>
@@ -152,9 +152,9 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
       </div>
 
       {/* 右手数据 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${isRightActive ? 'opacity-100' : 'opacity-50'}`}>
+      <div className={`zeiss-card overflow-hidden transition-opacity ${rightData.length > 0 || isRightActive ? 'opacity-100' : 'opacity-50'}`}>
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: isRightActive ? '#059669' : 'var(--border-light)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: rightData.length > 0 || isRightActive ? '#059669' : 'var(--border-light)' }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右手 · 压力曲线</h3>
         </div>
         <div className="h-[90px] px-1"><EChart option={rightLineOpt} height={90} /></div>
@@ -166,9 +166,9 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
       </div>
 
       {/* 右手正态分布 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${isRightActive ? 'opacity-100' : 'opacity-50'}`}>
+      <div className={`zeiss-card overflow-hidden transition-opacity ${rightData.length > 0 || isRightActive ? 'opacity-100' : 'opacity-50'}`}>
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: isRightActive ? '#0891B2' : 'var(--border-light)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: rightData.length > 0 || isRightActive ? '#0891B2' : 'var(--border-light)' }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右手 · 正态分布</h3>
         </div>
         <div className="h-[80px] px-1"><EChart option={rightNormalOpt} height={80} /></div>
@@ -320,21 +320,23 @@ export default function GripAssessment() {
         } catch (e) { console.error('[Left] heatmap error:', e); }
       }
 
-      // 如果正在采集左手数据，记录统计
-      if (isRecordingRef.current && currentHandRef.current === 'left') {
-        const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
-        const avgPressure = totalPressure / sensorArray.length;
-        setPressure(avgPressure);
+      // 计算压力值
+      const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
+      const avgPressure = totalPressure / sensorArray.length;
 
-        // 完整数据用于报告（带时间戳，不截断）
+      // 始终更新左侧面板的实时预览数据（无论是否在采集）
+      if (currentHandRef.current === 'left') {
+        setPressure(avgPressure);
+      }
+      setLeftData(prev => {
+        const next = [...prev, { time: prev.length, value: avgPressure }];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
+
+      // 如果正在采集左手数据，额外记录完整数据用于报告
+      if (isRecordingRef.current && currentHandRef.current === 'left') {
         leftFullDataRef.current.push({ time: leftFullDataRef.current.length, value: avgPressure, timestamp: Date.now() });
         leftRawFramesRef.current.push([...sensorArray]);
-
-        // 显示数据（截断到200条用于实时图表）
-        setLeftData(prev => {
-          const next = [...prev, { time: prev.length, value: avgPressure }];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
       }
     };
 
@@ -350,21 +352,23 @@ export default function GripAssessment() {
         } catch (e) { console.error('[Right] heatmap error:', e); }
       }
 
-      // 如果正在采集右手数据，记录统计
-      if (isRecordingRef.current && currentHandRef.current === 'right') {
-        const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
-        const avgPressure = totalPressure / sensorArray.length;
-        setPressure(avgPressure);
+      // 计算压力值
+      const totalPressure = sensorArray.reduce((a, b) => a + b, 0);
+      const avgPressure = totalPressure / sensorArray.length;
 
-        // 完整数据用于报告（带时间戳，不截断）
+      // 始终更新左侧面板的实时预览数据（无论是否在采集）
+      if (currentHandRef.current === 'right') {
+        setPressure(avgPressure);
+      }
+      setRightData(prev => {
+        const next = [...prev, { time: prev.length, value: avgPressure }];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
+
+      // 如果正在采集右手数据，额外记录完整数据用于报告
+      if (isRecordingRef.current && currentHandRef.current === 'right') {
         rightFullDataRef.current.push({ time: rightFullDataRef.current.length, value: avgPressure, timestamp: Date.now() });
         rightRawFramesRef.current.push([...sensorArray]);
-
-        // 显示数据（截断到200条用于实时图表）
-        setRightData(prev => {
-          const next = [...prev, { time: prev.length, value: avgPressure }];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
       }
     };
 
@@ -556,15 +560,13 @@ export default function GripAssessment() {
     } else if (isBackendMode) {
       // 后端模式：调用后端API开始采集，数据通过WebSocket自动流入
       addSimLog(`后端模式开始采集 ${isLeft ? '左手' : '右手'}`, 'info');
-      // 清空对应手的数据
+      // 清空报告用的完整数据（显示数据保持实时更新，不清空）
       if (isLeft) {
         leftFullDataRef.current = [];
         leftRawFramesRef.current = [];
-        setLeftData([]);
       } else {
         rightFullDataRef.current = [];
         rightRawFramesRef.current = [];
-        setRightData([]);
       }
       // 先切换到单手模式，等待完成后再开始采集
       const handMode = isLeft ? 11 : 12;
