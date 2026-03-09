@@ -139,3 +139,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 back-end/code/python/app/frontendReport/起坐/__pycache__/
 __pycache__/
+
+serial.txt
+back-end/code/serial.txt
