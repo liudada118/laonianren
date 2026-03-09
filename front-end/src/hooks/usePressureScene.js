@@ -58,6 +58,15 @@ function rotate180(matrix) {
 }
 
 /**
+ * 矩阵水平镜像（左右翻转）
+ * @param {number[][]} matrix
+ * @returns {number[][]}
+ */
+function flipLR(matrix) {
+  return matrix.map(row => [...row].reverse());
+}
+
+/**
  * 矩阵逆时针旋转90度
  * @param {number[][]} matrix
  * @returns {number[][]}
@@ -266,7 +275,7 @@ export function usePressureScene(options = {}) {
       // 使用过滤后的 buffers 更新场景
       const combined = combineFootpads(filteredBuffers);
       if (combined) {
-        const matrix = denoiseMatrix(rotateCCW90(combined), 3, 12);
+        const matrix = denoiseMatrix(flipLR(rotateCCW90(combined)), 3, 12);
         scene.updateFootpadData(matrix);
         const stats = matrixStats(matrix);
         const cop = calculateCoP(matrix);

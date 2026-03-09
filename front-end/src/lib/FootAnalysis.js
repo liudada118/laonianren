@@ -43,15 +43,17 @@ export function parseFrameData(data) {
   const mirrored = flipLR(rotated);
   // 3) 垂直镜像（与Python mirrored_vertical=True 一致）
   const flipped = flipUD(mirrored);
-  // 4) 去噪
+  // 4) 再做一次水平镜像（左右对调）
+  const swapped = flipLR(flipped);
+  // 5) 去噪
   for (let i = 0; i < 64; i++) {
     for (let j = 0; j < 64; j++) {
-      if (flipped[i][j] <= NOISE_THRESHOLD) {
-        flipped[i][j] = 0;
+      if (swapped[i][j] <= NOISE_THRESHOLD) {
+        swapped[i][j] = 0;
       }
     }
   }
-  return flipped;
+  return swapped;
 }
 
 export function splitLeftRight(matrix) {
