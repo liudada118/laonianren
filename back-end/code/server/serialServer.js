@@ -1185,6 +1185,10 @@ app.post('/getSitAndFootPdf', async (req, res) => {
     const sitData = []
     const sitTimes = []
 
+    // 用于去重：记录上一帧的数据签名（JSON字符串），跳过完全相同的连续帧
+    let lastStandSig = null
+    let lastSitSig = null
+
     rows.forEach((row) => {
       let dataObj = {}
       try {
@@ -1194,16 +1198,26 @@ app.post('/getSitAndFootPdf', async (req, res) => {
         const d = dataObj[standKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
-          standData.push(arr)
-          standTimes.push(formatTimestamp(row.timestamp))
+          // 去重：跳过与上一帧完全相同的数据（低帧率设备的重复帧）
+          const sig = JSON.stringify(arr)
+          if (sig !== lastStandSig) {
+            standData.push(arr)
+            standTimes.push(formatTimestamp(row.timestamp))
+            lastStandSig = sig
+          }
         }
       }
       if (sitKey && dataObj[sitKey]) {
         const d = dataObj[sitKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
-          sitData.push(arr)
-          sitTimes.push(formatTimestamp(row.timestamp))
+          // 去重：跳过与上一帧完全相同的数据
+          const sig = JSON.stringify(arr)
+          if (sig !== lastSitSig) {
+            sitData.push(arr)
+            sitTimes.push(formatTimestamp(row.timestamp))
+            lastSitSig = sig
+          }
         }
       }
     })
@@ -1232,6 +1246,8 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       renderData = await callAlgorithm('generate_sit_stand_render_report', {
         stand_data: standData,
         sit_data: sitData,
+        stand_times: standTimes,
+        sit_times: sitTimes,
         username: resolvedName || req.body?.collectName || req.body?.userName || 'user',
       })
     } catch (e) {

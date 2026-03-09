@@ -26,7 +26,7 @@ except Exception:
 # 总入口方法 (类似 generate_foot_pressure_report)
 # ============================================================
 
-def generate_sit_stand_report(stand_data, sit_data, username="用户"):
+def generate_sit_stand_report(stand_data, sit_data, stand_times=None, sit_times=None, username="用户"):
     """
     起坐评估总入口 - 接收脚垫和坐垫的数组数据，返回全部分析结果
 
@@ -35,6 +35,8 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
             每帧为长度4096的一维数组，内部reshape为64×64
         sit_data (list[list] | np.ndarray): 坐垫压力数据，shape [M, 1024]
             每帧为长度1024的一维数组，内部reshape为32×32
+        stand_times (list[str], optional): 脚垫每帧的真实时间戳
+        sit_times (list[str], optional): 坐垫每帧的真实时间戳
         username (str): 用户名
 
     Returns:
@@ -50,7 +52,7 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
             output_dir=tmp_dir, username=username,
         )
         return result
-    return _fallback_generate_sit_stand_report(stand_data, sit_data, username)
+    return _fallback_generate_sit_stand_report(stand_data, sit_data, stand_times, sit_times, username)
 
 
 # ============================================================
@@ -58,7 +60,28 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
 # 包含完整的热力图、COP轨迹、周期分析等计算
 # ============================================================
 
-def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
+def _parse_timestamps_to_seconds(ts_list):
+    """将时间戳字符串列表转换为从0开始的秒数列表"""
+    from datetime import datetime
+    if not ts_list or len(ts_list) == 0:
+        return None
+    try:
+        # 格式: "2026/03/09 20:38:32:123"
+        def parse_ts(s):
+            parts = s.split(':')
+            ms = int(parts[-1]) if len(parts) >= 4 else 0
+            main = ':'.join(parts[:3])
+            dt = datetime.strptime(main, '%Y/%m/%d %H:%M:%S')
+            return dt.timestamp() + ms / 1000.0
+        
+        parsed = [parse_ts(t) for t in ts_list]
+        t0 = parsed[0]
+        return [(t - t0) for t in parsed]
+    except Exception:
+        return None
+
+
+def _fallback_generate_sit_stand_report(stand_data, sit_data, raw_stand_times=None, raw_sit_times=None, username=''):
     from datetime import datetime
 
     stand = np.asarray(stand_data, dtype=float)
@@ -93,8 +116,21 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, username):
 
     stand_force = stand_3d.sum(axis=(1, 2))
     sit_force = sit_3d.sum(axis=(1, 2))
-    stand_times = (np.arange(len(stand_force), dtype=float) * 0.08).tolist()
-    sit_times = (np.arange(len(sit_force), dtype=float) * 0.08).tolist()
+
+    # 使用真实时间戳（如果提供了），否则回退到固定间隔估算
+    parsed_stand_times = _parse_timestamps_to_seconds(raw_stand_times)
+    parsed_sit_times = _parse_timestamps_to_seconds(raw_sit_times)
+
+    if parsed_stand_times and len(parsed_stand_times) == len(stand_force):
+        stand_times = parsed_stand_times
+    else:
+        # 回退：根据帧数估算帧率
+        stand_times = (np.arange(len(stand_force), dtype=float) * 0.08).tolist()
+
+    if parsed_sit_times and len(parsed_sit_times) == len(sit_force):
+        sit_times = parsed_sit_times
+    else:
+        sit_times = (np.arange(len(sit_force), dtype=float) * 0.08).tolist()
 
     # ── 起坐次数检测 ──
     peaks = _detect_peaks(stand_force, sit_force, stand_times)

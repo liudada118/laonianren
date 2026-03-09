@@ -208,13 +208,15 @@ def generate_grip_render_report(sensor_data, hand_type, times=None, imu_data=Non
         )
 
 
-def generate_sit_stand_render_report(stand_data, sit_data, username='user'):
+def generate_sit_stand_render_report(stand_data, sit_data, stand_times=None, sit_times=None, username='user'):
     """起坐评估渲染报告 - 使用 algorithms/ 目录下的算法"""
     with contextlib.redirect_stdout(sys.stderr):
         return _call_render_function(
             'sit_stand',
             stand_data=stand_data,
             sit_data=sit_data,
+            stand_times=stand_times,
+            sit_times=sit_times,
             username=username,
         )
 
