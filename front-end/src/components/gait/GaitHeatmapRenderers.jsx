@@ -170,7 +170,7 @@ export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
     const cellW = (width - labelW - padX * 2) / numCols;
     const cellH = (height - padY - 10 - rowGap) / 2;
 
-    // 计算全局最大值（使用 80% 分位作为 vmax，让颜色更饱满）
+    // 计算全局最大值（使用 95% 分位作为 vmax，让颜色更饱满）
     let allVals = [];
     [...leftFrames, ...rightFrames].forEach(f => {
       if (f?.data) {
@@ -184,6 +184,18 @@ export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
     allVals.sort((a, b) => a - b);
     let globalMax = allVals.length > 0 ? allVals[Math.floor(allVals.length * 0.95)] : 1;
     if (globalMax === 0) globalMax = 1;
+
+    // === 计算统一纵横比：取所有帧中最大的 rows 和最大的 cols ===
+    let unifiedRows = 0, unifiedCols = 0;
+    [...leftFrames, ...rightFrames].forEach(f => {
+      if (f?.data && f.data.length > 0) {
+        if (f.data.length > unifiedRows) unifiedRows = f.data.length;
+        const c = f.data[0]?.length || 0;
+        if (c > unifiedCols) unifiedCols = c;
+      }
+    });
+    // 统一纵横比：所有帧使用相同的 aspect ratio
+    const unifiedAspect = unifiedCols > 0 ? unifiedRows / unifiedCols : 2.0;
 
     // 绘制行
     const drawRow = (frames, rowIdx, label) => {
@@ -232,25 +244,22 @@ export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
         ctx.fillStyle = '#000000';
         ctx.fillRect(cellX, cellY, cellContentW, cellContentH);
 
-        // 保持矩阵纵横比，在单元格内居中绘制
-        const matRows = frame.data.length;
-        const matCols = frame.data[0]?.length || 1;
-        const matAspect = matRows / matCols;
+        // 使用统一纵横比，在单元格内居中绘制
         const cellAspect = cellContentH / cellContentW;
         let drawW, drawH;
-        if (matAspect > cellAspect) {
-          // 矩阵更瘦长，以高度为准
+        if (unifiedAspect > cellAspect) {
+          // 统一比例更瘦长，以高度为准
           drawH = cellContentH;
-          drawW = drawH / matAspect;
+          drawW = drawH / unifiedAspect;
         } else {
-          // 矩阵更宽扁，以宽度为准
+          // 统一比例更宽扁，以宽度为准
           drawW = cellContentW;
-          drawH = drawW * matAspect;
+          drawH = drawW * unifiedAspect;
         }
         const drawX = cellX + (cellContentW - drawW) / 2;
         const drawY = cellY + (cellContentH - drawH) / 2;
 
-        // 绘制平滑热力图（保持纵横比）
+        // 绘制平滑热力图（使用统一纵横比）
         drawSmoothHeatmap(ctx, frame.data, drawX, drawY, drawW, drawH, globalMax, true);
       });
     };

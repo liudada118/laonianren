@@ -2154,7 +2154,10 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
         try: return int(x)
         except: return None
 
-    def process_foot(on_list, off_list, is_right, ax_row):
+    # 用于收集左右脚裁剪区域，以便统一纵横比
+    crop_boxes = {}  # 存储每只脚的裁剪区域
+    
+    def process_foot(on_list, off_list, is_right, ax_row, unified_crop=None):
         foot_name = "Right" if is_right else "Left"
         
         best_step_data = None 
@@ -2241,6 +2244,16 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
             
             if (rmax - rmin) < 5: rmax = min(MAT_H, rmin + 5)
             if (cmax - cmin) < 5: cmax = min(MAT_W, cmin + 5)
+        
+        # 保存本脚的裁剪区域尺寸
+        crop_boxes[foot_name] = (rmax - rmin, cmax - cmin)
+        
+        # 如果提供了统一裁剪尺寸，则使用统一尺寸（通过 padding 居中）
+        if unified_crop is not None:
+            unified_h, unified_w = unified_crop
+            cur_h, cur_w = rmax - rmin, cmax - cmin
+            # 不改变裁剪区域本身，而是在返回数据时 padding 到统一尺寸
+            pass  # 统一尺寸在返回数据时处理
 
         # 选帧逻辑
         selected_frames = []
@@ -2310,13 +2323,23 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
         result_frames = []
         for k in range(len(selected_frames)):
             crop = selected_frames[k][rmin:rmax, cmin:cmax]
+            # 如果有统一裁剪尺寸，将裁剪数据 padding 到统一尺寸
+            if unified_crop is not None:
+                unified_h, unified_w = unified_crop
+                cur_h, cur_w = crop.shape
+                if cur_h < unified_h or cur_w < unified_w:
+                    padded = np.zeros((unified_h, unified_w), dtype=crop.dtype)
+                    pad_top = (unified_h - cur_h) // 2
+                    pad_left = (unified_w - cur_w) // 2
+                    padded[pad_top:pad_top+cur_h, pad_left:pad_left+cur_w] = crop
+                    crop = padded
             result_frames.append({
                 'data': np.round(crop, 1).tolist(),
                 'title': selected_titles[k].replace('\n', ' ')
             })
         return result_frames
 
-    # 执行
+    # === 第一轮：收集裁剪区域尺寸（不传 unified_crop） ===
     left_evo_data = process_foot(left_on, left_off, False, axes[0])
     axes[0, 0].set_ylabel("左脚", fontsize=14, rotation=0, labelpad=40, va='center')
 
@@ -2330,6 +2353,20 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
         plt.close()
     else:
         plt.show()
+
+    # === 第二轮：统一裁剪尺寸后重新生成前端数据 ===
+    left_box = crop_boxes.get('Left', (0, 0))
+    right_box = crop_boxes.get('Right', (0, 0))
+    unified_h = max(left_box[0], right_box[0])
+    unified_w = max(left_box[1], right_box[1])
+    
+    if unified_h > 0 and unified_w > 0:
+        # 重新生成前端数据（使用统一尺寸），不影响已保存的 matplotlib 图片
+        fig2, axes2 = plt.subplots(2, 10, figsize=(20, 5.5), facecolor='white')
+        plt.subplots_adjust(wspace=0.05, hspace=0.15)
+        left_evo_data = process_foot(left_on, left_off, False, axes2[0], unified_crop=(unified_h, unified_w))
+        right_evo_data = process_foot(right_on, right_off, True, axes2[1], unified_crop=(unified_h, unified_w))
+        plt.close(fig2)  # 关闭临时图形，只需要数据
 
     # 返回前端渲染数据
     return {
