@@ -98,10 +98,10 @@ function drawSmoothHeatmap(ctx, matrix, x, y, w, h, maxVal, bgBlack = true) {
   const cols = matrix[0]?.length || 0;
   if (cols === 0) return;
 
-  // 上采样 + 高斯模糊实现平滑效果
-  const scale = 4;
+  // 上采样 + 高斯模糊实现平滑效果（8x上采样 + 4次迭代模糊）
+  const scale = 8;
   const upsampled = upsampleMatrix(matrix, scale);
-  const blurred = gaussianBlur2D(upsampled, 3, 3);
+  const blurred = gaussianBlur2D(upsampled, 4, 4);
 
   const bRows = blurred.length;
   const bCols = blurred[0]?.length || 0;
