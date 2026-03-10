@@ -137,7 +137,7 @@ function drawSmoothHeatmap(ctx, matrix, x, y, w, h, maxVal, bgBlack = true) {
    1. 压力演变图 - 真实数据渲染
    props.data = { left: [{data, title}, ...], right: [{data, title}, ...] }
    ═══════════════════════════════════════════════════════════════ */
-export function RealPressureEvolution({ data, width = 1200, height = 420 }) {
+export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -166,7 +166,7 @@ export function RealPressureEvolution({ data, width = 1200, height = 420 }) {
     const labelW = 70;
     const padX = 10;
     const padY = 36;
-    const rowGap = 8;
+    const rowGap = 12;
     const cellW = (width - labelW - padX * 2) / numCols;
     const cellH = (height - padY - 10 - rowGap) / 2;
 
@@ -206,10 +206,10 @@ export function RealPressureEvolution({ data, width = 1200, height = 420 }) {
 
       frames.forEach((frame, i) => {
         if (!frame?.data || frame.data.length === 0) return;
-        const fx = labelW + padX + i * cellW + 3;
+        const fx = labelW + padX + i * cellW + 4;
         const fy = y0 + 20;
-        const fw = cellW - 6;
-        const fh = cellH - 24;
+        const fw = cellW - 8;
+        const fh = cellH - 26;
 
         // 帧标签（两行：Peak 单独一行 + 时间）
         const title = frame.title || '';
@@ -251,7 +251,7 @@ export function RealPressureEvolution({ data, width = 1200, height = 420 }) {
    2. 步态平均摘要 - 真实数据渲染
    props.data = { left: {heatmap, cops, stepCount}, right: {heatmap, cops, stepCount} }
    ═══════════════════════════════════════════════════════════════ */
-export function RealGaitAverageSummary({ data, width = 800, height = 550 }) {
+export function RealGaitAverageSummary({ data, width = 800, height = 700 }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
