@@ -1189,21 +1189,31 @@ app.post('/getSitAndFootPdf', async (req, res) => {
     // 用于去重：记录上一帧的数据签名（JSON字符串），跳过完全相同的连续帧
     let lastStandSig = null
     let lastSitSig = null
+    // 记录最后一个有效帧，用于离线时补齐（确保两传感器时间范围一致）
+    let lastStandArr = null
+    let lastSitArr = null
 
     rows.forEach((row) => {
       let dataObj = {}
       try {
         dataObj = JSON.parse(row.data || '{}')
       } catch {}
+
+      const ts = formatTimestamp(row.timestamp)
+      let standHasData = false
+      let sitHasData = false
+
       if (standKey && dataObj[standKey]) {
         const d = dataObj[standKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
+          standHasData = true
+          lastStandArr = arr
           // 去重：跳过与上一帧完全相同的数据（低帧率设备的重复帧）
           const sig = JSON.stringify(arr)
           if (sig !== lastStandSig) {
             standData.push(arr)
-            standTimes.push(formatTimestamp(row.timestamp))
+            standTimes.push(ts)
             lastStandSig = sig
           }
         }
@@ -1212,15 +1222,19 @@ app.post('/getSitAndFootPdf', async (req, res) => {
         const d = dataObj[sitKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
+          sitHasData = true
+          lastSitArr = arr
           // 去重：跳过与上一帧完全相同的数据
           const sig = JSON.stringify(arr)
           if (sig !== lastSitSig) {
             sitData.push(arr)
-            sitTimes.push(formatTimestamp(row.timestamp))
+            sitTimes.push(ts)
             lastSitSig = sig
           }
         }
       }
+
+      // 不补帧：保持数据真实性
     })
 
     if (!standData.length || !sitData.length) {

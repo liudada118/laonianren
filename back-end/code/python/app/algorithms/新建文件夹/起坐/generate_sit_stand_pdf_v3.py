@@ -94,6 +94,29 @@ def AMPD(data):
     return np.where(p_data == max_window_length)[0].tolist()
 
 
+# ================= ADC → 牛顿 转换 =================
+
+def adc_to_newton_foot(frame):
+    """足底传感器 ADC→牛顿 转换（逐像素）
+    规则: ADC < 150 → ADC / 12.7 N; ADC >= 150 → 12.0 N
+    返回: 转换后的帧（牛顿值矩阵）
+    """
+    frame = np.array(frame, dtype=np.float64)
+    return np.where(frame < 150, frame / 12.7, 12.0) * (frame > 0)
+
+
+def adc_to_newton_foot_sum(frame):
+    """足底传感器单帧 ADC→牛顿 总和"""
+    return float(np.sum(adc_to_newton_foot(frame)))
+
+
+def adc_to_newton_sit_sum(adc_sum):
+    """坐垫传感器 ADC总和→牛顿 转换
+    规则: ADC总和 / 26.18 = 牛顿
+    """
+    return adc_sum / 26.18
+
+
 def get_smooth_heatmap(original_matrix, upscale_factor=10, sigma=0.8):
     """生成平滑热力图"""
     matrix = np.array(original_matrix, dtype=float)
@@ -360,9 +383,10 @@ def calculate_cycle_durations(stand_times, stand_peaks):
     t_end = stand_times.iloc[stand_peaks[-1]]
     
     total_duration = (t_end - t_start).total_seconds()
-    num_cycles = len(stand_peaks) - 1
-    avg_duration = total_duration / num_cycles if num_cycles > 0 else 0
-    
+    num_cycles = len(stand_peaks)
+    intervals = len(stand_peaks) - 1
+    avg_duration = total_duration / intervals if intervals > 0 else 0
+
     return {
         "total_duration": total_duration,
         "num_cycles": num_cycles,

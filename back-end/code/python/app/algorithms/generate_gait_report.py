@@ -1541,9 +1541,9 @@ def get_smooth_heatmap(original_matrix, upscale_factor=10, sigma=None):
     # 1. 使用双三次插值 (order=3) 进行放大
     # 这本身就会产生非常平滑的渐变，比 griddata 效果好且快
     # upscale_factor: 放大倍数
-    high_res = zoom(matrix, upscale_factor, order=3, prefilter=False)
-    
-    # 2. 修正负值 (Cubic插值可能会产生微小的负值)
+    high_res = zoom(matrix, upscale_factor, order=1)
+
+    # 2. 修正负值
     high_res = np.where(high_res < 0, 0, high_res)
     
     # 3. 高斯模糊 (消除传感器的“方块感”)
@@ -1770,6 +1770,369 @@ def create_pressure_heatmap(section_coords, s1, s2, s3, s4, s5, s6, out_png):
     plt.tight_layout()
     plt.savefig(out_png, dpi=200)
     plt.close()
+
+
+def _smooth_and_crop(heatmap, upscale=3, sigma=0.8, pad=2):
+    """裁剪到有效区域，返回 (raw_cropped, smooth_cropped, crop_offset_r, crop_offset_c, orig_H, orig_W)
+       raw_cropped: 裁剪后原始矩阵（用于数据/tooltip）
+       smooth_cropped: 插值平滑后的矩阵（用于渲染）
+    """
+    from scipy.ndimage import zoom, gaussian_filter
+    H, W = heatmap.shape
+    nz = np.where(heatmap > 0)
+    if len(nz[0]) == 0:
+        return heatmap, heatmap, 0, 0, H, W
+    rmin, rmax = max(0, np.min(nz[0]) - pad), min(H, np.max(nz[0]) + 1 + pad)
+    cmin, cmax = max(0, np.min(nz[1]) - pad), min(W, np.max(nz[1]) + 1 + pad)
+    cropped = heatmap[rmin:rmax, cmin:cmax].astype(float)
+    # 插值平滑（仅用于渲染）
+    high_res = zoom(cropped, upscale, order=1)
+    high_res = np.where(high_res < 0, 0, high_res)
+    smoothed = gaussian_filter(high_res, sigma=sigma)
+    return cropped, smoothed, rmin, cmin, H, W
+
+
+def build_footprint_heatmap_data(left_regions, right_regions, total_matrix, left_peaks, right_peaks, center_l, center_r):
+    """提取完整足印热力图数据（供前端渲染），逻辑与 plot_all_largest_regions_heatmap 一致"""
+    data_np = np.array(total_matrix)
+    H, W = data_np[0].shape
+    heatmap = np.zeros((H, W), dtype=np.float32)
+    force_matrix = adc_to_force(data_np)
+    pressure_sum = np.mean(force_matrix, axis=0)  # 取帧平均，不是累加
+
+    for region in left_regions:
+        if region is None or len(region) == 0: continue
+        ys, xs = region[:, 0], region[:, 1]
+        heatmap[ys, xs] += pressure_sum[ys, xs]
+
+    for region in right_regions:
+        if region is None or len(region) == 0: continue
+        ys, xs = region[:, 0], region[:, 1]
+        heatmap[ys, xs] += pressure_sum[ys, xs]
+
+    # 裁剪 + 插值平滑（渲染用smooth，tooltip用raw）
+    UPSCALE = 3
+    raw, smooth, crop_r, crop_c, orig_H, orig_W = _smooth_and_crop(heatmap, upscale=UPSCALE, sigma=0.8, pad=3)
+
+    # 提取 FPA 线数据（坐标转换到smooth坐标系）
+    fpa_lines = []
+    for idx in left_peaks:
+        if idx >= len(total_matrix): continue
+        frame = np.array(total_matrix[idx])
+        angle, heel, fore = analyze_fpa_geometry(frame, False, center_l, center_r)
+        if angle is not None and heel is not None and fore is not None:
+            fpa_lines.append({
+                'heel': [round((float(heel[0]) - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
+                'fore': [round((float(fore[0]) - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
+                'angle': round(float(angle), 1),
+                'isRight': False,
+            })
+    for idx in right_peaks:
+        if idx >= len(total_matrix): continue
+        frame = np.array(total_matrix[idx])
+        angle, heel, fore = analyze_fpa_geometry(frame, True, center_l, center_r)
+        if angle is not None and heel is not None and fore is not None:
+            fpa_lines.append({
+                'heel': [round((float(heel[0]) - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
+                'fore': [round((float(fore[0]) - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
+                'angle': round(float(angle), 1),
+                'isRight': True,
+            })
+
+    return {
+        'heatmap': [[round(float(v), 1) for v in row] for row in smooth],
+        'rawHeatmap': [[round(float(v), 1) for v in row] for row in raw],
+        'fpaLines': fpa_lines,
+        'size': [int(smooth.shape[0]), int(smooth.shape[1])],
+    }
+
+
+def build_gait_average_data(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r):
+    """提取平均步态数据（供前端渲染），逻辑与 analyze_gait_and_plot 一致"""
+    data_3d = np.array(total_matrix)
+
+    def collect_and_align(on_list, off_list, is_right):
+        """收集步态数据并对齐"""
+        valid_steps = []
+        global_max_h, global_max_w = 0, 0
+        min_len = min(len(on_list), len(off_list))
+
+        for i in range(min_len):
+            on_idx, off_idx = on_list[i], off_list[i]
+            if on_idx is None or off_idx is None: continue
+            if np.isnan(on_idx) or np.isnan(off_idx): continue
+            on_idx, off_idx = int(on_idx), int(off_idx)
+            if off_idx <= on_idx: continue
+
+            step_frames_raw = data_3d[on_idx:off_idx + 1]
+            if step_frames_raw.shape[0] == 0: continue
+
+            step_frames = []
+            for frame in step_frames_raw:
+                try:
+                    mask = get_foot_mask_by_centers(frame, is_right, center_l, center_r)
+                    step_frames.append(frame * mask)
+                except:
+                    step_frames.append(frame)
+            step_frames = adc_to_force(np.array(step_frames))  # ADC转牛顿
+
+            accumulated = np.sum(step_frames, axis=0)
+            _, binary = cv2.threshold(accumulated.astype(np.float32), 1, 255, cv2.THRESH_BINARY)
+            binary = binary.astype(np.uint8)
+            num_labels, labels, stats, centroids = unite_broken_arch_components(binary, dist_threshold=3.0)
+            if num_labels <= 1: continue
+
+            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+            clean_mask = (labels == largest_label)
+            valid_indices = np.where(clean_mask)
+            if len(valid_indices[0]) == 0: continue
+
+            min_r, max_r = np.min(valid_indices[0]), np.max(valid_indices[0]) + 1
+            min_c, max_c = np.min(valid_indices[1]), np.max(valid_indices[1]) + 1
+            h, w = max_r - min_r, max_c - min_c
+            if h > global_max_h: global_max_h = h
+            if w > global_max_w: global_max_w = w
+
+            averaged = np.mean(step_frames, axis=0)  # 每步内取帧平均
+            valid_steps.append({
+                'raw_frames': step_frames,
+                'clean_mask': clean_mask,
+                'bbox': (min_r, max_r, min_c, max_c),
+                'accumulated_clean': averaged * clean_mask,
+            })
+
+        return valid_steps, global_max_h, global_max_w
+
+    def align_and_extract(steps, max_h, max_w):
+        """对齐并提取平均热力图 + COP轨迹"""
+        if not steps:
+            return None, []
+        CANVAS_H = max_h + 4
+        CANVAS_W = max_w + 4
+        aligned_imgs = []
+        cop_trails = []
+
+        for info in steps:
+            min_r, max_r, min_c, max_c = info['bbox']
+            h, w = max_r - min_r, max_c - min_c
+            canvas = np.zeros((CANVAS_H, CANVAS_W), dtype=float)
+            pad_top = (CANVAS_H - h) // 2
+            pad_left = (CANVAS_W - w) // 2
+            tight = info['accumulated_clean'][min_r:max_r, min_c:max_c]
+            canvas[pad_top:pad_top + h, pad_left:pad_left + w] = tight
+            aligned_imgs.append(canvas)
+
+            trail = []
+            for fi in range(info['raw_frames'].shape[0]):
+                frame_data = info['raw_frames'][fi]
+                masked_frame = frame_data * info['clean_mask']
+                tight_frame = masked_frame[min_r:max_r, min_c:max_c]
+                if np.sum(tight_frame) < 1: continue
+                try:
+                    cx, cy = calculate_cop_single_side(tight_frame)
+                    if not np.isnan(cx) and not np.isnan(cy):
+                        trail.append({'x': round(float(cx + pad_top), 3), 'y': round(float(cy + pad_left), 3)})
+                except:
+                    pass
+            cop_trails.append(trail)
+
+        avg_heatmap = np.mean(np.array(aligned_imgs), axis=0)
+        return avg_heatmap, cop_trails
+
+    left_steps, l_h, l_w = collect_and_align(left_on, left_off, False)
+    right_steps, r_h, r_w = collect_and_align(right_on, right_off, True)
+    unified_h, unified_w = max(l_h, r_h), max(l_w, r_w)
+
+    l_heatmap, l_cops = align_and_extract(left_steps, unified_h, unified_w)
+    r_heatmap, r_cops = align_and_extract(right_steps, unified_h, unified_w)
+
+    UPSCALE = 3
+
+    def process_heatmap(hm):
+        """返回 (smooth渲染用, raw原始值tooltip用)"""
+        if hm is None: return None, None
+        from scipy.ndimage import zoom, gaussian_filter
+        raw = [[round(float(v), 1) for v in row] for row in hm]
+        high_res = zoom(hm, UPSCALE, order=1)
+        high_res = np.where(high_res < 0, 0, high_res)
+        smoothed = gaussian_filter(high_res, sigma=0.8)
+        smooth = [[round(float(v), 1) for v in row] for row in smoothed]
+        return smooth, raw
+
+    def cops_to_scaled_arrays(cop_trails):
+        """COP 坐标按 UPSCALE 缩放后转为 [[row, col]] 格式"""
+        result = []
+        for trail in cop_trails:
+            result.append([[round(p['x'] * UPSCALE, 1), round(p['y'] * UPSCALE, 1)] for p in trail])
+        return result
+
+    l_smooth, l_raw = process_heatmap(l_heatmap)
+    r_smooth, r_raw = process_heatmap(r_heatmap)
+
+    return {
+        'left': {
+            'heatmap': l_smooth,
+            'rawHeatmap': l_raw,
+            'copTrajectories': cops_to_scaled_arrays(l_cops),
+            'stepCount': len(left_steps),
+        },
+        'right': {
+            'heatmap': r_smooth,
+            'rawHeatmap': r_raw,
+            'copTrajectories': cops_to_scaled_arrays(r_cops),
+            'stepCount': len(right_steps),
+        },
+    }
+
+
+def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r):
+    """提取压力演变数据（供前端渲染），逻辑与 plot_dynamic_pressure_evolution 一致"""
+    frame_ms = 40
+    if len(total_matrix) > 0:
+        MAT_H, MAT_W = np.array(total_matrix[0]).shape
+    else:
+        MAT_H, MAT_W = 64, 64
+
+    def safe_int(x):
+        try: return int(x)
+        except: return None
+
+    def process_foot(on_list, off_list, is_right):
+        best_step_data = None
+        max_load_peak = -1.0
+
+        min_len = min(len(on_list), len(off_list))
+        if min_len > 0:
+            for i in range(min_len):
+                start = safe_int(on_list[i])
+                end = safe_int(off_list[i])
+                if start is None or end is None: continue
+                if end <= start: continue
+
+                step_loads, step_frames = [], []
+                for f_idx in range(start, end + 1):
+                    if f_idx >= len(total_matrix): break
+                    raw = np.array(total_matrix[f_idx])
+                    mask = get_foot_mask_by_centers(raw, is_right, center_l, center_r)
+                    clean_frame = adc_to_force(raw * mask)
+                    step_loads.append(np.sum(clean_frame))
+                    step_frames.append(clean_frame)
+                if not step_loads: continue
+                current_peak = max(step_loads)
+                if current_peak > max_load_peak:
+                    max_load_peak = current_peak
+                    best_step_data = (step_loads, step_frames, start * frame_ms)
+
+        if best_step_data is None:
+            all_loads = []
+            for raw in total_matrix:
+                raw = np.array(raw)
+                mask = get_foot_mask_by_centers(raw, is_right, center_l, center_r)
+                all_loads.append(np.sum(adc_to_force(raw * mask)))
+            if len(all_loads) > 0:
+                global_peak_idx = np.argmax(all_loads)
+                if all_loads[global_peak_idx] > 1.0:
+                    sim_start = max(0, global_peak_idx - 15)
+                    sim_end = min(len(total_matrix) - 1, global_peak_idx + 15)
+                    step_loads, step_frames = [], []
+                    for f_idx in range(sim_start, sim_end + 1):
+                        raw = np.array(total_matrix[f_idx])
+                        mask = get_foot_mask_by_centers(raw, is_right, center_l, center_r)
+                        clean_frame = adc_to_force(raw * mask)
+                        step_loads.append(np.sum(clean_frame))
+                        step_frames.append(clean_frame)
+                    best_step_data = (step_loads, step_frames, sim_start * frame_ms)
+
+        if best_step_data is None:
+            return [None] * 10, [''] * 10, 1.0
+
+        loads, frames, start_time_base = best_step_data
+        loads = np.array(loads)
+        frames = np.array(frames)
+
+        # 裁剪 ROI
+        accumulated = np.sum(frames, axis=0)
+        valid_indices = np.where(accumulated > 0)
+        if len(valid_indices[0]) == 0:
+            rmin, rmax, cmin, cmax = 0, MAT_H, 0, MAT_W
+        else:
+            min_r, max_r = np.min(valid_indices[0]), np.max(valid_indices[0]) + 1
+            min_c, max_c = np.min(valid_indices[1]), np.max(valid_indices[1]) + 1
+            pad = 2
+            rmin = max(0, min_r - pad)
+            rmax = min(MAT_H, max_r + pad)
+            cmin = max(0, min_c - pad)
+            cmax = min(MAT_W, max_c + pad)
+            if (rmax - rmin) < 5: rmax = min(MAT_H, rmin + 5)
+            if (cmax - cmin) < 5: cmax = min(MAT_W, cmin + 5)
+
+        # 选10帧
+        selected_frames = []
+        selected_titles = []
+        peak_idx = np.argmax(loads)
+        peak_val = loads[peak_idx] if loads[peak_idx] > 0 else 0.0001
+
+        ascending_idxs = np.arange(0, peak_idx + 1)
+        ascending_loads = loads[:peak_idx + 1]
+        descending_idxs = np.arange(peak_idx, len(loads))
+        descending_loads = loads[peak_idx:]
+
+        # Frame 1: 落地
+        selected_frames.append(frames[min(1, len(frames) - 1)])
+        selected_titles.append("落地\n0ms")
+        # Frames 2-5: 上升
+        for r in [0.4, 0.5, 0.6, 0.85]:
+            idx = int((np.abs(ascending_loads - peak_val * r)).argmin())
+            t = int(ascending_idxs[idx]) * frame_ms
+            selected_frames.append(frames[ascending_idxs[idx]])
+            selected_titles.append(f"{t}ms")
+        # Frame 6: 峰值
+        selected_frames.append(frames[peak_idx])
+        selected_titles.append(f"峰值\n{peak_idx * frame_ms}ms")
+        # Frames 7-9: 下降
+        for r in [0.85, 0.7, 0.5]:
+            idx = int((np.abs(descending_loads - peak_val * r)).argmin())
+            t = int(descending_idxs[idx]) * frame_ms
+            selected_frames.append(frames[descending_idxs[idx]])
+            selected_titles.append(f"{t}ms")
+        # Frame 10: 离地
+        selected_frames.append(frames[-1])
+        selected_titles.append(f"离地\n{(len(frames) - 1) * frame_ms}ms")
+
+        # 裁剪 + 插值平滑（渲染用smooth，tooltip用raw）
+        from scipy.ndimage import zoom, gaussian_filter
+        smooth_frames = []
+        raw_frames = []
+        global_max = float(np.max(frames))
+        UPSCALE = 3
+        for f in selected_frames:
+            crop = f[rmin:rmax, cmin:cmax].astype(float)
+            raw_frames.append([[round(float(v), 1) for v in row] for row in crop])
+            high_res = zoom(crop, UPSCALE, order=1)
+            high_res = np.where(high_res < 0, 0, high_res)
+            smoothed = gaussian_filter(high_res, sigma=0.8)
+            smooth_frames.append([[round(float(v), 1) for v in row] for row in smoothed])
+
+        return smooth_frames, raw_frames, selected_titles, global_max
+
+    left_smooth, left_raw, left_titles, left_vmax = process_foot(left_on, left_off, False)
+    right_smooth, right_raw, right_titles, right_vmax = process_foot(right_on, right_off, True)
+    global_vmax = round(max(left_vmax, right_vmax), 1)
+
+    return {
+        'left': {
+            'frames': left_smooth,
+            'rawFrames': left_raw,
+            'titles': left_titles,
+            'vmax': global_vmax,
+        },
+        'right': {
+            'frames': right_smooth,
+            'rawFrames': right_raw,
+            'titles': right_titles,
+            'vmax': global_vmax,
+        },
+    }
 
 
 def plot_all_largest_regions_heatmap(left_regions, right_regions, total_matrix, left_peaks, right_peaks, center_l, center_r, save_path=None):
@@ -2983,6 +3346,18 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     img_evolution = os.path.join(working_dir, "pressure_evolution.png")
     plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_path=img_evolution)
 
+    # 10b. 提取前端渲染数据（与图片生成并行，数据用于前端Canvas渲染）
+    footprint_hm_data = build_footprint_heatmap_data(
+        left_regions, right_regions, raw_total_matrix,
+        raw_lx, raw_rx, raw_center_l, raw_center_r
+    )
+    gait_avg_data = build_gait_average_data(
+        total_matrix, left_on, left_off, right_on, right_off, center_l, center_r
+    )
+    pressure_evo_data = build_pressure_evolution_data(
+        total_matrix, left_on, left_off, right_on, right_off, center_l, center_r
+    )
+
     # 11. 构建步态参数
     l_diff = np.diff(lx) if len(lx) >= 2 else []
     r_diff = np.diff(rx) if len(rx) >= 2 else []
@@ -3168,16 +3543,13 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
         },
         "supportPhases": support_phases_result,
         "cyclePhases": cycle_phases_result,
+        "footprintHeatmapData": footprint_hm_data,
+        "gaitAverageData": gait_avg_data,
+        "pressureEvolutionData": pressure_evo_data,
         "images": {
             "pressureEvolution": img_to_base64(img_evolution),
             "gaitAverage": img_to_base64(os.path.join(working_dir, "gait_summary_average.png")),
             "footprintHeatmap": img_to_base64(img_all_footprints),
-            # [已注释] 以下5张图片前端已通过数值数据渲染，不再生成 base64
-            # "timeSeries": img_to_base64(img_ts),
-            # "leftPressureRegions": img_to_base64(img_left_heatmap),
-            # "rightPressureRegions": img_to_base64(img_right_heatmap),
-            # "leftPartitionCurves": img_to_base64(img_left_part),
-            # "rightPartitionCurves": img_to_base64(img_right_part),
         },
     }
 

@@ -363,11 +363,11 @@ function ForceTimeChart({ times, forces, peaksIdx = [], title, color = C.green, 
       .filter(idx => idx < times.length)
       .map(idx => ({ xAxis: times[idx], lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
     return {
-      tooltip: { trigger: 'axis', ...ttStyle, formatter: (p) => `<b>${p[0]?.value?.[0]?.toFixed(2)}s</b><br/>压力: ${p[0]?.value?.[1]?.toFixed(0)}` },
+      tooltip: { trigger: 'axis', ...ttStyle, formatter: (p) => `<b>${p[0]?.value?.[0]?.toFixed(2)}s</b><br/>力: ${p[0]?.value?.[1]?.toFixed(1)} N` },
       grid: { top: 35, bottom: 35, left: 55, right: 20 },
       title: title ? { text: title, left: 0, top: 0, textStyle: { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary, #6B7B8D)' } } : undefined,
       xAxis: { type: 'value', name: '时间 (s)', nameLocation: 'center', nameGap: 22, nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
-      yAxis: { type: 'value', name: '压力值', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      yAxis: { type: 'value', name: '力 (N)', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
       series: [{
         type: 'line', data, showSymbol: false, smooth: true,
         lineStyle: { color, width: 2 },
@@ -406,8 +406,8 @@ function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], si
       series.push({
         name: '\u5750\u57ab\u538b\u529b',
         type: 'line', data, showSymbol: false, smooth: true,
-        lineStyle: { color: C.blue, width: 2 },
-        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.blue + '18' }, { offset: 1, color: C.blue + '03' }]) },
+        lineStyle: { color: C.amber, width: 2 },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.amber + '18' }, { offset: 1, color: C.amber + '03' }]) },
       });
     }
 
@@ -419,7 +419,7 @@ function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], si
           let html = `<b>${params[0]?.value?.[0]?.toFixed(2)}s</b>`;
           params.forEach(p => {
             const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;"></span>`;
-            html += `<br/>${dot}${p.seriesName}: ${p.value?.[1]?.toFixed(0)}`;
+            html += `<br/>${dot}${p.seriesName}: ${p.value?.[1]?.toFixed(1)} N`;
           });
           return html;
         },
@@ -432,7 +432,7 @@ function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], si
       },
       grid: { top: 35, bottom: 35, left: 55, right: 20 },
       xAxis: { type: 'value', name: '\u65f6\u95f4 (s)', nameLocation: 'center', nameGap: 22, nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
-      yAxis: { type: 'value', name: '\u538b\u529b\u503c', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      yAxis: { type: 'value', name: '\u529b (N)', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
       series,
     };
   }, [standTimes, standForce, standPeaksIdx, sitTimes, sitForce, hasStand, hasSit]);
@@ -454,7 +454,7 @@ function CycleDurationChart({ durations, avgDuration, height = 200 }) {
     const labels = durations.map((_, i) => `周期${i + 1}`);
     return {
       tooltip: { trigger: 'axis', ...ttStyle },
-      grid: { top: 20, bottom: 30, left: 50, right: 15 },
+      grid: { top: 30, bottom: 30, left: 50, right: 15, containLabel: true },
       xAxis: { type: 'category', data: labels, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } } },
       yAxis: { type: 'value', name: '秒', axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
       series: [{
@@ -487,9 +487,9 @@ function CyclePeakForceChart({ peakForces, height = 200 }) {
     const labels = peakForces.map((_, i) => `峰值${i + 1}`);
     return {
       tooltip: { trigger: 'axis', ...ttStyle },
-      grid: { top: 20, bottom: 30, left: 55, right: 15 },
+      grid: { top: 30, bottom: 30, left: 55, right: 15, containLabel: true },
       xAxis: { type: 'category', data: labels, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } } },
-      yAxis: { type: 'value', name: '压力值', axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
+      yAxis: { type: 'value', name: '力 (N)', axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
       series: [{
         type: 'bar', barWidth: '50%',
         data: peakForces.map(f => ({
@@ -502,7 +502,7 @@ function CyclePeakForceChart({ peakForces, height = 200 }) {
             borderRadius: [4, 4, 0, 0],
           },
         })),
-        label: { show: true, position: 'top', formatter: (p) => p.value.toLocaleString(), fontSize: 9, color: C.text },
+        label: { show: true, position: 'top', formatter: (p) => `${Number(p.value).toFixed(1)} N`, fontSize: 9, color: C.text },
       }],
     };
   }, [peakForces]);
@@ -537,11 +537,11 @@ function SymmetryGauge({ ratio, leftTotal, rightTotal, height = 180 }) {
         <div className="flex justify-center gap-6 -mt-3">
           <div className="text-center">
             <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>左脚总力</div>
-            <div className="text-xs font-bold" style={{ color: C.blue }}>{Number(leftTotal).toLocaleString()}</div>
+            <div className="text-xs font-bold" style={{ color: C.blue }}>{Number(leftTotal).toFixed(1)} N</div>
           </div>
           <div className="text-center">
             <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>右脚总力</div>
-            <div className="text-xs font-bold" style={{ color: C.green }}>{Number(rightTotal).toLocaleString()}</div>
+            <div className="text-xs font-bold" style={{ color: C.red }}>{Number(rightTotal).toFixed(1)} N</div>
           </div>
         </div>
       )}
@@ -563,9 +563,9 @@ function SymmetryBar({ leftTotal, rightTotal }) {
           <div className="h-full flex items-center justify-center text-[10px] font-bold text-white transition-all"
             style={{ width: `${leftPct}%`, background: C.blue, minWidth: 30 }}>{leftPct}%</div>
           <div className="h-full flex items-center justify-center text-[10px] font-bold text-white transition-all"
-            style={{ width: `${rightPct}%`, background: C.green, minWidth: 30 }}>{rightPct}%</div>
+            style={{ width: `${rightPct}%`, background: C.red, minWidth: 30 }}>{rightPct}%</div>
         </div>
-        <span className="text-[10px] w-8" style={{ color: C.green }}>右</span>
+        <span className="text-[10px] w-8" style={{ color: C.red }}>右</span>
       </div>
     </div>
   );
@@ -669,8 +669,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const cycleDurations = durationStats.cycle_durations || [];
   const symmetry = d.symmetry || {};
   const symmetryRatio = symmetry.left_right_ratio ?? null;
-  const leftTotal = symmetry.left_total ?? null;
-  const rightTotal = symmetry.right_total ?? null;
+  const leftTotal = symmetry.left_avg_force ?? symmetry.left_total ?? null;
+  const rightTotal = symmetry.right_avg_force ?? symmetry.right_total ?? null;
   const pressureStats = d.pressure_stats || {};
   const cyclePeakForces = d.cycle_peak_forces || [];
 
@@ -844,7 +844,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                         color={C.blue} />
                       <DataRow label="右脚占比"
                         value={leftTotal && rightTotal ? `${((rightTotal / (leftTotal + rightTotal)) * 100).toFixed(1)}%` : '--'}
-                        color={C.green} />
+                        color={C.red} />
                     </div>
                     <div className="mt-3 p-3 rounded-lg text-xs leading-relaxed"
                       style={{
@@ -1017,22 +1017,22 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               {(pressureStats.foot_max || pressureStats.sit_max) ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="zeiss-card p-4">
-                    <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>脚垫压力统计</div>
+                    <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>脚垫力统计</div>
                     <div className="space-y-2">
-                      <DataRow label="最大总压力" value={pressureStats.foot_max?.toLocaleString() || '--'} color={C.red} />
-                      <DataRow label="平均总压力" value={pressureStats.foot_avg?.toLocaleString() || '--'} color={C.blue} />
+                      <DataRow label="最大总力" value={pressureStats.foot_max != null ? `${Number(pressureStats.foot_max).toFixed(1)} N` : '--'} color={C.red} />
+                      <DataRow label="平均总力" value={pressureStats.foot_avg != null ? `${Number(pressureStats.foot_avg).toFixed(1)} N` : '--'} color={C.blue} />
                       {pressureStats.max_foot_change_rate != null && (
-                        <DataRow label="最大变化率" value={pressureStats.max_foot_change_rate?.toLocaleString() || '--'} color={C.amber} sub="/帧" />
+                        <DataRow label="最大变化率" value={`${Number(pressureStats.max_foot_change_rate).toFixed(1)} N`} color={C.amber} sub="/帧" />
                       )}
                     </div>
                   </div>
                   <div className="zeiss-card p-4">
-                    <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>坐垫压力统计</div>
+                    <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>坐垫力统计</div>
                     <div className="space-y-2">
-                      <DataRow label="最大总压力" value={pressureStats.sit_max?.toLocaleString() || '--'} color={C.red} />
-                      <DataRow label="平均总压力" value={pressureStats.sit_avg?.toLocaleString() || '--'} color={C.blue} />
+                      <DataRow label="最大总力" value={pressureStats.sit_max != null ? `${Number(pressureStats.sit_max).toFixed(1)} N` : '--'} color={C.red} />
+                      <DataRow label="平均总力" value={pressureStats.sit_avg != null ? `${Number(pressureStats.sit_avg).toFixed(1)} N` : '--'} color={C.blue} />
                       {pressureStats.max_sit_change_rate != null && (
-                        <DataRow label="最大变化率" value={pressureStats.max_sit_change_rate?.toLocaleString() || '--'} color={C.amber} sub="/帧" />
+                        <DataRow label="最大变化率" value={`${Number(pressureStats.max_sit_change_rate).toFixed(1)} N`} color={C.amber} sub="/帧" />
                       )}
                     </div>
                   </div>

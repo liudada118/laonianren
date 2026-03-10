@@ -110,7 +110,7 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, 
     }
   }
 
-  // 分界线 — 5:5:9:5 比例（X轴4段）
+  // 分界线 — 5:5:9:5 比例（沿行方向即脚趾→脚跟，画横线）
   const ratios = [5, 5, 9, 5];
   const totalRatio = 24;
   ctx.strokeStyle = 'rgba(231, 76, 60, 0.6)';
@@ -119,10 +119,10 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, 
   let cumRatio = 0;
   for (let i = 0; i < ratios.length - 1; i++) {
     cumRatio += ratios[i];
-    const bx = cx + (cumRatio / totalRatio) * footW;
+    const by = cy + (cumRatio / totalRatio) * footH;
     ctx.beginPath();
-    ctx.moveTo(bx, cy - 3);
-    ctx.lineTo(bx, cy + footH + 3);
+    ctx.moveTo(cx - 3, by);
+    ctx.lineTo(cx + footW + 3, by);
     ctx.stroke();
   }
   ctx.setLineDash([]);
