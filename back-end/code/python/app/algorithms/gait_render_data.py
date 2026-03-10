@@ -280,6 +280,54 @@ def get_partition_curve_images(result):
     }
 
 
+def get_pressure_evolution_data(result):
+    """
+    【渲染区域】动态压力演变 - 前端 Canvas 渲染数据
+
+    返回: {
+        'left': [{'data': [[float]], 'title': str}, ...] | None,   # 左脚10个关键帧
+        'right': [{'data': [[float]], 'title': str}, ...] | None,  # 右脚10个关键帧
+    }
+    前端渲染: Canvas 热力图 2×10 网格
+    """
+    return result.get('pressureEvolutionData', {'left': None, 'right': None})
+
+
+def get_gait_average_data(result):
+    """
+    【渲染区域】步态平均摘要 - 前端 Canvas 渲染数据
+
+    返回: {
+        'left': {
+            'heatmap': [[float]],           # 平均热力图矩阵
+            'cops': [{'xs': [float], 'ys': [float]}, ...],  # COP轨迹
+            'stepCount': int,               # 步数
+        } | None,
+        'right': { ... } | None,
+    }
+    前端渲染: Canvas 热力图 + COP轨迹线
+    """
+    return result.get('gaitAverageData', {'left': None, 'right': None})
+
+
+def get_footprint_heatmap_data(result):
+    """
+    【渲染区域】足印热力图（足偏角分析）- 前端 Canvas 渲染数据
+
+    返回: {
+        'heatmap': [[float]],    # 累积热力图矩阵 (H x W)
+        'fpaLines': [
+            {'angle': float, 'heel': [x, y], 'fore': [x, y], 'isRight': bool},
+            ...
+        ],
+        'width': int,            # 矩阵宽度
+        'height': int,           # 矩阵高度
+    }
+    前端渲染: Canvas 热力图 + FPA角度线
+    """
+    return result.get('footprintHeatmapData', {'heatmap': [], 'fpaLines': [], 'width': 0, 'height': 0})
+
+
 # ============================================================
 # 测试入口
 # ============================================================

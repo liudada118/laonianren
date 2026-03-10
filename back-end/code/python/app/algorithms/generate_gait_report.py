@@ -1887,6 +1887,31 @@ def plot_all_largest_regions_heatmap(left_regions, right_regions, total_matrix, 
     else: 
         plt.show()
 
+    # === 返回前端渲染所需的数据 ===
+    fpa_lines = []
+    def _collect_fpa(frame_idx, is_right):
+        if frame_idx >= len(total_matrix): return
+        frame = np.array(total_matrix[frame_idx])
+        angle, heel, fore = analyze_fpa_geometry(frame, is_right, center_l, center_r)
+        if angle is not None and heel is not None and fore is not None:
+            fpa_lines.append({
+                'angle': round(float(angle), 1),
+                'heel': [round(float(heel[0]), 2), round(float(heel[1]), 2)],
+                'fore': [round(float(fore[0]), 2), round(float(fore[1]), 2)],
+                'isRight': is_right
+            })
+    for idx in left_peaks:
+        _collect_fpa(idx, False)
+    for idx in right_peaks:
+        _collect_fpa(idx, True)
+
+    return {
+        'heatmap': np.round(heatmap, 1).tolist(),
+        'fpaLines': fpa_lines,
+        'width': W,
+        'height': H
+    }
+
 
 def analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_dir=None):
     # total_matrix: 帧矩阵, left_on/off: 左脚起止, right_on/off: 右脚起止, center_l/r: 重心, save_dir: 目录
@@ -2077,6 +2102,31 @@ def analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, 
         plt.savefig(summary_path, dpi=150, facecolor='white')
         plt.close()
 
+    # === 返回前端渲染所需的数据 ===
+    def _build_side_data(aligned_imgs, aligned_cops):
+        if not aligned_imgs:
+            return None
+        avg_heatmap = np.mean(np.array(aligned_imgs), axis=0)
+        # 将热力图转为列表，保留1位小数减少传输量
+        heatmap_list = np.round(avg_heatmap, 1).tolist()
+        cops_list = []
+        for (cop_xs, cop_ys) in aligned_cops:
+            if len(cop_xs) > 0:
+                cops_list.append({
+                    'xs': [round(float(x), 2) for x in cop_xs],
+                    'ys': [round(float(y), 2) for y in cop_ys]
+                })
+        return {
+            'heatmap': heatmap_list,
+            'cops': cops_list,
+            'stepCount': len(aligned_imgs)
+        }
+
+    return {
+        'left': _build_side_data(l_aligned_imgs, l_aligned_cops),
+        'right': _build_side_data(r_aligned_imgs, r_aligned_cops)
+    }
+
 
 def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_path=None):
     # total_matrix: 帧矩阵, left_on/off...: 事件索引, center_l/r: 重心, save_path: 保存路径
@@ -2167,7 +2217,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
                 ax.set_facecolor('black')
                 ax.axis('off')
                 if ax == ax_row[0]: ax.text(0.5, 0.5, "无信号", color='gray', ha='center', transform=ax.transAxes)
-            return
+            return None  # 返回 None 表示无数据
 
         loads, frames, start_time_base = best_step_data
         loads = np.array(loads)
@@ -2256,11 +2306,21 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
             else:
                 ax.axis('off')
 
+        # === 返回裁剪后的帧数据供前端渲染 ===
+        result_frames = []
+        for k in range(len(selected_frames)):
+            crop = selected_frames[k][rmin:rmax, cmin:cmax]
+            result_frames.append({
+                'data': np.round(crop, 1).tolist(),
+                'title': selected_titles[k].replace('\n', ' ')
+            })
+        return result_frames
+
     # 执行
-    process_foot(left_on, left_off, False, axes[0])
+    left_evo_data = process_foot(left_on, left_off, False, axes[0])
     axes[0, 0].set_ylabel("左脚", fontsize=14, rotation=0, labelpad=40, va='center')
 
-    process_foot(right_on, right_off, True, axes[1])
+    right_evo_data = process_foot(right_on, right_off, True, axes[1])
     axes[1, 0].set_ylabel("右脚", fontsize=14, rotation=0, labelpad=40, va='center')
 
     plt.suptitle("足底压力演变（落地 → 离地）", fontsize=16, y=0.98)
@@ -2270,6 +2330,12 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
         plt.close()
     else:
         plt.show()
+
+    # 返回前端渲染数据
+    return {
+        'left': left_evo_data,
+        'right': right_evo_data
+    }
 
 # ==================================================================================
 # 5. 报告生成
@@ -2976,12 +3042,12 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
 
     left_regions, right_regions = extract_all_largest_regions_cv(raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r)
     img_all_footprints = os.path.join(working_dir, "all_footprints.png")
-    plot_all_largest_regions_heatmap(left_regions, right_regions, raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r, save_path=img_all_footprints)
+    footprint_heatmap_data = plot_all_largest_regions_heatmap(left_regions, right_regions, raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r, save_path=img_all_footprints)
 
-    analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_dir=working_dir)
+    gait_average_data = analyze_gait_and_plot(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_dir=working_dir)
 
     img_evolution = os.path.join(working_dir, "pressure_evolution.png")
-    plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_path=img_evolution)
+    pressure_evolution_data = plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r, save_path=img_evolution)
 
     # 11. 构建步态参数
     l_diff = np.diff(lx) if len(lx) >= 2 else []
@@ -3168,6 +3234,10 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
         },
         "supportPhases": support_phases_result,
         "cyclePhases": cycle_phases_result,
+        # === 前端 Canvas 渲染数据 ===
+        "pressureEvolutionData": pressure_evolution_data if pressure_evolution_data else {'left': None, 'right': None},
+        "gaitAverageData": gait_average_data if gait_average_data else {'left': None, 'right': None},
+        "footprintHeatmapData": footprint_heatmap_data if footprint_heatmap_data else {'heatmap': [], 'fpaLines': [], 'width': 0, 'height': 0},
         "images": {
             "pressureEvolution": img_to_base64(img_evolution),
             "gaitAverage": img_to_base64(os.path.join(working_dir, "gait_summary_average.png")),
