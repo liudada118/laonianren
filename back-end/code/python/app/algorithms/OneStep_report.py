@@ -2317,13 +2317,13 @@ def cal_cop_fromData(data_array, threshold_ratio=0.8, fps=42, r_radius=0.1, time
     # 尺寸（基于峰值帧的max_area）
     x_left_coords = [coord[0] for coord in left_max_area]
     y_left_coords = [coord[1] for coord in left_max_area]
-    left_length = (max(x_left_coords) - min(x_left_coords) + 1) * 0.7 + 1.5
-    left_width = (max(y_left_coords) - min(y_left_coords) + 1) * 0.7 + 1.5
+    left_length = (max(x_left_coords) - min(x_left_coords) + 1) * 1.4 + 1.5
+    left_width = (max(y_left_coords) - min(y_left_coords) + 1) * 1.4 + 1.5
 
     x_right_coords = [coord[0] for coord in right_max_area]
     y_right_coords = [coord[1] for coord in right_max_area]
-    right_length = (max(x_right_coords) - min(x_right_coords) + 1) * 0.7 + 1.5
-    right_width = (max(y_right_coords) - min(y_right_coords) + 1) * 0.7 + 1.5
+    right_length = (max(x_right_coords) - min(x_right_coords) + 1) * 1.4 + 1.5
+    right_width = (max(y_right_coords) - min(y_right_coords) + 1) * 1.4 + 1.5
 
     # ✅ 使用峰值帧计算压力分布
     matrix = np.array(peak_frame_data, dtype=float).reshape(64, 64)

@@ -21,6 +21,7 @@ from OneStep_report import (
     preprocess_data_array,
     extract_pressure_curves,
     calculate_cop_trajectories,
+    calculate_cop_time_series,
     draw_confidence_ellipse,
 )
 
@@ -86,9 +87,12 @@ def generate_standing_report(data_array, fps=42, threshold_ratio=0.8):
         return results
 
     # 3. 额外提取 COP 轨迹 & 椭圆参数（cal_cop_fromData 未返回这些）
+    #    注意: processed_data 已经过 preprocess_origin_data 的 fliplr，
+    #    这里不能再做 mirrored_horizon=True，否则会双重镜像导致 COP 坐标系
+    #    与 section_coords / peak_frame_data 不一致（轨迹画到脚外面）
     try:
         df = preprocess_data_array(
-            processed_data, rotate_90_ccw=False, mirrored_horizon=True
+            processed_data, rotate_90_ccw=False, mirrored_horizon=False
         )
         left_curve, right_curve = extract_pressure_curves(processed_data)
         left_cop, right_cop = calculate_cop_trajectories(
@@ -108,6 +112,12 @@ def generate_standing_report(data_array, fps=42, threshold_ratio=0.8):
         results["right_cop_trajectory"] = right_cop
         results["left_ellipse_params"] = left_ellipse
         results["right_ellipse_params"] = right_ellipse
+
+        # 4. 分别计算左右脚 COP 时间序列参数（轨迹长度、速度等）
+        left_cop_ts = calculate_cop_time_series(left_cop, [], {}, dt=1.0 / fps)
+        right_cop_ts = calculate_cop_time_series(right_cop, [], {}, dt=1.0 / fps)
+        results["left_cop_time_series"] = left_cop_ts
+        results["right_cop_time_series"] = right_cop_ts
     except Exception as e:
         import traceback
         traceback.print_exc()

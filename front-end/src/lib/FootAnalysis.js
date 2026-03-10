@@ -247,8 +247,8 @@ export function calculateFootDimensions(coords) {
   const xValues = coords.map(c => c[0]);
   const yValues = coords.map(c => c[1]);
   return {
-    length: (Math.max(...xValues) - Math.min(...xValues)) * PITCH_MM / 10,
-    width: (Math.max(...yValues) - Math.min(...yValues)) * PITCH_MM / 10
+    length: (Math.max(...xValues) - Math.min(...xValues)) * 14.0 / 10,
+    width: (Math.max(...yValues) - Math.min(...yValues)) * 14.0 / 10
   };
 }
 
