@@ -206,12 +206,12 @@ export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
 
       frames.forEach((frame, i) => {
         if (!frame?.data || frame.data.length === 0) return;
-        const fx = labelW + padX + i * cellW + 4;
-        const fy = y0 + 20;
-        const fw = cellW - 8;
-        const fh = cellH - 26;
+        const cellX = labelW + padX + i * cellW + 4;
+        const cellY = y0 + 20;
+        const cellContentW = cellW - 8;
+        const cellContentH = cellH - 26;
 
-        // 帧标签（两行：Peak 单独一行 + 时间）
+        // 帧标签
         const title = frame.title || '';
         const isPeak = title.includes('峰值') || title.includes('Peak');
 
@@ -219,18 +219,39 @@ export function RealPressureEvolution({ data, width = 1200, height = 600 }) {
         ctx.textBaseline = 'top';
 
         if (isPeak) {
-          // Peak 标签红色加粗
           ctx.fillStyle = '#DC2626';
           ctx.font = 'bold 10px "PingFang SC", "Microsoft YaHei", sans-serif';
-          ctx.fillText(title, fx + fw / 2, y0);
+          ctx.fillText(title, cellX + cellContentW / 2, y0);
         } else {
           ctx.fillStyle = '#6B7B8D';
           ctx.font = '10px "PingFang SC", "Microsoft YaHei", sans-serif';
-          ctx.fillText(title, fx + fw / 2, y0 + 4);
+          ctx.fillText(title, cellX + cellContentW / 2, y0 + 4);
         }
 
-        // 绘制平滑热力图
-        drawSmoothHeatmap(ctx, frame.data, fx, fy, fw, fh, globalMax, true);
+        // 先画黑色背景填满单元格
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(cellX, cellY, cellContentW, cellContentH);
+
+        // 保持矩阵纵横比，在单元格内居中绘制
+        const matRows = frame.data.length;
+        const matCols = frame.data[0]?.length || 1;
+        const matAspect = matRows / matCols;
+        const cellAspect = cellContentH / cellContentW;
+        let drawW, drawH;
+        if (matAspect > cellAspect) {
+          // 矩阵更瘦长，以高度为准
+          drawH = cellContentH;
+          drawW = drawH / matAspect;
+        } else {
+          // 矩阵更宽扁，以宽度为准
+          drawW = cellContentW;
+          drawH = drawW * matAspect;
+        }
+        const drawX = cellX + (cellContentW - drawW) / 2;
+        const drawY = cellY + (cellContentH - drawH) / 2;
+
+        // 绘制平滑热力图（保持纵横比）
+        drawSmoothHeatmap(ctx, frame.data, drawX, drawY, drawW, drawH, globalMax, true);
       });
     };
 
