@@ -174,6 +174,24 @@ class BackendBridge {
     return res.json();
   }
 
+  async tareGrip() {
+    const res = await fetch(`${this.httpUrl}/tareGrip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    return res.json();
+  }
+
+  async clearGripBaseline() {
+    const res = await fetch(`${this.httpUrl}/clearGripBaseline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    return res.json();
+  }
+
   async startCol({ name, assessmentId, sampleType, date, colName }) {
     const res = await fetch(`${this.httpUrl}/startCol`, {
       method: 'POST',

@@ -462,6 +462,9 @@ let activeSampleType = null
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
 const glovePacket1Cache = {}
 
+// 握力清零基线：记录清零时刻的传感器值，后续数据减去基线（负值归零）
+let gripBaseline = { HL: null, HR: null }
+
 /**
  * 校验四元数合法性（参考 serial_parser_two.py 的 quaternion 属性）
  * @param {number[]} q - [w, x, y, z]
@@ -1626,6 +1629,41 @@ app.post('/setActiveMode', (req, res) => {
   }
 })
 
+
+// 握力传感器清零：记录当前 HL/HR 的传感器值作为基线
+app.post('/tareGrip', (req, res) => {
+  try {
+    let taredCount = 0
+    // 遍历 dataMap，找到 HL 和 HR 类型的最新数据作为基线
+    Object.keys(dataMap).forEach((key) => {
+      const item = dataMap[key]
+      if (!item || !item.type) return
+      if (item.type === 'HL' && item.arr && item.arr.length) {
+        gripBaseline.HL = [...item.arr]
+        taredCount++
+        console.log('[tareGrip] HL 基线已记录, 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
+      }
+      if (item.type === 'HR' && item.arr && item.arr.length) {
+        gripBaseline.HR = [...item.arr]
+        taredCount++
+        console.log('[tareGrip] HR 基线已记录, 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
+      }
+    })
+    console.log('[tareGrip] 清零完成, 已记录 %d 个设备基线', taredCount)
+    res.json(new HttpResult(0, { taredCount }, '清零成功'))
+  } catch (e) {
+    console.error('[tareGrip] 错误:', e)
+    res.json(new HttpResult(1, {}, '清零失败: ' + e.message))
+  }
+})
+
+// 清除握力基线（退出握力评估时调用）
+app.post('/clearGripBaseline', (req, res) => {
+  gripBaseline.HL = null
+  gripBaseline.HR = null
+  console.log('[clearGripBaseline] 基线已清除')
+  res.json(new HttpResult(0, {}, '基线已清除'))
+})
 
 /// 停止采集
 app.get('/endCol', async (req, res) => {
@@ -2806,6 +2844,15 @@ function parseData(parserArr, objs) {
       if (obj.port.isOpen) {
       // 统一使用 data.arr（手套在 packet2 到达时已合并，其他设备直接赋值 arr）
       let blueArr = data.arr && data.arr.length ? data.arr : []
+
+      // 握力清零：对 HL/HR 数据减去基线，负值归零
+      if ((data.type === 'HL' || data.type === 'HR') && gripBaseline[data.type] && blueArr.length) {
+        const base = gripBaseline[data.type]
+        blueArr = blueArr.map((v, i) => {
+          const diff = v - (base[i] || 0)
+          return diff > 0 ? diff : 0
+        })
+      }
       // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
       const dataStamp = new Date().getTime() - data.stamp
       json[data.type] = {}

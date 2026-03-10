@@ -274,6 +274,13 @@ export default function GripAssessment() {
     backendBridge.setActiveMode(1).then(() => {
       console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
       addSimLog('已设置为手套模式 (mode=1)', 'info');
+      // 设置模式后延迟 500ms 执行清零，确保已收到稳定的基线数据
+      setTimeout(() => {
+        backendBridge.tareGrip().then((r) => {
+          console.log('[GripAssessment] 握力清零完成:', r);
+          addSimLog('左右手传感器已清零', 'info');
+        }).catch(e => console.error('[GripAssessment] tareGrip failed:', e));
+      }, 500);
     }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
@@ -303,6 +310,8 @@ export default function GripAssessment() {
         backendCleanupRef.current();
         backendCleanupRef.current = null;
       }
+      // 退出握力评估时清除基线，避免影响其他模式
+      backendBridge.clearGripBaseline().catch(() => {});
     };
   }, [isGlobalConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
