@@ -1318,13 +1318,13 @@ function generateStandingReport(dataArray, fps = 42, thresholdRatio = 0.8) {
 
   const leftXCoords = leftMaxArea.map(p => p[0]);
   const leftYCoords = leftMaxArea.map(p => p[1]);
-  const leftLength = (Math.max(...leftXCoords) - Math.min(...leftXCoords) + 1) * 0.7 + 1.5;
-  const leftWidth = (Math.max(...leftYCoords) - Math.min(...leftYCoords) + 1) * 0.7 + 1.5;
+  const leftLength = (Math.max(...leftXCoords) - Math.min(...leftXCoords) + 1) * 1.4 + 1.5;
+  const leftWidth = (Math.max(...leftYCoords) - Math.min(...leftYCoords) + 1) * 1.4 + 1.5;
 
   const rightXCoords = rightMaxArea.map(p => p[0]);
   const rightYCoords = rightMaxArea.map(p => p[1]);
-  const rightLength = (Math.max(...rightXCoords) - Math.min(...rightXCoords) + 1) * 0.7 + 1.5;
-  const rightWidth = (Math.max(...rightYCoords) - Math.min(...rightYCoords) + 1) * 0.7 + 1.5;
+  const rightLength = (Math.max(...rightXCoords) - Math.min(...rightXCoords) + 1) * 1.4 + 1.5;
+  const rightWidth = (Math.max(...rightYCoords) - Math.min(...rightYCoords) + 1) * 1.4 + 1.5;
 
   // 压力分布
   const matrix = reshape2D(peakFrameData, 64, 64);

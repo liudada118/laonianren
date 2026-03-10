@@ -31,8 +31,6 @@ const SECTIONS = [
   { id: 'arch-zones', label: '足弓区域分布图' },
   { id: 'pressure', label: '区域压力分布' },
   { id: 'cop-heatmap', label: 'COP 压力中心轨迹' },
-  { id: 'cop-trajectory', label: 'COP 轨迹' },
-  { id: 'cop-ellipse', label: 'COP 置信椭圆' },
   { id: 'cop-velocity', label: 'COP 速度时间序列' },
   { id: 'cop-params', label: 'COP 参数表' },
   { id: 'annotation', label: '参数说明' },
@@ -57,6 +55,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       const ad = r.additional_data || {};
       const af = r.arch_features || {};
       const cts = r.cop_time_series || {};
+      const leftCts = r.left_cop_time_series || {};
+      const rightCts = r.right_cop_time_series || {};
       const leftCopM = r.left_cop_metrics || {};
       const rightCopM = r.right_cop_metrics || {};
       const leftSway = r.left_sway_features || {};
@@ -154,10 +154,28 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
             hindfoot: (rightPres['后足'] || 0) * 100,
           },
         },
-        bilateral: {
-          leftPressureRatio: (r.bilateral_pressure && r.bilateral_pressure.leftRatio) || 50,
-          rightPressureRatio: (r.bilateral_pressure && r.bilateral_pressure.rightRatio) || 50,
-        },
+        bilateral: (() => {
+          // 用峰值帧数据计算左右脚压力比（64x64矩阵，列0-31左脚，列32-63右脚）
+          const peak = af.peak_frame_data || [];
+          if (peak.length === 4096) {
+            let leftP = 0, rightP = 0;
+            for (let row = 0; row < 64; row++) {
+              for (let col = 0; col < 64; col++) {
+                const v = peak[row * 64 + col] || 0;
+                if (col < 32) leftP += v;
+                else rightP += v;
+              }
+            }
+            const total = leftP + rightP;
+            if (total > 0) {
+              return {
+                leftPressureRatio: Math.round(leftP / total * 1000) / 10,
+                rightPressureRatio: Math.round(rightP / total * 1000) / 10,
+              };
+            }
+          }
+          return { leftPressureRatio: 50, rightPressureRatio: 50 };
+        })(),
         copData: { leftCop: leftCopTraj, rightCop: rightCopTraj },
         ellipseData: {
           left: calcEllipseFromTraj(leftCopTraj, leftEllipseArea, backendLeftEllipse),
@@ -180,6 +198,39 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
           rmsDisplacement: cts.rms_displacement || 0,
           stdY: cts.std_y || 0,
           stdX: cts.std_x || 0,
+        },
+        // 左右脚分别的 COP 时间序列参数
+        leftCopTimeSeries: {
+          pathLength: leftCts.path_length || 0,
+          contactArea: leftCts.contact_area || 0,
+          lsRatio: leftCts.ls_ratio || 0,
+          eccentricity: leftCts.eccentricity || 0,
+          deltaY: leftCts.delta_y || 0,
+          deltaX: leftCts.delta_x || 0,
+          majorAxis: leftCts.major_axis || 0,
+          minorAxis: leftCts.minor_axis || 0,
+          maxDisplacement: leftCts.max_displacement || 0,
+          minDisplacement: leftCts.min_displacement || 0,
+          avgVelocity: leftCts.avg_velocity || 0,
+          rmsDisplacement: leftCts.rms_displacement || 0,
+          stdY: leftCts.std_y || 0,
+          stdX: leftCts.std_x || 0,
+        },
+        rightCopTimeSeries: {
+          pathLength: rightCts.path_length || 0,
+          contactArea: rightCts.contact_area || 0,
+          lsRatio: rightCts.ls_ratio || 0,
+          eccentricity: rightCts.eccentricity || 0,
+          deltaY: rightCts.delta_y || 0,
+          deltaX: rightCts.delta_x || 0,
+          majorAxis: rightCts.major_axis || 0,
+          minorAxis: rightCts.minor_axis || 0,
+          maxDisplacement: rightCts.max_displacement || 0,
+          minDisplacement: rightCts.min_displacement || 0,
+          avgVelocity: rightCts.avg_velocity || 0,
+          rmsDisplacement: rightCts.rms_displacement || 0,
+          stdY: rightCts.std_y || 0,
+          stdX: rightCts.std_x || 0,
         },
         rawData: {
           leftSectionCoords: leftArchF.section_coords || null,
@@ -328,6 +379,9 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         stdY: copMet.stdY || 0,
         stdX: copMet.stdX || 0,
       },
+      // 前端格式暂无分脚数据，fallback 到 copTimeSeries
+      leftCopTimeSeries: null,
+      rightCopTimeSeries: null,
       rawData: {
         leftSectionCoords: r.left?.sectionCoords || null,
         rightSectionCoords: r.right?.sectionCoords || null,
@@ -384,120 +438,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     }]
   });
 
-  /* ─── COP 轨迹图（左脚+右脚，坐标自适应） ─── */
-  const copTrajectoryOption = useMemo(() => {
-    const leftPts = (data.copData?.leftCop || []).map((p) => [p[1], p[0]]);
-    const rightPts = (data.copData?.rightCop || []).map((p) => [p[1], p[0]]);
-    const allPts = [...leftPts, ...rightPts];
-    // 计算坐标范围并留 padding
-    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
-    allPts.forEach(([x, y]) => { xMin = Math.min(xMin, x); xMax = Math.max(xMax, x); yMin = Math.min(yMin, y); yMax = Math.max(yMax, y); });
-    if (!isFinite(xMin)) { xMin = -10; xMax = 10; yMin = -10; yMax = 10; }
-    const xPad = Math.max((xMax - xMin) * 0.15, 1);
-    const yPad = Math.max((yMax - yMin) * 0.15, 1);
-    return {
-      tooltip: tooltipStyle,
-      legend: { data: ['左脚', '右脚'], bottom: 5, textStyle: { color: chartText } },
-      grid: { top: 30, bottom: 50, left: 60, right: 30 },
-      xAxis: { name: '左右摆动', type: 'value', min: Math.floor(xMin - xPad), max: Math.ceil(xMax + xPad), nameLocation: 'center', nameGap: 30, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
-      yAxis: { name: '前后摆动', type: 'value', min: Math.floor(yMin - yPad), max: Math.ceil(yMax + yPad), nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
-      visualMap: [{
-        show: true, dimension: 2, min: 0, max: Math.max(leftPts.length, rightPts.length),
-        inRange: { color: ['#440154', '#31688e', '#35b779', '#fde725'] },
-        orient: 'vertical', right: 0, top: 30, bottom: 60,
-        text: ['后', '先'], textStyle: { color: chartText, fontSize: 10 },
-        calculable: false
-      }],
-      series: [
-        {
-          name: '左脚', type: 'scatter',
-          data: leftPts.map((p, i) => [...p, i]),
-          symbolSize: 4, encode: { x: 0, y: 1 }
-        },
-        {
-          name: '右脚', type: 'scatter',
-          data: rightPts.map((p, i) => [...p, i]),
-          symbolSize: 4, encode: { x: 0, y: 1 }
-        }
-      ]
-    };
-  }, [data]);
 
-  /* ─── COP 置信椭圆图（坐标自适应） ─── */
-  const copEllipseOption = useMemo(() => {
-    const leftPts = (data.copData?.leftCop || []).map(p => [p[1], p[0]]);
-    const rightPts = (data.copData?.rightCop || []).map(p => [p[1], p[0]]);
-    const ellipseLeft = data.ellipseData?.left;
-    const ellipseRight = data.ellipseData?.right;
-
-    const series = [];
-    // 收集所有点用于计算坐标范围
-    const allPoints = [...leftPts, ...rightPts];
-
-    if (leftPts.length > 0) {
-      series.push({
-        name: '左脚COP', type: 'scatter', data: leftPts,
-        symbolSize: 4, itemStyle: { color: '#0066CC', opacity: 0.5 }
-      });
-    }
-    if (rightPts.length > 0) {
-      series.push({
-        name: '右脚COP', type: 'scatter', data: rightPts,
-        symbolSize: 4, itemStyle: { color: '#DC2626', opacity: 0.5 }
-      });
-    }
-
-    // 用参数方程绘制椭圆
-    const drawEllipse = (ellipse, color, name) => {
-      if (!ellipse) return;
-      const { center, width, height, angle } = ellipse;
-      const cx = center[1], cy = center[0];
-      const a = width / 2, b = height / 2;
-      const rad = (angle || 0) * Math.PI / 180;
-      const pts = [];
-      for (let t = 0; t <= 2 * Math.PI; t += 0.05) {
-        const x = a * Math.cos(t);
-        const y = b * Math.sin(t);
-        const rx = cx + x * Math.cos(rad) - y * Math.sin(rad);
-        const ry = cy + x * Math.sin(rad) + y * Math.cos(rad);
-        pts.push([rx, ry]);
-      }
-      pts.push(pts[0]);
-      // 椭圆点也加入坐标范围计算
-      allPoints.push(...pts);
-      series.push({
-        name, type: 'line', data: pts, showSymbol: false,
-        lineStyle: { color, width: 2.5, type: 'solid' },
-        areaStyle: { color: color + '15' }
-      });
-      // 中心点
-      series.push({
-        type: 'scatter', data: [[cx, cy]], symbolSize: 12,
-        itemStyle: { color, borderColor: '#fff', borderWidth: 2 }
-      });
-    };
-
-    drawEllipse(ellipseLeft, '#0066CC', '左脚椭圆');
-    drawEllipse(ellipseRight, '#DC2626', '右脚椭圆');
-
-    // 计算坐标范围并留充足 padding
-    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
-    allPoints.forEach(([x, y]) => { xMin = Math.min(xMin, x); xMax = Math.max(xMax, x); yMin = Math.min(yMin, y); yMax = Math.max(yMax, y); });
-    if (!isFinite(xMin)) { xMin = -10; xMax = 10; yMin = -10; yMax = 10; }
-    const xRange = xMax - xMin;
-    const yRange = yMax - yMin;
-    const xPad = Math.max(xRange * 0.2, 2);
-    const yPad = Math.max(yRange * 0.2, 2);
-
-    return {
-      tooltip: tooltipStyle,
-      legend: { data: ['左脚COP', '右脚COP', '左脚椭圆', '右脚椭圆'], bottom: 5, textStyle: { color: chartText } },
-      grid: { top: 30, bottom: 50, left: 60, right: 30 },
-      xAxis: { name: '左右摆动', type: 'value', min: Math.floor(xMin - xPad), max: Math.ceil(xMax + xPad), nameLocation: 'center', nameGap: 30, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
-      yAxis: { name: '前后摆动', type: 'value', min: Math.floor(yMin - yPad), max: Math.ceil(yMax + yPad), nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartText }, axisLabel: { color: chartText }, splitLine: { lineStyle: { color: gridLine } } },
-      series
-    };
-  }, [data]);
 
   /* ─── COP 速度时间序列 ─── */
   const copVelocityOption = useMemo(() => {
@@ -533,24 +474,25 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     }]
   }), [data]);
 
-  /* ─── COP 参数表数据 ─── */
+  /* ─── COP 参数表数据（左右脚分列） ─── */
   const copParams = useMemo(() => {
-    const ts = data.copTimeSeries || {};
+    const lts = data.leftCopTimeSeries || data.copTimeSeries || {};
+    const rts = data.rightCopTimeSeries || data.copTimeSeries || {};
     return [
-      { name: '压力中心轨迹长度', value: ts.pathLength, unit: 'mm' },
-      { name: '压力中心活动总面积', value: ts.contactArea, unit: 'mm²' },
-      { name: '压力中心摆动稳定系数', value: ts.lsRatio, unit: '' },
-      { name: '压力中心摆动均匀系数', value: ts.eccentricity, unit: '' },
-      { name: '压力中心左右摆动幅度系数', value: ts.deltaY, unit: 'mm' },
-      { name: '压力中心前后摆动幅度系数', value: ts.deltaX, unit: 'mm' },
-      { name: '压力中心最大摆幅', value: ts.majorAxis, unit: 'mm' },
-      { name: '压力中心稳定摆幅', value: ts.minorAxis, unit: 'mm' },
-      { name: '压力中心最大离心', value: ts.maxDisplacement, unit: 'mm' },
-      { name: '压力中心最小离心', value: ts.minDisplacement, unit: 'mm' },
-      { name: '压力中心偏移平均速度', value: ts.avgVelocity, unit: 'mm/s' },
-      { name: '压力中心摆动强度', value: ts.rmsDisplacement, unit: 'mm' },
-      { name: '压力中心左右方向标准差', value: ts.stdY, unit: 'mm' },
-      { name: '压力中心前后方向标准差', value: ts.stdX, unit: 'mm' },
+      { name: '压力中心轨迹长度', leftVal: lts.pathLength, rightVal: rts.pathLength, unit: 'mm' },
+      { name: '压力中心活动总面积', leftVal: lts.contactArea, rightVal: rts.contactArea, unit: 'mm²' },
+      { name: '压力中心摆动稳定系数', leftVal: lts.lsRatio, rightVal: rts.lsRatio, unit: '' },
+      { name: '压力中心摆动均匀系数', leftVal: lts.eccentricity, rightVal: rts.eccentricity, unit: '' },
+      { name: '压力中心左右摆动幅度系数', leftVal: lts.deltaY, rightVal: rts.deltaY, unit: 'mm' },
+      { name: '压力中心前后摆动幅度系数', leftVal: lts.deltaX, rightVal: rts.deltaX, unit: 'mm' },
+      { name: '压力中心最大摆幅', leftVal: lts.majorAxis, rightVal: rts.majorAxis, unit: 'mm' },
+      { name: '压力中心稳定摆幅', leftVal: lts.minorAxis, rightVal: rts.minorAxis, unit: 'mm' },
+      { name: '压力中心最大离心', leftVal: lts.maxDisplacement, rightVal: rts.maxDisplacement, unit: 'mm' },
+      { name: '压力中心最小离心', leftVal: lts.minDisplacement, rightVal: rts.minDisplacement, unit: 'mm' },
+      { name: '压力中心偏移平均速度', leftVal: lts.avgVelocity, rightVal: rts.avgVelocity, unit: 'mm/s' },
+      { name: '压力中心摆动强度', leftVal: lts.rmsDisplacement, rightVal: rts.rmsDisplacement, unit: 'mm' },
+      { name: '压力中心左右方向标准差', leftVal: lts.stdY, rightVal: rts.stdY, unit: 'mm' },
+      { name: '压力中心前后方向标准差', leftVal: lts.stdX, rightVal: rts.stdX, unit: 'mm' },
     ];
   }, [data]);
 
@@ -764,44 +706,6 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
               </div>
             </section>
 
-            {/* ═══════════ 第2页：COP 轨迹 ═══════════ */}
-            <section id="standing-cop-trajectory">
-              <SectionHeader title="COP 轨迹" subtitle="COP trajectory" />
-              <div className="zeiss-card p-4">
-                <EChart option={copTrajectoryOption} height={520} />
-              </div>
-            </section>
-
-            {/* ═══════════ COP 置信椭圆 ═══════════ */}
-            <section id="standing-cop-ellipse">
-              <SectionHeader title="COP 置信椭圆" subtitle="COP confidence ellipse" />
-              <div className="zeiss-card p-4">
-                <EChart option={copEllipseOption} height={520} />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div className="zeiss-card p-5">
-                  <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>椭圆参数</div>
-                  <div className="space-y-2">
-                    <DataRow label="左脚95%面积" value={`${(data.ellipseData?.left?.area_cm2 || 0).toFixed(4)} cm²`} />
-                    <DataRow label="右脚95%面积" value={`${(data.ellipseData?.right?.area_cm2 || 0).toFixed(4)} cm²`} />
-                    <DataRow label="左脚椭圆宽度" value={`${(data.ellipseData?.left?.width || 0).toFixed(2)}`} />
-                    <DataRow label="左脚椭圆高度" value={`${(data.ellipseData?.left?.height || 0).toFixed(2)}`} />
-                    <DataRow label="右脚椭圆宽度" value={`${(data.ellipseData?.right?.width || 0).toFixed(2)}`} />
-                    <DataRow label="右脚椭圆高度" value={`${(data.ellipseData?.right?.height || 0).toFixed(2)}`} />
-                  </div>
-                </div>
-                <div className="zeiss-card p-5">
-                  {/* 风险等级色条 */}
-                  <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>风险预警</div>
-                  <div className="h-4 rounded-full" style={{ background: 'linear-gradient(to right, #87CEEB, #003366)' }} />
-                  <div className="flex justify-between mt-2">
-                    <span className="text-xs font-medium" style={{ color: '#87CEEB' }}>低风险</span>
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>椭圆面积 (cm²)</span>
-                    <span className="text-xs font-medium" style={{ color: '#003366' }}>风险预警</span>
-                  </div>
-                </div>
-              </div>
-            </section>
 
             {/* ═══════════ COP 速度时间序列 ═══════════ */}
             <section id="standing-cop-velocity">
@@ -819,7 +723,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
                   <thead>
                     <tr>
                       <th className="px-4 md:px-6 py-3 text-left text-sm font-bold" style={{ background: '#1A2332', color: '#fff' }}>参数</th>
-                      <th className="px-4 md:px-6 py-3 text-center text-sm font-bold" style={{ background: '#1A2332', color: '#fff' }}>数值（单位）</th>
+                      <th className="px-4 md:px-6 py-3 text-center text-sm font-bold" style={{ background: '#0066CC', color: '#fff' }}>左脚</th>
+                      <th className="px-4 md:px-6 py-3 text-center text-sm font-bold" style={{ background: '#DC2626', color: '#fff' }}>右脚</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -831,7 +736,10 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
                           </div>
                         </td>
                         <td className="px-4 md:px-6 py-3 text-center text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                          {p.value != null ? `${Number(p.value).toFixed(2)} ${p.unit}` : '-'}
+                          {p.leftVal != null ? `${Number(p.leftVal).toFixed(2)} ${p.unit}` : '-'}
+                        </td>
+                        <td className="px-4 md:px-6 py-3 text-center text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          {p.rightVal != null ? `${Number(p.rightVal).toFixed(2)} ${p.unit}` : '-'}
                         </td>
                       </tr>
                     ))}
