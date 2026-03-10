@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect } from 'react';
 
 /* ─── Jet 色谱映射 ─── */
 function jetColor(t) {
@@ -12,47 +12,6 @@ function jetColor(t) {
   return [Math.round(r), Math.round(g), Math.round(b)];
 }
 
-/* ─── 渲染2D矩阵为热力图ImageData ─── */
-function matrixToImageData(ctx, matrix, maxVal, bgBlack = true) {
-  const rows = matrix.length;
-  const cols = matrix[0]?.length || 0;
-  if (rows === 0 || cols === 0) return null;
-  const imgData = ctx.createImageData(cols, rows);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const idx = (r * cols + c) * 4;
-      const val = maxVal > 0 ? matrix[r][c] / maxVal : 0;
-      if (val < 0.02) {
-        if (bgBlack) {
-          imgData.data[idx] = 0; imgData.data[idx + 1] = 0; imgData.data[idx + 2] = 0; imgData.data[idx + 3] = 255;
-        } else {
-          imgData.data[idx] = 255; imgData.data[idx + 1] = 255; imgData.data[idx + 2] = 255; imgData.data[idx + 3] = 0;
-        }
-      } else {
-        const [cr, cg, cb] = jetColor(val);
-        imgData.data[idx] = cr; imgData.data[idx + 1] = cg; imgData.data[idx + 2] = cb; imgData.data[idx + 3] = 255;
-      }
-    }
-  }
-  return imgData;
-}
-
-/* ─── 绘制热力图到Canvas指定区域 ─── */
-function drawHeatmap(ctx, matrix, x, y, w, h, maxVal, bgBlack = true) {
-  if (!matrix || matrix.length === 0) return;
-  const rows = matrix.length;
-  const cols = matrix[0]?.length || 0;
-  if (cols === 0) return;
-  const imgData = matrixToImageData(ctx, matrix, maxVal, bgBlack);
-  if (!imgData) return;
-  const tmp = document.createElement('canvas');
-  tmp.width = cols; tmp.height = rows;
-  tmp.getContext('2d').putImageData(imgData, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(tmp, x, y, w, h);
-}
-
 /* ─── 获取矩阵最大值 ─── */
 function getMatrixMax(matrix) {
   let max = 0;
@@ -64,11 +23,121 @@ function getMatrixMax(matrix) {
   return max;
 }
 
+/* ─── 简易高斯模糊（对二维数组做 NxN 均值模糊，多次迭代近似高斯） ─── */
+function gaussianBlur2D(matrix, radius = 2, iterations = 2) {
+  const rows = matrix.length;
+  const cols = matrix[0]?.length || 0;
+  if (rows === 0 || cols === 0) return matrix;
+
+  let src = matrix.map(row => Float32Array.from(row));
+  let dst = src.map(row => new Float32Array(row.length));
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // 水平方向
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let sum = 0, cnt = 0;
+        for (let k = -radius; k <= radius; k++) {
+          const cc = c + k;
+          if (cc >= 0 && cc < cols) { sum += src[r][cc]; cnt++; }
+        }
+        dst[r][c] = sum / cnt;
+      }
+    }
+    // 交换
+    [src, dst] = [dst, src];
+    // 垂直方向
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let sum = 0, cnt = 0;
+        for (let k = -radius; k <= radius; k++) {
+          const rr = r + k;
+          if (rr >= 0 && rr < rows) { sum += src[rr][c]; cnt++; }
+        }
+        dst[r][c] = sum / cnt;
+      }
+    }
+    [src, dst] = [dst, src];
+  }
+  return src;
+}
+
+/* ─── 上采样矩阵（双线性插值放大） ─── */
+function upsampleMatrix(matrix, scale = 4) {
+  const rows = matrix.length;
+  const cols = matrix[0]?.length || 0;
+  if (rows === 0 || cols === 0) return matrix;
+  const newRows = rows * scale;
+  const newCols = cols * scale;
+  const result = [];
+  for (let r = 0; r < newRows; r++) {
+    const row = new Float32Array(newCols);
+    const srcR = r / scale;
+    const r0 = Math.floor(srcR);
+    const r1 = Math.min(r0 + 1, rows - 1);
+    const fr = srcR - r0;
+    for (let c = 0; c < newCols; c++) {
+      const srcC = c / scale;
+      const c0 = Math.floor(srcC);
+      const c1 = Math.min(c0 + 1, cols - 1);
+      const fc = srcC - c0;
+      row[c] = (1 - fr) * (1 - fc) * matrix[r0][c0]
+             + (1 - fr) * fc * matrix[r0][c1]
+             + fr * (1 - fc) * matrix[r1][c0]
+             + fr * fc * matrix[r1][c1];
+    }
+    result.push(row);
+  }
+  return result;
+}
+
+/* ─── 渲染平滑热力图到Canvas指定区域 ─── */
+function drawSmoothHeatmap(ctx, matrix, x, y, w, h, maxVal, bgBlack = true) {
+  if (!matrix || matrix.length === 0) return;
+  const rows = matrix.length;
+  const cols = matrix[0]?.length || 0;
+  if (cols === 0) return;
+
+  // 上采样 + 高斯模糊实现平滑效果
+  const scale = 4;
+  const upsampled = upsampleMatrix(matrix, scale);
+  const blurred = gaussianBlur2D(upsampled, 3, 3);
+
+  const bRows = blurred.length;
+  const bCols = blurred[0]?.length || 0;
+
+  // 生成 ImageData
+  const imgData = ctx.createImageData(bCols, bRows);
+  for (let r = 0; r < bRows; r++) {
+    for (let c = 0; c < bCols; c++) {
+      const idx = (r * bCols + c) * 4;
+      const val = maxVal > 0 ? blurred[r][c] / maxVal : 0;
+      if (val < 0.015) {
+        if (bgBlack) {
+          imgData.data[idx] = 0; imgData.data[idx + 1] = 0; imgData.data[idx + 2] = 0; imgData.data[idx + 3] = 255;
+        } else {
+          imgData.data[idx] = 255; imgData.data[idx + 1] = 255; imgData.data[idx + 2] = 255; imgData.data[idx + 3] = 0;
+        }
+      } else {
+        const [cr, cg, cb] = jetColor(val);
+        imgData.data[idx] = cr; imgData.data[idx + 1] = cg; imgData.data[idx + 2] = cb; imgData.data[idx + 3] = 255;
+      }
+    }
+  }
+
+  const tmp = document.createElement('canvas');
+  tmp.width = bCols; tmp.height = bRows;
+  tmp.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(tmp, x, y, w, h);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    1. 压力演变图 - 真实数据渲染
    props.data = { left: [{data, title}, ...], right: [{data, title}, ...] }
    ═══════════════════════════════════════════════════════════════ */
-export function RealPressureEvolution({ data, width = 900, height = 280 }) {
+export function RealPressureEvolution({ data, width = 1200, height = 420 }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -80,8 +149,8 @@ export function RealPressureEvolution({ data, width = 900, height = 280 }) {
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
-    // 白色背景
-    ctx.fillStyle = '#FFFFFF';
+    // 浅灰背景
+    ctx.fillStyle = '#F8F8F8';
     ctx.fillRect(0, 0, width, height);
 
     const leftFrames = data?.left || [];
@@ -90,62 +159,78 @@ export function RealPressureEvolution({ data, width = 900, height = 280 }) {
 
     // 标题
     ctx.fillStyle = '#1A2332';
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 14px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('足底压力演变（落地 → 离地）', width / 2, 18);
+    ctx.fillText('足底压力演变（落地 → 离地）', width / 2, 22);
 
-    const labelW = 50;
-    const padX = 8;
-    const padY = 30;
+    const labelW = 70;
+    const padX = 10;
+    const padY = 36;
+    const rowGap = 8;
     const cellW = (width - labelW - padX * 2) / numCols;
-    const cellH = (height - padY - 20) / 2;
+    const cellH = (height - padY - 10 - rowGap) / 2;
 
-    // 计算全局最大值
-    let globalMax = 0;
+    // 计算全局最大值（使用 80% 分位作为 vmax，让颜色更饱满）
+    let allVals = [];
     [...leftFrames, ...rightFrames].forEach(f => {
       if (f?.data) {
-        const m = getMatrixMax(f.data);
-        if (m > globalMax) globalMax = m;
+        for (let r = 0; r < f.data.length; r++) {
+          for (let c = 0; c < (f.data[r]?.length || 0); c++) {
+            if (f.data[r][c] > 0) allVals.push(f.data[r][c]);
+          }
+        }
       }
     });
+    allVals.sort((a, b) => a - b);
+    let globalMax = allVals.length > 0 ? allVals[Math.floor(allVals.length * 0.95)] : 1;
     if (globalMax === 0) globalMax = 1;
 
     // 绘制行
     const drawRow = (frames, rowIdx, label) => {
-      const y0 = padY + rowIdx * cellH;
+      const y0 = padY + rowIdx * (cellH + rowGap);
 
       // 行标签
       ctx.fillStyle = '#1A2332';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.font = 'bold 12px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, labelW / 2, y0 + cellH / 2);
+      ctx.fillText(label, labelW - 10, y0 + cellH / 2 + 8);
 
       if (!frames || frames.length === 0) {
         ctx.fillStyle = '#999';
-        ctx.font = '11px sans-serif';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
         ctx.fillText('无数据', width / 2, y0 + cellH / 2);
         return;
       }
 
       frames.forEach((frame, i) => {
         if (!frame?.data || frame.data.length === 0) return;
-        const fx = labelW + padX + i * cellW + 2;
-        const fy = y0 + 14;
-        const fw = cellW - 4;
+        const fx = labelW + padX + i * cellW + 3;
+        const fy = y0 + 20;
+        const fw = cellW - 6;
         const fh = cellH - 24;
 
-        // 帧标签
+        // 帧标签（两行：Peak 单独一行 + 时间）
         const title = frame.title || '';
         const isPeak = title.includes('峰值') || title.includes('Peak');
-        ctx.fillStyle = isPeak ? '#DC2626' : '#6B7B8D';
-        ctx.font = isPeak ? 'bold 9px sans-serif' : '9px sans-serif';
+
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillText(title, fx + fw / 2, y0 + 1);
 
-        // 绘制热力图
-        drawHeatmap(ctx, frame.data, fx, fy, fw, fh, globalMax, true);
+        if (isPeak) {
+          // Peak 标签红色加粗
+          ctx.fillStyle = '#DC2626';
+          ctx.font = 'bold 10px "PingFang SC", "Microsoft YaHei", sans-serif';
+          ctx.fillText(title, fx + fw / 2, y0);
+        } else {
+          ctx.fillStyle = '#6B7B8D';
+          ctx.font = '10px "PingFang SC", "Microsoft YaHei", sans-serif';
+          ctx.fillText(title, fx + fw / 2, y0 + 4);
+        }
+
+        // 绘制平滑热力图
+        drawSmoothHeatmap(ctx, frame.data, fx, fy, fw, fh, globalMax, true);
       });
     };
 
@@ -157,7 +242,7 @@ export function RealPressureEvolution({ data, width = 900, height = 280 }) {
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, borderRadius: 8, display: 'block', margin: '0 auto' }}
+      style={{ width: '100%', height: 'auto', aspectRatio: `${width}/${height}`, borderRadius: 8, display: 'block', margin: '0 auto' }}
     />
   );
 }
@@ -166,7 +251,7 @@ export function RealPressureEvolution({ data, width = 900, height = 280 }) {
    2. 步态平均摘要 - 真实数据渲染
    props.data = { left: {heatmap, cops, stepCount}, right: {heatmap, cops, stepCount} }
    ═══════════════════════════════════════════════════════════════ */
-export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
+export function RealGaitAverageSummary({ data, width = 800, height = 550 }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -184,9 +269,9 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
 
     // 标题
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 14px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('步态平均摘要（平滑处理）', width / 2, 22);
+    ctx.fillText('步态平均摘要（平滑处理）', width / 2, 24);
 
     const leftData = data?.left;
     const rightData = data?.right;
@@ -194,9 +279,9 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
     const drawSide = (sideData, centerX, label) => {
       if (!sideData || !sideData.heatmap || sideData.heatmap.length === 0) {
         ctx.fillStyle = '#666';
-        ctx.font = '12px sans-serif';
+        ctx.font = '13px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('No Data', centerX, height / 2);
+        ctx.fillText('无数据', centerX, height / 2);
         return;
       }
 
@@ -205,9 +290,17 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
       const cols = heatmap[0]?.length || 0;
       if (cols === 0) return;
 
+      // 标签在上方
+      ctx.fillStyle = '#CCCCCC';
+      ctx.font = '13px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${label}平均`, centerX, 46);
+
       // 计算绘制区域，保持纵横比
-      const maxDrawH = height - 80;
-      const maxDrawW = width / 2 - 40;
+      const topPad = 58;
+      const bottomPad = 30;
+      const maxDrawH = height - topPad - bottomPad;
+      const maxDrawW = width / 2 - 50;
       const aspect = rows / cols;
       let drawW, drawH;
       if (aspect > maxDrawH / maxDrawW) {
@@ -219,44 +312,57 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
       }
 
       const drawX = centerX - drawW / 2;
-      const drawY = 50;
+      const drawY = topPad;
 
-      // 最大值
-      const maxVal = getMatrixMax(heatmap) || 1;
+      // 使用 95% 分位值作为 maxVal，让颜色更饱满
+      let vals = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (heatmap[r][c] > 0) vals.push(heatmap[r][c]);
+        }
+      }
+      vals.sort((a, b) => a - b);
+      const maxVal = vals.length > 0 ? vals[Math.floor(vals.length * 0.92)] : 1;
 
-      // 绘制热力图
-      drawHeatmap(ctx, heatmap, drawX, drawY, drawW, drawH, maxVal, true);
+      // 绘制平滑热力图
+      drawSmoothHeatmap(ctx, heatmap, drawX, drawY, drawW, drawH, maxVal, true);
 
       // 绘制COP轨迹
       const scaleX = drawW / cols;
       const scaleY = drawH / rows;
 
       if (sideData.cops && sideData.cops.length > 0) {
-        sideData.cops.forEach(cop => {
+        sideData.cops.forEach((cop, copIdx) => {
           if (!cop.xs || !cop.ys || cop.xs.length < 2) return;
-          ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-          ctx.lineWidth = 2;
+
+          // 每条COP轨迹用白色线
+          ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+          ctx.lineWidth = 1.8;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
           ctx.beginPath();
           for (let i = 0; i < cop.xs.length; i++) {
-            // cop.xs 是行坐标(y方向), cop.ys 是列坐标(x方向)
             const px = drawX + cop.ys[i] * scaleX;
             const py = drawY + cop.xs[i] * scaleY;
             if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           }
           ctx.stroke();
 
-          // 起点（白色圆圈+红边）
+          // 起点标记（白色实心圆 + 红色边框）
           const startPx = drawX + cop.ys[0] * scaleX;
           const startPy = drawY + cop.xs[0] * scaleY;
           ctx.fillStyle = '#FFFFFF';
-          ctx.strokeStyle = '#FF0000';
+          ctx.strokeStyle = '#FF4444';
           ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(startPx, startPy, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(startPx, startPy, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
 
-          // 终点（红色×）
+          // 终点标记（红色 ×）
           const endPx = drawX + cop.ys[cop.ys.length - 1] * scaleX;
           const endPy = drawY + cop.xs[cop.xs.length - 1] * scaleY;
-          ctx.strokeStyle = '#FF0000';
+          ctx.strokeStyle = '#FF4444';
           ctx.lineWidth = 2;
           const sz = 4;
           ctx.beginPath(); ctx.moveTo(endPx - sz, endPy - sz); ctx.lineTo(endPx + sz, endPy + sz); ctx.stroke();
@@ -264,12 +370,11 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
         });
       }
 
-      // 标签
+      // 步数标签
       ctx.fillStyle = '#CCCCCC';
-      ctx.font = '12px sans-serif';
+      ctx.font = '12px "PingFang SC", "Microsoft YaHei", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${label}平均`, centerX, 42);
-      ctx.fillText(`(共${sideData.stepCount || 0}步)`, centerX, drawY + drawH + 16);
+      ctx.fillText(`(共${sideData.stepCount || 0}步)`, centerX, drawY + drawH + 18);
     };
 
     drawSide(leftData, width * 0.25, '左脚');
@@ -280,14 +385,14 @@ export function RealGaitAverageSummary({ data, width = 560, height = 360 }) {
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, borderRadius: 8, display: 'block', margin: '0 auto' }}
+      style={{ width: '100%', maxWidth: width, height: 'auto', aspectRatio: `${width}/${height}`, borderRadius: 8, display: 'block', margin: '0 auto' }}
     />
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
    3. 足印热力图（足偏角分析）- 真实数据渲染
-   props.data = { heatmap, fpaLines, width, height }
+   props.data = { heatmap, fpaLines }
    ═══════════════════════════════════════════════════════════════ */
 export function RealFootprintHeatmap({ data, width: canvasWidth = 500, height: canvasHeight = 700 }) {
   const canvasRef = useRef(null);
@@ -316,7 +421,7 @@ export function RealFootprintHeatmap({ data, width: canvasWidth = 500, height: c
 
     // 标题
     ctx.fillStyle = '#1A2332';
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = 'bold 14px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('足印热力图（足偏角分析）', canvasWidth / 2, 24);
 
@@ -342,10 +447,18 @@ export function RealFootprintHeatmap({ data, width: canvasWidth = 500, height: c
     const drawX = padLeft + (drawW - actualW) / 2;
     const drawY = padTop;
 
-    const maxVal = getMatrixMax(heatmap) || 1;
+    // 使用 95% 分位值作为 maxVal
+    let vals = [];
+    for (let r = 0; r < matH; r++) {
+      for (let c = 0; c < matW; c++) {
+        if (heatmap[r][c] > 0) vals.push(heatmap[r][c]);
+      }
+    }
+    vals.sort((a, b) => a - b);
+    const maxVal = vals.length > 0 ? vals[Math.floor(vals.length * 0.92)] : 1;
 
-    // 绘制热力图
-    drawHeatmap(ctx, heatmap, drawX, drawY, actualW, actualH, maxVal, false);
+    // 绘制平滑热力图
+    drawSmoothHeatmap(ctx, heatmap, drawX, drawY, actualW, actualH, maxVal, false);
 
     // 绘制FPA角度线
     const scaleX = actualW / matW;
@@ -354,7 +467,6 @@ export function RealFootprintHeatmap({ data, width: canvasWidth = 500, height: c
     if (data.fpaLines && data.fpaLines.length > 0) {
       data.fpaLines.forEach(line => {
         if (!line.heel || !line.fore) return;
-        // heel 和 fore 是 [row, col] 格式
         const hx = drawX + line.heel[1] * scaleX;
         const hy = drawY + line.heel[0] * scaleY;
         const fx = drawX + line.fore[1] * scaleX;
