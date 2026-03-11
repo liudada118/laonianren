@@ -37,7 +37,7 @@ function padFrame(frame, targetLen) {
 }
 
 /**
- * 计算总力序列
+ * 计算总力序列 (ADC 原始值求和，用于峰值检测)
  */
 function computeForceSeries(frames, frameSize) {
   const n = frames.length;
@@ -48,6 +48,43 @@ function computeForceSeries(frames, frameSize) {
     const len = Math.min(f.length, frameSize);
     for (let j = 0; j < len; j++) s += f[j];
     force[i] = s;
+  }
+  return Array.from(force);
+}
+
+/**
+ * 足底 ADC→牛顿 转换 (逐像素)
+ * 规则: ADC < 150 → ADC / 12.7 N; ADC >= 150 → 12.0 N; ADC == 0 → 0
+ */
+function computeForceNewtonFoot(frames, frameSize) {
+  const n = frames.length;
+  const force = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    const f = frames[i];
+    const len = Math.min(f.length, frameSize);
+    for (let j = 0; j < len; j++) {
+      const v = f[j];
+      if (v > 0) s += v < 150 ? v / 12.7 : 12.0;
+    }
+    force[i] = s;
+  }
+  return Array.from(force);
+}
+
+/**
+ * 坐垫 ADC→牛顿 转换
+ * 规则: ADC总和 / 26.18 = 牛顿
+ */
+function computeForceNewtonSit(frames, frameSize) {
+  const n = frames.length;
+  const force = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    const f = frames[i];
+    const len = Math.min(f.length, frameSize);
+    for (let j = 0; j < len; j++) s += f[j];
+    force[i] = s / 26.18;
   }
   return Array.from(force);
 }
@@ -174,19 +211,24 @@ function generateSitStandReport(standData, sitData, username = '用户') {
   }
 
   // ---- 1. 力-时间序列 ----
-  const standForce = computeForceSeries(standFrames, 4096);
-  const sitForce = computeForceSeries(sitFrames, 1024);
+  const standForce = computeForceSeries(standFrames, 4096);  // ADC用于峰值检测
+  const sitForce = computeForceSeries(sitFrames, 1024);      // ADC用于峰值检测
+  // 牛顿值用于显示
+  const standForceN = computeForceNewtonFoot(standFrames, 4096);
+  const sitForceN = computeForceNewtonSit(sitFrames, 1024);
 
   const standTimes = standForce.map((_, i) => Math.round(i * STAND_DT * 1000) / 1000);
   const sitTimes = sitForce.map((_, i) => Math.round(i * SIT_DT * 1000) / 1000);
 
   // ---- 2. 峰值检测 (起坐周期) ----
   const peaksIdx = detectCyclePeaks(standForce);
-  const numCycles = peaksIdx.length;
+  // 用户坐着开始、坐着结束，一个完整周期 = 站-坐-站（峰到峰）
+  // N个站立峰 → N-1个周期
+  const numCycles = Math.max(0, peaksIdx.length - 1);
 
-  // ---- 3. 周期统计 ----
-  const totalDuration = nStand >= 2
-    ? Math.round((standTimes[nStand - 1] - standTimes[0]) * 100) / 100
+  // ---- 3. 周期统计（峰到峰） ----
+  const totalDuration = peaksIdx.length >= 2
+    ? Math.round((standTimes[peaksIdx[peaksIdx.length - 1]] - standTimes[peaksIdx[0]]) * 100) / 100
     : 0;
   const avgDuration = numCycles > 0
     ? Math.round((totalDuration / numCycles) * 100) / 100
@@ -214,12 +256,30 @@ function generateSitStandReport(standData, sitData, username = '用户') {
   const standSampleIdx = downsampleIndices(nStand, 300);
   const sitSampleIdx = downsampleIndices(nSit, 300);
 
+  // ---- 6.5 各周期时长和峰值力（峰到峰，N-1个） ----
+  const cycleDurations = [];
+  const cyclePeakForces = [];
+  if (peaksIdx.length >= 2) {
+    for (let i = 0; i < peaksIdx.length - 1; i++) {
+      // 周期时长 = 从当前峰到下一个峰
+      const dur = standTimes[peaksIdx[i + 1]] - standTimes[peaksIdx[i]];
+      cycleDurations.push(Math.round(dur * 100) / 100);
+      // 周期内最大力值
+      let maxForce = 0;
+      for (let j = peaksIdx[i]; j <= peaksIdx[i + 1]; j++) {
+        if (standForceN[j] > maxForce) maxForce = standForceN[j];
+      }
+      cyclePeakForces.push(Math.round(maxForce * 10) / 10);
+    }
+  }
+
   // ---- 7. 组装结果 ----
   return {
     duration_stats: {
       total_duration: totalDuration,
       num_cycles: numCycles,
       avg_duration: avgDuration,
+      cycle_durations: cycleDurations,
     },
     stand_frames: nStand,
     sit_frames: nSit,
@@ -240,13 +300,14 @@ function generateSitStandReport(standData, sitData, username = '用户') {
     // 力曲线数据
     force_curves: {
       stand_times: standSampleIdx.map(i => standTimes[i]),
-      stand_force: standSampleIdx.map(i => standForce[i]),
+      stand_force: standSampleIdx.map(i => standForceN[i]),
       sit_times: sitSampleIdx.map(i => sitTimes[i]),
-      sit_force: sitSampleIdx.map(i => sitForce[i]),
+      sit_force: sitSampleIdx.map(i => sitForceN[i]),
       stand_peaks_idx: peaksIdx,
       // 峰值对应的时间点 (方便前端标注)
       stand_peaks_times: peaksIdx.map(i => standTimes[i]),
     },
+    cycle_peak_forces: cyclePeakForces,
   };
 }
 

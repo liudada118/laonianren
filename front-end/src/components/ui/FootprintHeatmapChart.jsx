@@ -1,88 +1,115 @@
-import React, { useRef, useEffect } from 'react';
-import { renderMatrixToCanvas, drawColorbar, roundRect, calcP95Vmax } from './heatmapUtils';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { JET_LUT } from './heatmapUtils';
 
 /**
  * FootprintHeatmapChart - 足印叠加热力图 + FPA辅助线
- * 使用双线性上采样插值 + P95 百分位数做 vmax
+ * Canvas渲染，自适应容器宽度，hover显示压力值，FPA线叠加
  */
 
-export default function FootprintHeatmapChart({ heatmapData, width = 500, height, className = '' }) {
+function calcP95(data) {
+  const vals = [];
+  for (const row of data) for (const v of row) if (v > 0) vals.push(v);
+  if (vals.length === 0) return 1;
+  vals.sort((a, b) => a - b);
+  return vals[Math.floor(vals.length * 0.95)] || vals[vals.length - 1] || 1;
+}
+
+export default function FootprintHeatmapChart({ heatmapData, className = '' }) {
+  const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const [tooltip, setTooltip] = useState(null);
+  const metaRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // 监听容器宽度
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(containerRef.current);
+    setContainerWidth(containerRef.current.clientWidth);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
-    if (!heatmapData || !heatmapData.heatmap || !canvasRef.current) return;
+    if (!heatmapData?.heatmap || !canvasRef.current || containerWidth < 100) return;
     const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
     const { heatmap, fpaLines = [], size } = heatmapData;
     const H = size[0];
     const W = size[1];
 
-    const vmax = calcP95Vmax(heatmap);
-    const threshold = vmax * 0.003;
+    const vmax = calcP95(heatmap);
+    const threshold = vmax * 0.02;
 
-    // 布局
-    const padding = 16;
-    const colorbarW = 22;
-    const colorbarGap = 16;
-    const cardW = width - padding * 2 - colorbarW - colorbarGap - 30;
-    const aspectRatio = H / W;
-    const cardH = height ? (height - padding * 2) : Math.max(300, Math.round(cardW * aspectRatio));
-    const totalH = height || (cardH + padding * 2);
+    // 布局 - 根据容器宽度自适应，图居中
+    const PAD = 16;
+    const totalW = containerWidth;
+    const MAX_CHART_W = 150;
+    const chartW = Math.min(MAX_CHART_W, totalW - PAD * 2);
+    const aspect = H / W;
+    const chartH = Math.max(200, Math.round(chartW * aspect));
+    const totalH = chartH + PAD * 2;
 
-    canvas.width = width;
-    canvas.height = totalH;
-    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = totalW * dpr;
+    canvas.height = totalH * dpr;
+    canvas.style.width = `${totalW}px`;
+    canvas.style.height = `${totalH}px`;
+    ctx.scale(dpr, dpr);
 
+    // 白色背景
     ctx.fillStyle = '#FAFAFA';
-    ctx.fillRect(0, 0, width, totalH);
+    ctx.fillRect(0, 0, totalW, totalH);
 
-    // 白色卡片
-    roundRect(ctx, padding, padding, cardW, cardH, 4);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
-    ctx.strokeStyle = '#E0E0E0';
-    ctx.lineWidth = 1;
-    roundRect(ctx, padding, padding, cardW, cardH, 4);
-    ctx.stroke();
+    // 渲染热力图到 offscreen canvas
+    const off = document.createElement('canvas');
+    off.width = W;
+    off.height = H;
+    const offCtx = off.getContext('2d');
+    const imgData = offCtx.createImageData(W, H);
+    const px = imgData.data;
 
-    // 上采样渲染
-    const innerPad = 4;
-    const renderW = cardW - innerPad * 2;
-    const renderH = cardH - innerPad * 2;
-
-    const { canvas: offCanvas } = renderMatrixToCanvas(
-      heatmap, vmax, threshold, 'transparent', renderW, renderH
-    );
-
-    // 保持宽高比
-    const srcAspect = H / W;
-    const dstAspect = renderH / renderW;
-    let drawW, drawH;
-    if (srcAspect > dstAspect) {
-      drawH = renderH;
-      drawW = renderH / srcAspect;
-    } else {
-      drawW = renderW;
-      drawH = renderW * srcAspect;
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        const v = heatmap[r]?.[c] || 0;
+        const idx = (r * W + c) * 4;
+        if (v <= threshold) {
+          px[idx] = 250; px[idx + 1] = 250; px[idx + 2] = 250; px[idx + 3] = 255;
+        } else {
+          const norm = Math.min(1, v / (vmax * 0.8));
+          const li = Math.round(norm * 255) * 4;
+          px[idx] = JET_LUT[li]; px[idx + 1] = JET_LUT[li + 1]; px[idx + 2] = JET_LUT[li + 2]; px[idx + 3] = 255;
+        }
+      }
     }
-    const offsetX = padding + innerPad + (renderW - drawW) / 2;
-    const offsetY = padding + innerPad + (renderH - drawH) / 2;
+    offCtx.putImageData(imgData, 0, 0);
 
-    ctx.save();
-    roundRect(ctx, padding + 1, padding + 1, cardW - 2, cardH - 2, 3);
-    ctx.clip();
+    // 保持宽高比绘制
+    const srcAsp = H / W;
+    const dstAsp = chartH / chartW;
+    let drawW, drawH;
+    if (srcAsp > dstAsp) { drawH = chartH; drawW = chartH / srcAsp; }
+    else { drawW = chartW; drawH = chartW * srcAsp; }
+    const offX = (totalW - drawW) / 2;  // 居中
+    const offY = PAD + (chartH - drawH) / 2;
+
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(offCanvas, offsetX, offsetY, drawW, drawH);
+    ctx.drawImage(off, offX, offY, drawW, drawH);
 
     // FPA 线
-    const pixPerCol = drawW / W;
-    const pixPerRow = drawH / H;
+    const pxPerCol = drawW / W;
+    const pxPerRow = drawH / H;
 
     fpaLines.forEach(line => {
       const { heel, fore, angle, isRight } = line;
-      const hx = heel[0] * pixPerCol + offsetX;
-      const hy = heel[1] * pixPerRow + offsetY;
-      const fx = fore[0] * pixPerCol + offsetX;
-      const fy = fore[1] * pixPerRow + offsetY;
+      const hx = heel[0] * pxPerCol + offX;
+      const hy = heel[1] * pxPerRow + offY;
+      const fx = fore[0] * pxPerCol + offX;
+      const fy = fore[1] * pxPerRow + offY;
 
       const vecX = fx - hx;
       const vecY = fy - hy;
@@ -105,13 +132,13 @@ export default function FootprintHeatmapChart({ heatmapData, width = 500, height
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // 垂直参考线
+      // 虚线参考
       const footLen = Math.sqrt(vecX * vecX + vecY * vecY);
       ctx.beginPath();
       ctx.setLineDash([3, 3]);
       ctx.moveTo(hx, hy);
       ctx.lineTo(hx, hy - footLen * 1.1);
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
@@ -131,10 +158,10 @@ export default function FootprintHeatmapChart({ heatmapData, width = 500, height
       const pillX = fx + (isRight ? 6 : -6 - pillW);
       const pillY = fy - pillH / 2;
 
-      roundRect(ctx, pillX, pillY, pillW, pillH, 8);
+      ctx.beginPath();
+      ctx.roundRect(pillX, pillY, pillW, pillH, 8);
       ctx.fillStyle = isRight ? 'rgba(245,158,11,0.9)' : 'rgba(59,130,246,0.9)';
       ctx.fill();
-
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
@@ -142,18 +169,51 @@ export default function FootprintHeatmapChart({ heatmapData, width = 500, height
       ctx.fillText(text, pillX + pillW / 2, pillY + pillH / 2);
     });
 
-    ctx.restore();
+    // tooltip用rawHeatmap（原始牛顿值），渲染用heatmap（插值平滑版）
+    const rawHm = heatmapData.rawHeatmap || heatmap;
+    metaRef.current = { offX, offY, drawW, drawH, rawH: rawHm.length, rawW: rawHm[0].length, rawHeatmap: rawHm };
+  }, [heatmapData, containerWidth]);
 
-    // 色条
-    const cbX = padding + cardW + colorbarGap;
-    const cbY = padding + innerPad;
-    const cbH = cardH - innerPad * 2;
-    drawColorbar(ctx, cbX, cbY, colorbarW, cbH, 0, vmax);
-  }, [heatmapData, width, height]);
+  const handleMouseMove = useCallback((e) => {
+    if (!metaRef.current || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const m = metaRef.current;
 
-  if (!heatmapData || !heatmapData.heatmap) return null;
+    if (mx >= m.offX && mx < m.offX + m.drawW && my >= m.offY && my < m.offY + m.drawH) {
+      const r = Math.floor((my - m.offY) / m.drawH * m.rawH);
+      const c = Math.floor((mx - m.offX) / m.drawW * m.rawW);
+      if (r >= 0 && r < m.rawH && c >= 0 && c < m.rawW) {
+        const v = m.rawHeatmap[r]?.[c] || 0;
+        if (v > 0) {
+          setTooltip({ x: e.clientX, y: e.clientY, text: `${v.toFixed(1)} N` });
+          return;
+        }
+      }
+    }
+    setTooltip(null);
+  }, []);
+
+  if (!heatmapData?.heatmap) return null;
 
   return (
-    <canvas ref={canvasRef} className={className} style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
+    <div ref={containerRef} className={`relative ${className}`} style={{ width: '100%', maxWidth: 320, margin: '0 auto' }}>
+      <canvas
+        ref={canvasRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setTooltip(null)}
+        style={{ display: 'block', maxWidth: '100%', height: 'auto', cursor: 'crosshair' }}
+      />
+      {tooltip && (
+        <div style={{
+          position: 'fixed', left: tooltip.x + 12, top: tooltip.y - 8,
+          background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '4px 8px',
+          borderRadius: 4, fontSize: 11, pointerEvents: 'none', zIndex: 999,
+        }}>
+          {tooltip.text}
+        </div>
+      )}
+    </div>
   );
 }

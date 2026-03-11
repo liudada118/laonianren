@@ -233,7 +233,7 @@ export function usePressureScene(options = {}) {
 
       // 后端推送的是 1024 个值的 flat 数组，转为 32x32 矩阵
       const size = Math.round(Math.sqrt(arr.length));
-      const matrix = denoiseMatrix(rotate180(flatToMatrix(arr, size)), 3, 15);
+      const matrix = denoiseMatrix(flipLR(flatToMatrix(arr, size)), 3, 15);
       scene.updateSeatData(matrix);
       const stats = matrixStats(matrix);
       const cop = calculateCoP(matrix);
@@ -369,7 +369,7 @@ export function usePressureScene(options = {}) {
         // 坐垫数据（32×32）
         if (!seatSensorRef.current?.getIsConnected() && seatFrames.length > 0) {
           const seatFlat = seatFrames[idx % seatFrames.length];
-          const seatMatrix = denoiseMatrix(rotate180(flatToMatrix(seatFlat, 32)), 3, 15);
+          const seatMatrix = denoiseMatrix(flipLR(flatToMatrix(seatFlat, 32)), 3, 15);
           scene.updateSeatData(seatMatrix);
           const stats = matrixStats(seatMatrix);
           const cop = calculateCoP(seatMatrix);

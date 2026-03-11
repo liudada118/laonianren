@@ -21,7 +21,7 @@ from generate_sit_stand_pdf_v3 import generate_report_from_content
 # 总入口方法 (类似 generate_foot_pressure_report)
 # ============================================================
 
-def generate_sit_stand_report(stand_data, sit_data, username="用户"):
+def generate_sit_stand_report(stand_data, sit_data, stand_times=None, sit_times=None, username="用户"):
     """
     起坐评估总入口 - 接收脚垫和坐垫的数组数据，返回全部分析结果
 
@@ -30,6 +30,8 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
             每帧为长度4096的一维数组，内部reshape为64×64
         sit_data (list[list] | np.ndarray): 坐垫压力数据，shape [M, 1024]
             每帧为长度1024的一维数组，内部reshape为32×32
+        stand_times (list[str], optional): 脚垫真实时间戳列表 (如 "2025/12/06 17:07:33:840")
+        sit_times (list[str], optional): 坐垫真实时间戳列表
         username (str): 用户名
 
     Returns:
@@ -71,8 +73,9 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
     import tempfile
 
     # 将数组转换为CSV文本格式，复用现有的 generate_report_from_content
-    stand_csv = _array_to_pressure_csv(stand_data)
-    sit_csv = _array_to_pressure_csv(sit_data)
+    # 当提供真实时间戳时使用真实时间戳，否则用合成时间戳
+    stand_csv = _array_to_pressure_csv(stand_data, real_times=stand_times)
+    sit_csv = _array_to_pressure_csv(sit_data, real_times=sit_times)
 
     tmp_dir = tempfile.mkdtemp(prefix='sitstand_render_')
     result = generate_report_from_content(
@@ -82,13 +85,14 @@ def generate_sit_stand_report(stand_data, sit_data, username="用户"):
     return result
 
 
-def _array_to_pressure_csv(data_array, fps=None):
+def _array_to_pressure_csv(data_array, fps=None, real_times=None):
     """
     将压力数组转换为CSV文本格式（内部适配函数）
 
     Args:
         data_array: [N, X] 压力数据（X=4096或1024）
         fps: 采样率（用于生成时间戳），默认None则按帧间隔生成
+        real_times: 真实时间戳列表 (如 "2025/12/06 17:07:33:840")，提供时优先使用
 
     Returns:
         str: CSV文本内容（包含 data 和 time 列）
@@ -102,8 +106,12 @@ def _array_to_pressure_csv(data_array, fps=None):
     for i, row in enumerate(data_array):
         if hasattr(row, 'tolist'):
             row = row.tolist()
-        t = base_time + timedelta(seconds=i * dt)
-        time_str = t.strftime('%Y/%m/%d %H:%M:%S:') + f'{t.microsecond:06d}'
+        # 优先使用真实时间戳
+        if real_times and i < len(real_times):
+            time_str = real_times[i]
+        else:
+            t = base_time + timedelta(seconds=i * dt)
+            time_str = t.strftime('%Y/%m/%d %H:%M:%S:') + f'{t.microsecond:06d}'
         # 计算 max, area(非零点数), press(总压力) 以匹配原始CSV格式
         row_max = max(row) if row else 0
         row_area = sum(1 for v in row if v > 0)

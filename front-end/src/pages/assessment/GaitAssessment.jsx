@@ -5,7 +5,9 @@ import EChart from '../../components/ui/EChart';
 import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
 import { backendBridge } from '../../lib/BackendBridge';
 import GaitRegionChart from '../../components/report/GaitRegionChart';
-
+import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
+import GaitAverageChart from '../../components/ui/GaitAverageChart';
+import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
 
 /* ─── 传感器常量 ─── */
@@ -226,7 +228,9 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
   }));
 
   const images = realData?.images || {};
-
+  const footprintHeatmapData = realData?.footprintHeatmapData || null;
+  const gaitAverageData = realData?.gaitAverageData || null;
+  const pressureEvolutionData = realData?.pressureEvolutionData || null;
 
   const fpaOption = useMemo(() => ({
     animation: false,
@@ -413,13 +417,21 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
           <div className="zeiss-card p-4 mb-4">
             <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>足底压力演变（落地 → 离地）</h4>
             <div className="overflow-x-auto">
-              <img src={images.pressureEvolution || '/gait_report_data/pressure_evolution.png'} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
+              {pressureEvolutionData ? (
+                <PressureEvolutionChart evolutionData={pressureEvolutionData} />
+              ) : (
+                <img src={images.pressureEvolution || '/gait_report_data/pressure_evolution.png'} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
+              )}
             </div>
           </div>
           <div className="zeiss-card p-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要（平滑处理）</h4>
-            <div className="flex justify-center">
-              <img src={images.gaitAverage || '/gait_report_data/gait_average.png'} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要</h4>
+            <div>
+              {gaitAverageData ? (
+                <GaitAverageChart gaitAvgData={gaitAverageData} />
+              ) : (
+                <img src={images.gaitAverage || '/gait_report_data/gait_average.png'} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+              )}
             </div>
           </div>
         </section>
@@ -427,8 +439,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
         {/* 4. 足印热力图 */}
         <section id="gait-heatmap">
           <div className="zeiss-section-title">4. 足印热力图（足偏角分析）</div>
-          <div className="zeiss-card p-4 flex justify-center">
-            <img src={images.footprintHeatmap || '/gait_report_data/footprint_heatmap.png'} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '800px', imageRendering: 'auto' }} />
+          <div className="zeiss-card p-4">
+            {footprintHeatmapData ? (
+              <FootprintHeatmapChart heatmapData={footprintHeatmapData} />
+            ) : (
+              <img src={images.footprintHeatmap || '/gait_report_data/footprint_heatmap.png'} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+            )}
           </div>
         </section>
 

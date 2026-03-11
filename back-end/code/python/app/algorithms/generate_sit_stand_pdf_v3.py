@@ -94,6 +94,28 @@ def AMPD(data):
     return np.where(p_data == max_window_length)[0].tolist()
 
 
+# ================= ADC → 牛顿 转换 =================
+
+def adc_to_newton_foot(frame):
+    """足底传感器 ADC→牛顿 转换（逐像素）
+    规则: ADC < 150 → ADC / 12.7 N; ADC >= 150 → 12.0 N
+    """
+    frame = np.array(frame, dtype=np.float64)
+    return np.where(frame < 150, frame / 12.7, 12.0) * (frame > 0)
+
+
+def adc_to_newton_foot_sum(frame):
+    """足底传感器单帧 ADC→牛顿 总和"""
+    return float(np.sum(adc_to_newton_foot(frame)))
+
+
+def adc_to_newton_sit_sum(adc_sum):
+    """坐垫传感器 ADC总和→牛顿 转换
+    规则: ADC总和 / 26.18 = 牛顿
+    """
+    return adc_sum / 26.18
+
+
 def get_smooth_heatmap(original_matrix, upscale_factor=10, sigma=0.8):
     """生成平滑热力图"""
     matrix = np.array(original_matrix, dtype=float)
@@ -1204,6 +1226,23 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     stand_data, stand_times = load_stand_data(stand_csv)
     sit_data, sit_times = load_sit_data(sit_csv)
 
+    # 1.5 对齐时间范围：裁剪到两个传感器的重叠区间，保持数据真实
+    if len(stand_times) > 0 and len(sit_times) > 0:
+        overlap_end = min(stand_times.iloc[-1], sit_times.iloc[-1])
+        overlap_start = max(stand_times.iloc[0], sit_times.iloc[0])
+        # 裁剪足底
+        stand_mask = (stand_times >= overlap_start) & (stand_times <= overlap_end)
+        if stand_mask.sum() > 0 and stand_mask.sum() < len(stand_times):
+            print(f"  [对齐] 足底裁剪: {len(stand_times)} → {stand_mask.sum()} 帧")
+            stand_data = stand_data[stand_mask.values]
+            stand_times = stand_times[stand_mask.values].reset_index(drop=True)
+        # 裁剪坐垫
+        sit_mask = (sit_times >= overlap_start) & (sit_times <= overlap_end)
+        if sit_mask.sum() > 0 and sit_mask.sum() < len(sit_times):
+            print(f"  [对齐] 坐垫裁剪: {len(sit_times)} → {sit_mask.sum()} 帧")
+            sit_data = sit_data[sit_mask.values]
+            sit_times = sit_times[sit_mask.values].reset_index(drop=True)
+
     # 2. 周期检测
     stand_peaks = detect_stand_peaks_assisted(stand_data, stand_times, sit_data, sit_times)
     duration_stats = calculate_cycle_durations(stand_times, stand_peaks)
@@ -1380,14 +1419,21 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     }
 
     # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
-    stand_force_arr = np.sum(stand_data, axis=(1, 2))
-    sit_force_arr = np.sum(sit_data, axis=(1, 2))
+    # ADC→牛顿转换: 足底逐像素转换后求和, 坐垫ADC总和/26.18
+    stand_force_arr = np.array([adc_to_newton_foot_sum(f) for f in stand_data])
+    sit_adc_arr = np.sum(sit_data, axis=(1, 2))
+    sit_force_arr = sit_adc_arr / 26.18  # 坐垫 ADC→牛顿
     stand_force = stand_force_arr.tolist()
     sit_force = sit_force_arr.tolist()
     t0_stand = stand_times.iloc[0] if len(stand_times) > 0 else None
     t0_sit = sit_times.iloc[0] if len(sit_times) > 0 else None
-    stand_time_list = [(t - t0_stand).total_seconds() for t in stand_times] if t0_stand is not None else []
-    sit_time_list = [(t - t0_sit).total_seconds() for t in sit_times] if t0_sit is not None else []
+    # 使用统一时间基准，确保两条曲线在图表上对齐
+    if t0_stand is not None and t0_sit is not None:
+        t0 = min(t0_stand, t0_sit)
+    else:
+        t0 = t0_stand or t0_sit
+    stand_time_list = [(t - t0).total_seconds() for t in stand_times] if t0 is not None and len(stand_times) > 0 else []
+    sit_time_list = [(t - t0).total_seconds() for t in sit_times] if t0 is not None and len(sit_times) > 0 else []
 
     # ====== 4.6 补充前端所需的额外字段 ======
 
@@ -1426,14 +1472,34 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         rep_idx_start = np.searchsorted(sit_times_val, rep_t_start)
         rep_idx_end = np.searchsorted(sit_times_val, rep_t_end)
         rep_segment = sit_data[rep_idx_start:rep_idx_end]
-        sit_indices = [int(p * (len(rep_segment)-1)) for p in np.linspace(0, 1, 11)]
-        for col_idx, frame_idx in enumerate(sit_indices):
-            if frame_idx < len(rep_segment):
-                frame = rep_segment[frame_idx]
-                sit_evo_matrix.append({
-                    'label': col_idx,
-                    'matrix': frame.tolist(),
-                })
+        # 裁剪：找最大连续有压力区间（真正坐着的部分，排除两端站立残余）
+        if len(rep_segment) > 0:
+            seg_force = np.sum(rep_segment, axis=(1, 2))
+            threshold = np.max(seg_force) * 0.05 if np.max(seg_force) > 0 else 0
+            active_mask = seg_force > threshold
+            # 找最长连续 True 区间
+            best_start, best_len = 0, 0
+            cur_start, cur_len = 0, 0
+            for idx, val in enumerate(active_mask):
+                if val:
+                    if cur_len == 0:
+                        cur_start = idx
+                    cur_len += 1
+                    if cur_len > best_len:
+                        best_start, best_len = cur_start, cur_len
+                else:
+                    cur_len = 0
+            if best_len > 0:
+                rep_segment = rep_segment[best_start:best_start + best_len]
+        if len(rep_segment) > 1:
+            sit_indices = [int(p * (len(rep_segment)-1)) for p in np.linspace(0, 1, 11)]
+            for col_idx, frame_idx in enumerate(sit_indices):
+                if frame_idx < len(rep_segment):
+                    frame = rep_segment[frame_idx]
+                    sit_evo_matrix.append({
+                        'label': col_idx,
+                        'matrix': frame.tolist(),
+                    })
 
     heatmap_data = {
         'stand_evolution': stand_evo_matrix,
@@ -1513,24 +1579,27 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             dur = (t_end - t_start).total_seconds()
             cycle_durations.append(round(dur, 2))
 
-    # --- 4.6.4 symmetry: 左右脚对称性 ---
+    # --- 4.6.4 symmetry: 左右脚对称性（每帧平均力，牛顿） ---
     print(" 计算左右脚对称性...")
     symmetry = {}
     if len(stand_peaks) >= 2:
-        left_total_force = 0.0
-        right_total_force = 0.0
+        left_forces = []
+        right_forces = []
         for i in range(len(stand_peaks) - 1):
             seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
             for frame in seg:
-                left_total_force += float(np.sum(frame * l_mask))
-                right_total_force += float(np.sum(frame * r_mask))
-        max_force = max(left_total_force, right_total_force)
-        min_force = min(left_total_force, right_total_force)
-        ratio = (min_force / max_force * 100) if max_force > 0 else 0
+                newton_frame = adc_to_newton_foot(frame)
+                left_forces.append(float(np.sum(newton_frame * l_mask)))
+                right_forces.append(float(np.sum(newton_frame * r_mask)))
+        left_avg = np.mean(left_forces) if len(left_forces) > 0 else 0
+        right_avg = np.mean(right_forces) if len(right_forces) > 0 else 0
+        max_avg = max(left_avg, right_avg)
+        min_avg = min(left_avg, right_avg)
+        ratio = (min_avg / max_avg * 100) if max_avg > 0 else 0
         symmetry = {
             'left_right_ratio': round(ratio, 1),
-            'left_total': round(left_total_force, 0),
-            'right_total': round(right_total_force, 0),
+            'left_avg_force': round(left_avg, 1),   # 左脚每帧平均力(N)
+            'right_avg_force': round(right_avg, 1),  # 右脚每帧平均力(N)
         }
 
     # --- 4.6.5 pressure_stats: 压力统计 ---
