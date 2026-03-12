@@ -713,6 +713,17 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     }
   }
   
+  // 诊断日志：打印 foot2/foot3 连接处附近的 colSums
+  if (!global._colDiagCount) global._colDiagCount = 0
+  if (global._colDiagCount < 5) {
+    global._colDiagCount++
+    console.log('[colSums诊断] c125-132: %s', 
+      Array.from(colSums).slice(125, 133).map((v,i) => `c${125+i}=${v.toFixed(0)}`).join(', '))
+    console.log('[colSums诊断] c60-68: %s',
+      Array.from(colSums).slice(60, 69).map((v,i) => `c${60+i}=${v.toFixed(0)}`).join(', '))
+    console.log('[colSums诊断] c189-196: %s',
+      Array.from(colSums).slice(189, 197).map((v,i) => `c${189+i}=${v.toFixed(0)}`).join(', '))
+  }
   if (repairedRows || repairedCols) {
     console.log('[zeroLineRepairMerged] 修复了 %d 行, %d 列', repairedRows, repairedCols)
   }
