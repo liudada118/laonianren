@@ -138,35 +138,35 @@ export default function GaitCanvas({
 
     /* ─── 坏线补值：检测并修复 64×256 矩阵中异常低值的行/列 ─── */
     function zeroLine64x256(arr, rows, cols) {
-      const BAD_THRESH = 20;   // 坏线：平均值 < 20
-      const GOOD_THRESH = 40;  // 正常：平均值 > 40
+      const BAD = 40;    // 坏线：行/列总和 < 40
+      const GOOD = 100;  // 正常：行/列总和 > 100
 
-      // 计算每行和每列的平均值
-      const rowAvg = new Float32Array(rows);
-      const colAvg = new Float32Array(cols);
+      // 计算每行和每列的总和
+      const rowSums = new Float32Array(rows);
+      const colSums = new Float32Array(cols);
       for (let r = 0; r < rows; r++) {
         let total = 0;
         for (let c = 0; c < cols; c++) total += arr[r * cols + c];
-        rowAvg[r] = total / cols;
+        rowSums[r] = total;
       }
       for (let c = 0; c < cols; c++) {
         let total = 0;
         for (let r = 0; r < rows; r++) total += arr[r * cols + c];
-        colAvg[c] = total / rows;
+        colSums[c] = total;
       }
 
       // --- 修复坏行 ---
       for (let r = 1; r < rows - 1; r++) {
-        if (rowAvg[r] >= BAD_THRESH) continue;
+        if (rowSums[r] >= BAD) continue;
         // 单行坏线
-        if (rowAvg[r - 1] > GOOD_THRESH && rowAvg[r + 1] > GOOD_THRESH) {
+        if (rowSums[r - 1] > GOOD && rowSums[r + 1] > GOOD) {
           for (let c = 0; c < cols; c++) {
             arr[r * cols + c] = (arr[(r - 1) * cols + c] + arr[(r + 1) * cols + c]) / 2;
           }
         }
         // 连续两行坏线
-        else if (r + 2 < rows && rowAvg[r + 1] < BAD_THRESH &&
-                 rowAvg[r - 1] > GOOD_THRESH && rowAvg[r + 2] > GOOD_THRESH) {
+        else if (r + 2 < rows && rowSums[r + 1] < BAD &&
+                 rowSums[r - 1] > GOOD && rowSums[r + 2] > GOOD) {
           for (let c = 0; c < cols; c++) {
             const vPrev = arr[(r - 1) * cols + c];
             const vNext = arr[(r + 2) * cols + c];
@@ -179,16 +179,16 @@ export default function GaitCanvas({
 
       // --- 修复坏列 ---
       for (let c = 1; c < cols - 1; c++) {
-        if (colAvg[c] >= BAD_THRESH) continue;
+        if (colSums[c] >= BAD) continue;
         // 单列坏线
-        if (colAvg[c - 1] > GOOD_THRESH && colAvg[c + 1] > GOOD_THRESH) {
+        if (colSums[c - 1] > GOOD && colSums[c + 1] > GOOD) {
           for (let r = 0; r < rows; r++) {
             arr[r * cols + c] = (arr[r * cols + (c - 1)] + arr[r * cols + (c + 1)]) / 2;
           }
         }
         // 连续两列坏线
-        else if (c + 2 < cols && colAvg[c + 1] < BAD_THRESH &&
-                 colAvg[c - 1] > GOOD_THRESH && colAvg[c + 2] > GOOD_THRESH) {
+        else if (c + 2 < cols && colSums[c + 1] < BAD &&
+                 colSums[c - 1] > GOOD && colSums[c + 2] > GOOD) {
           for (let r = 0; r < rows; r++) {
             const vPrev = arr[r * cols + (c - 1)];
             const vNext = arr[r * cols + (c + 2)];
