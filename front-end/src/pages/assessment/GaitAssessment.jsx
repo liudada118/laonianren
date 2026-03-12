@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
-import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
+import GaitCanvas from '../../components/three/gait/GaitCanvas';
 import { backendBridge } from '../../lib/BackendBridge';
 import GaitRegionChart from '../../components/report/GaitRegionChart';
 import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
@@ -1002,14 +1002,12 @@ export default function GaitAssessment() {
         {/* 右侧3D区域 */}
         <div className="flex-1 flex flex-col items-center justify-center relative min-w-0 overflow-hidden">
           <div className="relative w-full h-full m-3 rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #d4d0cc 0%, #e0dcd8 50%, #d8d4d0 100%)' }}>
-            <FootpadSceneReact
-              sensorCount={4}
+            <GaitCanvas
+              sensorData={sensorData}
               showHeatmap={showHeatmap}
               depthScale={depthScale}
               smoothness={smoothness}
-              sensorData={sensorData}
               onSceneReady={(scene) => { sceneRef.current = scene; }}
-              style={{ width: '100%', height: '100%' }}
             />
 
             {/* 浮动控件 */}
