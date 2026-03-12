@@ -26,7 +26,7 @@ const HAND_REGIONS = {
       { cx: 0.135, cy: 0.315, rx: 0.028, ry: 0.025 },  // 指中
       { cx: 0.150, cy: 0.355, rx: 0.030, ry: 0.025 },  // 指根
     ],
-    label: { x: 0.050, y: 0.290 },
+    label: { x: 0.122, y: 0.290 },
     fingerIdx: 4,
   },
   // 无名指 (顶端 x=0.279, y=0.129)
@@ -280,7 +280,7 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
         const f = fingers[region.fingerIdx];
         if (!f) continue;
 
-        const lx = region.label.x * W;
+        let lx = region.label.x * W;
         const ly = region.label.y * H;
 
         const name = f.name;
@@ -293,6 +293,12 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
         // 背景圆角矩形
         const boxW = key === 'palm' ? 78 : 66;
         const boxH = 38;
+
+        // 边界钳制：确保标注框不超出画布边界
+        const margin = 4;
+        if (lx - boxW / 2 < margin) lx = margin + boxW / 2;
+        if (lx + boxW / 2 > W - margin) lx = W - margin - boxW / 2;
+
         const bx = lx - boxW / 2;
         const by = ly - boxH / 2;
 
