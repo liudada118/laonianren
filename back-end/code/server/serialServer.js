@@ -365,18 +365,13 @@ function applyFootFilter(arr, mode, footType) {
     if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
       // 步道模式：缓存当前传感器数据，待 4 个都到齐后合并 64×256 做坏线补值
       gaitFootCache[footType] = arr
-      const hasAll = !!(gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4)
-      console.log('[applyFootFilter] gait cache %s, hasAll=%s, bad=%d, good=%d', footType, hasAll, cfg.optimizeBad, cfg.optimizeGood)
-      if (hasAll) {
+      if (gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4) {
         zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
       }
     } else {
       // 静态模式：单个 64×64 做坏线补值
-      console.log('[applyFootFilter] standing optimize, bad=%d, good=%d', cfg.optimizeBad, cfg.optimizeGood)
       zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
     }
-  } else {
-    console.log('[applyFootFilter] optimize disabled for mode:', mode)
   }
   return arr
 }
@@ -634,13 +629,17 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   if (!f1 || !f2 || !f3 || !f4) return
   
   const ROWS = 64, COLS = 256
-  // 合并为 64×256 一维数组（foot1..foot4 按列拼接）
-  const merged = new Array(ROWS * COLS)
+  // 合并为 64×256：每个 64×64 传感器先顺时针旋转 90 度（与前端一致），再按列拼接
+  // 顺时针旋转 90°：newRow = col, newCol = 63 - row
+  const merged = new Array(ROWS * COLS).fill(0)
   const parts = [f1, f2, f3, f4]
   for (let p = 0; p < 4; p++) {
-    for (let r = 0; r < 64; r++) {
-      for (let c = 0; c < 64; c++) {
-        merged[r * COLS + p * 64 + c] = parts[p][r * 64 + c]
+    const colOffset = p * 64
+    for (let row = 0; row < 64; row++) {
+      for (let col = 0; col < 64; col++) {
+        const newRow = col
+        const newCol = 63 - row
+        merged[newRow * COLS + colOffset + newCol] = parts[p][row * 64 + col]
       }
     }
   }
@@ -659,59 +658,76 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     colSums[c] = total
   }
   
-  // 调试：输出行/列总和统计
-  const badRows = [], badCols = []
-  for (let r = 0; r < ROWS; r++) if (rowSums[r] < badThresh) badRows.push(`r${r}:${rowSums[r].toFixed(0)}`)
-  for (let c = 0; c < COLS; c++) if (colSums[c] < badThresh) badCols.push(`c${c}:${colSums[c].toFixed(0)}`)
-  if (badRows.length || badCols.length) {
-    console.log('[zeroLineRepairMerged] badRows=%s, badCols=%s, badThresh=%d, goodThresh=%d', 
-      badRows.join(',') || 'none', badCols.join(',') || 'none', badThresh, goodThresh)
+  // 修复坏行：找到连续坏行段，用两端正常行线性插值填充
+  _repairBadSegments(merged, rowSums, ROWS, COLS, badThresh, goodThresh, 'row')
+  
+  // 重新计算列总和（行修复后列总和可能变化）
+  for (let c = 0; c < COLS; c++) {
+    let total = 0
+    for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
+    colSums[c] = total
   }
   
-  // 修复坏行（单行 + 连续两行）
-  for (let r = 1; r < ROWS - 1; r++) {
-    if (rowSums[r] >= badThresh) continue
-    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
-      for (let c = 0; c < COLS; c++) {
-        merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
-      }
-    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
-               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
-      for (let c = 0; c < COLS; c++) {
-        const vPrev = merged[(r - 1) * COLS + c]
-        const vNext = merged[(r + 2) * COLS + c]
-        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
-        merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
-      }
-      r++
-    }
-  }
+  // 修复坏列
+  _repairBadSegments(merged, colSums, COLS, ROWS, badThresh, goodThresh, 'col')
   
-  // 修复坏列（单列 + 连续两列）
-  for (let c = 1; c < COLS - 1; c++) {
-    if (colSums[c] >= badThresh) continue
-    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
-      for (let r = 0; r < ROWS; r++) {
-        merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
-      }
-    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
-               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
-      for (let r = 0; r < ROWS; r++) {
-        const vPrev = merged[r * COLS + (c - 1)]
-        const vNext = merged[r * COLS + (c + 2)]
-        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
-        merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
-      }
-      c++
-    }
-  }
-  
-  // 拆回 4 个 64×64，写回缓存
+  // 逆时针旋转 90° 拆回 4 个 64×64，写回原始数组
+  // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
   for (let p = 0; p < 4; p++) {
     const target = parts[p]
-    for (let r = 0; r < 64; r++) {
-      for (let c = 0; c < 64; c++) {
-        target[r * 64 + c] = merged[r * COLS + p * 64 + c]
+    const colOffset = p * 64
+    for (let newRow = 0; newRow < 64; newRow++) {
+      for (let newCol = 0; newCol < 64; newCol++) {
+        const origRow = 63 - newCol
+        const origCol = newRow
+        target[origRow * 64 + origCol] = merged[newRow * COLS + colOffset + newCol]
+      }
+    }
+  }
+}
+
+/**
+ * 通用坏段修复：找到连续坏行/坏列段，用两端正常行/列线性插值填充
+ */
+function _repairBadSegments(merged, sums, mainLen, crossLen, badThresh, goodThresh, direction) {
+  const COLS = 256
+  let i = 0
+  while (i < mainLen) {
+    if (sums[i] >= badThresh) { i++; continue }
+    const start = i
+    while (i < mainLen && sums[i] < badThresh) i++
+    const end = i
+    
+    const prevGood = start > 0 && sums[start - 1] > goodThresh
+    const nextGood = end < mainLen && sums[end] > goodThresh
+    if (!prevGood && !nextGood) continue
+    
+    const badLen = end - start
+    for (let b = 0; b < badLen; b++) {
+      const idx = start + b
+      const t = (b + 1) / (badLen + 1)
+      for (let j = 0; j < crossLen; j++) {
+        let vPrev, vNext
+        if (direction === 'row') {
+          vPrev = prevGood ? merged[(start - 1) * COLS + j] : 0
+          vNext = nextGood ? merged[end * COLS + j] : 0
+        } else {
+          vPrev = prevGood ? merged[j * COLS + (start - 1)] : 0
+          vNext = nextGood ? merged[j * COLS + end] : 0
+        }
+        let val
+        if (prevGood && nextGood) {
+          val = vPrev * (1 - t) + vNext * t
+        } else if (prevGood) {
+          val = vPrev * (1 - t)
+        } else {
+          val = vNext * t
+        }
+        if (direction === 'row') {
+          merged[idx * COLS + j] = val
+        } else {
+          merged[j * COLS + idx] = val
+        }
       }
     }
   }
