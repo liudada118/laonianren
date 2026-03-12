@@ -17,7 +17,7 @@ const SHARED_DEFAULTS = {
   filterThreshold: 2,
   initValue: 2.5,
   colorRange: 700,
-  heightScale: 2.8,
+  heightScale: 2.6,
 };
 
 export const SHARED_RANGES = {
@@ -33,24 +33,24 @@ export const SHARED_RANGES = {
 const STANDING_TRANSFORM_DEFAULTS = {
   posX: -5,
   posY: -5,
-  posZ: -120,
+  posZ: -20,
   rotX: -20,
   rotY: 0,
   rotZ: 0,
   particleSize: 1.6,
-  scale: 1.8,
+  scale: 1.9,
 };
 
 // 步道默认值
 const GAIT_TRANSFORM_DEFAULTS = {
   posX: 0,
-  posY: 295,
+  posY: 305,
   posZ: 350,
   rotX: 153,
   rotY: 180,
-  rotZ: 188,
+  rotZ: 180,
   particleSize: 3.7,
-  scale: 1.8,
+  scale: 1.0,
 };
 
 // 通用默认值（兜底）
