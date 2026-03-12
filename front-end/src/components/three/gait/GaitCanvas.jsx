@@ -137,63 +137,65 @@ export default function GaitCanvas({
     if (onSceneReady) onSceneReady({ scene, camera, renderer });
 
     /* ─── 坏线补值：检测并修复 64×256 矩阵中异常低值的行/列 ─── */
-    function zeroLine64x256(arr, rows, cols, threshLow, threshHigh) {
-      // 计算每行和每列的总和
-      const rowSums = new Float32Array(rows);
-      const colSums = new Float32Array(cols);
+    function zeroLine64x256(arr, rows, cols) {
+      const BAD_THRESH = 20;   // 坏线：平均值 < 20
+      const GOOD_THRESH = 40;  // 正常：平均值 > 40
+
+      // 计算每行和每列的平均值
+      const rowAvg = new Float32Array(rows);
+      const colAvg = new Float32Array(cols);
       for (let r = 0; r < rows; r++) {
         let total = 0;
         for (let c = 0; c < cols; c++) total += arr[r * cols + c];
-        rowSums[r] = total;
+        rowAvg[r] = total / cols;
       }
       for (let c = 0; c < cols; c++) {
         let total = 0;
         for (let r = 0; r < rows; r++) total += arr[r * cols + c];
-        colSums[c] = total;
+        colAvg[c] = total / rows;
       }
 
       // --- 修复坏行 ---
       for (let r = 1; r < rows - 1; r++) {
-        if (rowSums[r] >= threshLow) continue; // 当前行正常，跳过
-        // 单行坏线：前后邻居都正常
-        if (rowSums[r - 1] > threshHigh && rowSums[r + 1] > threshHigh) {
+        if (rowAvg[r] >= BAD_THRESH) continue;
+        // 单行坏线
+        if (rowAvg[r - 1] > GOOD_THRESH && rowAvg[r + 1] > GOOD_THRESH) {
           for (let c = 0; c < cols; c++) {
             arr[r * cols + c] = (arr[(r - 1) * cols + c] + arr[(r + 1) * cols + c]) / 2;
           }
         }
-        // 连续两行坏线：r 和 r+1 都是坏行，r-1 和 r+2 正常
-        else if (r + 2 < rows && rowSums[r + 1] < threshLow &&
-                 rowSums[r - 1] > threshHigh && rowSums[r + 2] > threshHigh) {
+        // 连续两行坏线
+        else if (r + 2 < rows && rowAvg[r + 1] < BAD_THRESH &&
+                 rowAvg[r - 1] > GOOD_THRESH && rowAvg[r + 2] > GOOD_THRESH) {
           for (let c = 0; c < cols; c++) {
             const vPrev = arr[(r - 1) * cols + c];
             const vNext = arr[(r + 2) * cols + c];
-            // 线性插值：第1行取 2/3 前 + 1/3 后，第2行取 1/3 前 + 2/3 后
             arr[r * cols + c]       = vPrev * 2 / 3 + vNext * 1 / 3;
             arr[(r + 1) * cols + c] = vPrev * 1 / 3 + vNext * 2 / 3;
           }
-          r++; // 跳过已修复的 r+1
+          r++;
         }
       }
 
       // --- 修复坏列 ---
       for (let c = 1; c < cols - 1; c++) {
-        if (colSums[c] >= threshLow) continue; // 当前列正常，跳过
-        // 单列坏线：前后邻居都正常
-        if (colSums[c - 1] > threshHigh && colSums[c + 1] > threshHigh) {
+        if (colAvg[c] >= BAD_THRESH) continue;
+        // 单列坏线
+        if (colAvg[c - 1] > GOOD_THRESH && colAvg[c + 1] > GOOD_THRESH) {
           for (let r = 0; r < rows; r++) {
             arr[r * cols + c] = (arr[r * cols + (c - 1)] + arr[r * cols + (c + 1)]) / 2;
           }
         }
-        // 连续两列坏线：c 和 c+1 都是坏列，c-1 和 c+2 正常
-        else if (c + 2 < cols && colSums[c + 1] < threshLow &&
-                 colSums[c - 1] > threshHigh && colSums[c + 2] > threshHigh) {
+        // 连续两列坏线
+        else if (c + 2 < cols && colAvg[c + 1] < BAD_THRESH &&
+                 colAvg[c - 1] > GOOD_THRESH && colAvg[c + 2] > GOOD_THRESH) {
           for (let r = 0; r < rows; r++) {
             const vPrev = arr[r * cols + (c - 1)];
             const vNext = arr[r * cols + (c + 2)];
             arr[r * cols + c]       = vPrev * 2 / 3 + vNext * 1 / 3;
             arr[r * cols + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3;
           }
-          c++; // 跳过已修复的 c+1
+          c++;
         }
       }
     }
@@ -247,7 +249,7 @@ export default function GaitCanvas({
 
       // 坏线补值（由“优化”开关控制）
       if (propsRef.current.optimizeEnabled) {
-        zeroLine64x256(ndata, NX, NY, 300, 800);
+        zeroLine64x256(ndata, NX, NY);
       }
 
       // 过滤
