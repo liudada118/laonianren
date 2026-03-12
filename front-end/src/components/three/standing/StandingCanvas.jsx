@@ -121,8 +121,8 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     });
 
     const particles = new THREE.Points(geometry, material);
-    // 缩小到 80%：0.0062 * 0.8 = 0.00496
-    const SCALE = 0.0062 * 0.8;
+    // 缩小到 80% 再缩小 2 倍：0.0062 * 0.4 = 0.00248
+    const SCALE = 0.0062 * 0.4;
     particles.scale.set(SCALE, SCALE, SCALE);
     particles.rotation.x = Math.PI / 3;
 

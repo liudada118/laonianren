@@ -89,8 +89,8 @@ export default function GaitCanvas({
     });
 
     const particles = new THREE.Points(geometry, material);
-    // 放大 2 倍：0.0062 * 2 = 0.0124
-    const SCALE = 0.0062 * 2;
+    // 放大 3 倍：0.0062 * 3 = 0.0186
+    const SCALE = 0.0062 * 3;
     particles.scale.set(SCALE, SCALE, SCALE);
     particles.rotation.x = Math.PI / 3;
 
