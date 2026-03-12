@@ -628,6 +628,9 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   const f4 = gaitFootCache.foot4
   if (!f1 || !f2 || !f3 || !f4) return
   
+  console.log('[zeroLineRepairMerged] 开始, badThresh=%d, goodThresh=%d, f1.len=%d, f2.len=%d, f3.len=%d, f4.len=%d',
+    badThresh, goodThresh, f1.length, f2.length, f3.length, f4.length)
+  
   const ROWS = 64, COLS = 256
   // 合并为 64×256：每个 64×64 传感器先顺时针旋转 90 度（与前端一致），再按列拼接
   // 顺时针旋转 90°：newRow = col, newCol = 63 - row
@@ -658,6 +661,18 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     colSums[c] = total
   }
   
+  // 打印坏行坏列统计
+  const badRows = [], badCols = []
+  for (let r = 0; r < ROWS; r++) if (rowSums[r] < badThresh) badRows.push(r)
+  for (let c = 0; c < COLS; c++) if (colSums[c] < badThresh) badCols.push(c)
+  console.log('[zeroLineRepairMerged] 坏行(%d): %s', badRows.length, badRows.slice(0, 20).join(','))
+  console.log('[zeroLineRepairMerged] 坏列(%d): %s', badCols.length, badCols.slice(0, 30).join(','))
+  // 打印一些行列总和样例
+  console.log('[zeroLineRepairMerged] rowSums前10: %s', Array.from(rowSums).slice(0, 10).map(v => v.toFixed(0)).join(','))
+  console.log('[zeroLineRepairMerged] colSums前10: %s', Array.from(colSums).slice(0, 10).map(v => v.toFixed(0)).join(','))
+  
+  let repairedRows = 0, repairedCols = 0
+  
   // 修复坏行（只补 1~2 行）
   for (let r = 1; r < ROWS - 1; r++) {
     if (rowSums[r] >= badThresh) continue
@@ -666,6 +681,8 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
       for (let c = 0; c < COLS; c++) {
         merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
       }
+      repairedRows++
+      console.log('[zeroLineRepairMerged] 修复单行 r=%d, prevSum=%.0f, nextSum=%.0f', r, rowSums[r-1], rowSums[r+1])
     } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
                rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
       // 连续两行坏线
@@ -675,19 +692,27 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
         merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
         merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
       }
+      repairedRows += 2
+      console.log('[zeroLineRepairMerged] 修复双行 r=%d,%d, prevSum=%.0f, nextSum=%.0f', r, r+1, rowSums[r-1], rowSums[r+2])
       r++
     }
   }
   
-  // 修复坏列（只补 1~2 列）
+  // 修复坏列（只补 1~2 列，跳过传感器边界区域）
+  // 传感器边界列：63,64, 127,128, 191,192（旋转后的合并矩阵中每64列一个边界）
+  const boundarySet = new Set([63, 64, 127, 128, 191, 192])
   for (let c = 1; c < COLS - 1; c++) {
+    if (boundarySet.has(c)) continue  // 跳过传感器边界
     if (colSums[c] >= badThresh) continue
     if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
       // 单列坏线
       for (let r = 0; r < ROWS; r++) {
         merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
       }
+      repairedCols++
+      console.log('[zeroLineRepairMerged] 修复单列 c=%d, prevSum=%.0f, nextSum=%.0f', c, colSums[c-1], colSums[c+1])
     } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               !boundarySet.has(c + 1) &&
                colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
       // 连续两列坏线
       for (let r = 0; r < ROWS; r++) {
@@ -696,9 +721,13 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
         merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
         merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
       }
+      repairedCols += 2
+      console.log('[zeroLineRepairMerged] 修复双列 c=%d,%d, prevSum=%.0f, nextSum=%.0f', c, c+1, colSums[c-1], colSums[c+2])
       c++
     }
   }
+  
+  console.log('[zeroLineRepairMerged] 完成: 修复了 %d 行, %d 列', repairedRows, repairedCols)
   
   // 逆时针旋转 90° 拆回 4 个 64×64，写回原始数组
   // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
