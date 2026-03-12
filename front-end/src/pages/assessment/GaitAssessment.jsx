@@ -641,6 +641,7 @@ export default function GaitAssessment() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.5);
+  const [filterEnabled, setFilterEnabled] = useState(true);
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
@@ -760,7 +761,7 @@ export default function GaitAssessment() {
           for (let r = 0; r < 64; r++) row.push(raw[r][c]);
           matrix.push(row);
         }
-        const denoised = denoiseMatrix(matrix, 15, 20);
+        const denoised = filterEnabled ? denoiseMatrix(matrix, 15, 20) : matrix;
         setSensorData(prev => {
           const newData = { ...prev, [key]: denoised };
           computeStats(newData);
@@ -775,7 +776,7 @@ export default function GaitAssessment() {
         backendBridge.off(event, handler);
       });
     };
-  }, [isGlobalConnected, computeStats, denoiseMatrix]);
+  }, [isGlobalConnected, computeStats, denoiseMatrix, filterEnabled]);
 
   // ─── CSV 导出 ───
   const handleExportCsv = async () => {
@@ -1016,6 +1017,9 @@ export default function GaitAssessment() {
               style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
               <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
                 <input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} className="rounded" /> 热力图
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="rounded" /> 滤波
               </label>
               <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 <span>平滑</span>
