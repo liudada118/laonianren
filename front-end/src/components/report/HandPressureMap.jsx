@@ -7,24 +7,25 @@ import React, { useRef, useEffect, useMemo } from 'react';
  * 热力点: 根据传感器矩阵数据精确叠加到各手指和手掌区域
  * 颜色映射: 0-70N 蓝→红
  * 
- * 精确坐标来自图像分析:
+ * 左手坐标来自图像分析（手掌面朝观察者，小指在左，拇指在右）:
  *   小指顶端: x=0.121, y=0.251
  *   无名指顶端: x=0.279, y=0.129
  *   中指顶端: x=0.455, y=0.081
  *   食指顶端: x=0.667, y=0.124
  *   拇指顶端: x=0.928, y=0.360
- *   手部蓝色区域: y 0.081-0.924, x 0.086-0.973
+ *
+ * 右手: 水平镜像（拇指在左，小指在右），背景图也水平翻转
  */
 
-// 手部各区域在图片中的归一化坐标 (0-1, 相对于图片尺寸)
+// ─── 左手各区域在图片中的归一化坐标 (0-1) ───
 // 图片中是左手（手掌面朝观察者），从左到右：小指、无名指、中指、食指，拇指在右侧
-const HAND_REGIONS = {
+const HAND_REGIONS_LEFT = {
   // 小指 - 图片左侧最外 (顶端 x=0.121, y=0.251)
   little_finger: {
     zones: [
-      { cx: 0.122, cy: 0.270, rx: 0.030, ry: 0.025 },  // 指尖
-      { cx: 0.135, cy: 0.315, rx: 0.028, ry: 0.025 },  // 指中
-      { cx: 0.150, cy: 0.355, rx: 0.030, ry: 0.025 },  // 指根
+      { cx: 0.122, cy: 0.270, rx: 0.030, ry: 0.025 },
+      { cx: 0.135, cy: 0.315, rx: 0.028, ry: 0.025 },
+      { cx: 0.150, cy: 0.355, rx: 0.030, ry: 0.025 },
     ],
     label: { x: 0.122, y: 0.290 },
     fingerIdx: 4,
@@ -32,9 +33,9 @@ const HAND_REGIONS = {
   // 无名指 (顶端 x=0.279, y=0.129)
   ring_finger: {
     zones: [
-      { cx: 0.279, cy: 0.150, rx: 0.032, ry: 0.028 },  // 指尖
-      { cx: 0.285, cy: 0.205, rx: 0.030, ry: 0.028 },  // 指中
-      { cx: 0.295, cy: 0.265, rx: 0.032, ry: 0.030 },  // 指根
+      { cx: 0.279, cy: 0.150, rx: 0.032, ry: 0.028 },
+      { cx: 0.285, cy: 0.205, rx: 0.030, ry: 0.028 },
+      { cx: 0.295, cy: 0.265, rx: 0.032, ry: 0.030 },
     ],
     label: { x: 0.210, y: 0.090 },
     fingerIdx: 3,
@@ -42,9 +43,9 @@ const HAND_REGIONS = {
   // 中指 (顶端 x=0.455, y=0.081)
   middle_finger: {
     zones: [
-      { cx: 0.455, cy: 0.100, rx: 0.033, ry: 0.028 },  // 指尖
-      { cx: 0.455, cy: 0.160, rx: 0.032, ry: 0.028 },  // 指中
-      { cx: 0.450, cy: 0.230, rx: 0.035, ry: 0.030 },  // 指根
+      { cx: 0.455, cy: 0.100, rx: 0.033, ry: 0.028 },
+      { cx: 0.455, cy: 0.160, rx: 0.032, ry: 0.028 },
+      { cx: 0.450, cy: 0.230, rx: 0.035, ry: 0.030 },
     ],
     label: { x: 0.430, y: 0.050 },
     fingerIdx: 2,
@@ -52,9 +53,9 @@ const HAND_REGIONS = {
   // 食指 (顶端 x=0.667, y=0.124)
   index_finger: {
     zones: [
-      { cx: 0.660, cy: 0.145, rx: 0.032, ry: 0.028 },  // 指尖
-      { cx: 0.655, cy: 0.205, rx: 0.030, ry: 0.028 },  // 指中
-      { cx: 0.645, cy: 0.270, rx: 0.033, ry: 0.030 },  // 指根
+      { cx: 0.660, cy: 0.145, rx: 0.032, ry: 0.028 },
+      { cx: 0.655, cy: 0.205, rx: 0.030, ry: 0.028 },
+      { cx: 0.645, cy: 0.270, rx: 0.033, ry: 0.030 },
     ],
     label: { x: 0.620, y: 0.090 },
     fingerIdx: 1,
@@ -62,29 +63,50 @@ const HAND_REGIONS = {
   // 拇指 - 图片右侧 (顶端 x=0.928, y=0.360)
   thumb: {
     zones: [
-      { cx: 0.920, cy: 0.385, rx: 0.035, ry: 0.030 },  // 指尖
-      { cx: 0.880, cy: 0.430, rx: 0.035, ry: 0.030 },  // 指中
-      { cx: 0.830, cy: 0.480, rx: 0.038, ry: 0.032 },  // 指根
+      { cx: 0.920, cy: 0.385, rx: 0.035, ry: 0.030 },
+      { cx: 0.880, cy: 0.430, rx: 0.035, ry: 0.030 },
+      { cx: 0.830, cy: 0.480, rx: 0.038, ry: 0.032 },
     ],
     label: { x: 0.920, y: 0.340 },
     fingerIdx: 0,
   },
-  // 手掌 - 中心大区域 (大约 y=0.35-0.65, x=0.15-0.75)
+  // 手掌 - 中心大区域
   palm: {
     zones: [
-      { cx: 0.380, cy: 0.380, rx: 0.080, ry: 0.040 },  // 上掌（指根连接处）
-      { cx: 0.450, cy: 0.440, rx: 0.100, ry: 0.050 },  // 中掌
-      { cx: 0.430, cy: 0.520, rx: 0.090, ry: 0.045 },  // 下掌
-      { cx: 0.560, cy: 0.400, rx: 0.060, ry: 0.040 },  // 右上掌
-      { cx: 0.530, cy: 0.500, rx: 0.070, ry: 0.045 },  // 右中掌
+      { cx: 0.380, cy: 0.380, rx: 0.080, ry: 0.040 },
+      { cx: 0.450, cy: 0.440, rx: 0.100, ry: 0.050 },
+      { cx: 0.430, cy: 0.520, rx: 0.090, ry: 0.045 },
+      { cx: 0.560, cy: 0.400, rx: 0.060, ry: 0.040 },
+      { cx: 0.530, cy: 0.500, rx: 0.070, ry: 0.045 },
     ],
     label: { x: 0.430, y: 0.490 },
     fingerIdx: 5,
   },
 };
 
-// 传感器矩阵区域映射（16×16矩阵中各手指对应的行列范围）
-const SENSOR_REGIONS = {
+// ─── 右手：水平镜像左手坐标 (x → 1 - x) ───
+function mirrorRegions(regions) {
+  const mirrored = {};
+  for (const [key, region] of Object.entries(regions)) {
+    mirrored[key] = {
+      zones: region.zones.map(z => ({
+        cx: 1 - z.cx,
+        cy: z.cy,
+        rx: z.rx,
+        ry: z.ry,
+      })),
+      label: { x: 1 - region.label.x, y: region.label.y },
+      fingerIdx: region.fingerIdx,
+    };
+  }
+  return mirrored;
+}
+
+const HAND_REGIONS_RIGHT = mirrorRegions(HAND_REGIONS_LEFT);
+
+// ─── 传感器矩阵区域映射（16×16矩阵中各手指对应的行列范围）───
+// 左手传感器布局
+const SENSOR_REGIONS_LEFT = {
   thumb:         { rows: [6, 10], cols: [12, 15] },
   index_finger:  { rows: [0, 4],  cols: [0, 3] },
   middle_finger: { rows: [0, 4],  cols: [4, 7] },
@@ -93,8 +115,18 @@ const SENSOR_REGIONS = {
   palm:          { rows: [4, 12], cols: [0, 11] },
 };
 
+// 右手传感器布局（与左手镜像：列范围翻转）
+const SENSOR_REGIONS_RIGHT = {
+  thumb:         { rows: [6, 10], cols: [0, 3] },
+  index_finger:  { rows: [0, 4],  cols: [12, 15] },
+  middle_finger: { rows: [0, 4],  cols: [8, 11] },
+  ring_finger:   { rows: [0, 4],  cols: [4, 7] },
+  little_finger: { rows: [0, 4],  cols: [0, 3] },
+  palm:          { rows: [4, 12], cols: [4, 15] },
+};
+
 // 颜色映射：0-70N → 蓝→青→绿→黄→红
-const FORCE_MAX = 70; // 最大力值映射
+const FORCE_MAX = 70;
 
 function forceToColor(forceN, alpha = 0.6) {
   const v = Math.max(0, Math.min(1, forceN / FORCE_MAX));
@@ -102,34 +134,21 @@ function forceToColor(forceN, alpha = 0.6) {
   
   let r, g, b;
   if (v < 0.25) {
-    // 蓝 → 青
     const t = v / 0.25;
-    r = 0;
-    g = Math.round(t * 200);
-    b = 255;
+    r = 0; g = Math.round(t * 200); b = 255;
   } else if (v < 0.50) {
-    // 青 → 绿
     const t = (v - 0.25) / 0.25;
-    r = 0;
-    g = 200 + Math.round(t * 55);
-    b = Math.round(255 * (1 - t));
+    r = 0; g = 200 + Math.round(t * 55); b = Math.round(255 * (1 - t));
   } else if (v < 0.75) {
-    // 绿 → 黄
     const t = (v - 0.50) / 0.25;
-    r = Math.round(t * 255);
-    g = 255;
-    b = 0;
+    r = Math.round(t * 255); g = 255; b = 0;
   } else {
-    // 黄 → 红
     const t = (v - 0.75) / 0.25;
-    r = 255;
-    g = Math.round(255 * (1 - t));
-    b = 0;
+    r = 255; g = Math.round(255 * (1 - t)); b = 0;
   }
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// 归一化值到颜色（用于色标）
 function normalizedToColor(v, alpha = 0.9) {
   v = Math.max(0, Math.min(1, v));
   let r, g, b;
@@ -151,6 +170,11 @@ function normalizedToColor(v, alpha = 0.9) {
 
 export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '左手', sensorMatrix = null }) {
   const canvasRef = useRef(null);
+  const isRight = hand === '右手';
+
+  // 根据左右手选择对应的坐标映射
+  const HAND_REGIONS = isRight ? HAND_REGIONS_RIGHT : HAND_REGIONS_LEFT;
+  const SENSOR_REGIONS = isRight ? SENSOR_REGIONS_RIGHT : SENSOR_REGIONS_LEFT;
 
   // 计算各区域的力值（N）
   const regionForces = useMemo(() => {
@@ -165,7 +189,7 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       }
     }
     return result;
-  }, [fingers]);
+  }, [fingers, HAND_REGIONS]);
 
   // 计算传感器矩阵各区域的平均值
   const sensorRegionAvg = useMemo(() => {
@@ -183,7 +207,7 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       result[key] = count > 0 ? parseFloat((sum / count).toFixed(2)) : 0;
     }
     return result;
-  }, [sensorMatrix]);
+  }, [sensorMatrix, SENSOR_REGIONS]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -211,7 +235,16 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
 
       // 2. 绘制背景图（线框手叠加在热力层上）
       ctx.globalAlpha = 0.80;
-      ctx.drawImage(img, 0, 0, displayW, displayH);
+      if (isRight) {
+        // 右手：水平翻转绘制背景图，使拇指在左侧
+        ctx.save();
+        ctx.translate(displayW, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, 0, displayW, displayH);
+        ctx.restore();
+      } else {
+        ctx.drawImage(img, 0, 0, displayW, displayH);
+      }
       ctx.globalAlpha = 1.0;
 
       // 3. 绘制数据标注
@@ -227,7 +260,6 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       for (const key of regionKeys) {
         const region = HAND_REGIONS[key];
         
-        // 获取该区域的力值（N）
         let forceN = 0;
         if (regionForces[key] !== undefined) {
           forceN = regionForces[key];
@@ -235,11 +267,8 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
 
         if (forceN < 0.1) continue;
 
-        // 颜色直接基于区域总力值（不除以zone数量）
-        // 这样 90N 的手掌会显示为深红色
         const colorForce = forceN;
 
-        // 在每个 zone 绘制高斯热力点
         for (const zone of region.zones) {
           const cx = zone.cx * W;
           const cy = zone.cy * H;
@@ -247,7 +276,6 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
           const ry = zone.ry * H;
           const radius = Math.max(rx, ry) * 2.5;
 
-          // 多层渐变叠加，颜色基于区域总力值
           for (let layer = 0; layer < 3; layer++) {
             const layerRadius = radius * (1 - layer * 0.15);
 
@@ -290,7 +318,6 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 背景圆角矩形
         const boxW = key === 'palm' ? 78 : 66;
         const boxH = 38;
 
@@ -318,7 +345,6 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
         // 力值 — 根据力值大小着色
         const forceVal = f.force || 0;
         const ratio = Math.min(forceVal / FORCE_MAX, 1);
-        // 蓝→红的文字颜色
         const textR = Math.round(ratio * 220);
         const textB = Math.round((1 - ratio) * 200);
         ctx.fillStyle = `rgb(${textR}, 40, ${textB})`;
@@ -333,7 +359,6 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       const barX = (W - barW) / 2;
       const barY = H - 32;
 
-      // 渐变色条
       const steps = 200;
       for (let i = 0; i < steps; i++) {
         const v = i / steps;
@@ -355,7 +380,7 @@ export default function HandPressureMap({ fingers = [], totalForce = 0, hand = '
       ctx.textAlign = 'right';
       ctx.fillText(`${FORCE_MAX}`, barX + barW, barY + barH + 4);
     }
-  }, [fingers, totalForce, hand, sensorMatrix, regionForces, sensorRegionAvg]);
+  }, [fingers, totalForce, hand, sensorMatrix, regionForces, sensorRegionAvg, isRight, HAND_REGIONS]);
 
   return (
     <div style={{
