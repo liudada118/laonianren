@@ -224,7 +224,6 @@ export default function GripAssessment() {
 
   // Heatmap state
   const [heatmapCanvas, setHeatmapCanvas] = useState(null);
-  const [heatmapVersion, setHeatmapVersion] = useState(0);
   const bodyCanvasRef = useRef(null);
   const frameRef = useRef(0);
 
@@ -262,7 +261,7 @@ export default function GripAssessment() {
         max: 500,
         size: 40
       });
-      setHeatmapCanvas(bodyCanvasRef.current.canvas);
+      setHeatmapCanvas(bodyCanvasRef.current);
     }
   }, []);
 
@@ -325,7 +324,6 @@ export default function GripAssessment() {
         try {
           const mapped = mapLeftHand(sensorArray);
           bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-          setHeatmapVersion(v => v + 1);
         } catch (e) { console.error('[Left] heatmap error:', e); }
       }
 
@@ -357,7 +355,6 @@ export default function GripAssessment() {
         try {
           const mapped = mapRightHand(sensorArray);
           bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-          setHeatmapVersion(v => v + 1);
         } catch (e) { console.error('[Right] heatmap error:', e); }
       }
 
@@ -552,7 +549,6 @@ export default function GripAssessment() {
           try {
             const mapped = isLeft ? mapLeftHand(sensorData) : mapRightHand(sensorData);
             bodyCanvasRef.current.changeHeatmap(mapped, 1, 1, 0);
-            setHeatmapVersion(v => v + 1);
           } catch (e) {
             console.error('[Sim] heatmap error:', e);
             addSimLog(`热力图更新错误: ${e.message}`, 'error');
@@ -972,7 +968,7 @@ export default function GripAssessment() {
         {/* 右侧3D区域 */}
         <div className="flex-1 flex flex-col items-center justify-center relative">
           <div className="relative w-full h-full flex items-center justify-center model-container m-3 rounded-xl">
-            <HandModel isRecording={phase.includes('recording')} pressureValue={pressure} isLeftHand={phase.startsWith('left')} heatmapCanvas={heatmapCanvas} heatmapVersion={heatmapVersion} />
+            <HandModel isRecording={phase.includes('recording')} pressureValue={pressure} isLeftHand={phase.startsWith('left')} heatmapCanvas={heatmapCanvas} />
             {phase === 'processing' && (
               <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl" style={{ background: 'rgba(245,246,248,0.8)', backdropFilter: 'blur(4px)' }}>
                 <div className="w-64 h-2 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border-light)' }}>
