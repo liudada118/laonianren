@@ -2,13 +2,14 @@
  * StandingCanvas - 基于 Three.js 粒子系统的静态站立压力可视化
  * 
  * 适配自用户提供的 Canvas 样例组件，接入项目的 64×64 矩阵数据流。
+ * 兼容 three.js 0.177+（使用 outputColorSpace / SRGBColorSpace）
  * 
  * Props:
- *   - externalDataRef: React ref，ref.current 为 64×64 的二维数组（与 InsoleScene 接口一致）
- *   - showHeatmap: boolean，是否显示热力图颜色
- *   - depthScale: number，深度缩放系数
- *   - smoothness: number，平滑度
- *   - data: ref 对象，用于向外暴露 changeData / handleCharts 等回调
+ *   - externalDataRef: React ref，ref.current 为 64×64 的二维数组
+ *   - showHeatmap: boolean
+ *   - depthScale: number
+ *   - smoothness: number
+ *   - data: ref 对象
  *   - changeSelect: 选区变化回调
  *   - changeStateData: 选区尺寸回调
  *   - local: boolean
@@ -29,7 +30,6 @@ import { obj } from "./config";
 import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 
 let group = new THREE.Group();
-const sitInit = 0;
 const sitnum1 = 64;
 const sitnum2 = 64;
 const sitInterp = 2;
@@ -43,52 +43,38 @@ var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getIte
   valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
   valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
   valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
-let enableControls = true;
 
 let timer;
-
 function debounce(fn, time) {
   if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    fn();
-  }, time);
+  timer = setTimeout(() => { fn(); }, time);
 }
 
 var FPS = 10;
 var timeS = 0;
 var renderT = 1 / FPS;
-let totalArr = [],
-  totalPointArr = [];
+let totalArr = [], totalPointArr = [];
 let local;
 let camera;
-let particles,
-  material,
-  sitGeometry;
+let particles, material, sitGeometry;
 let controls;
 
 const StandingCanvas = React.forwardRef((props, refs) => {
   local = props.local;
+  const containerRef = useRef(null);
   var selectStartArr = [], selectEndArr = [], sitArr, sitMatrix = [], selectMatrix = [], selectHelper = {};
   let sitIndexArr = [], sitIndexEndArr = [];
   var animationRequestId, colSelectFlag = false;
   let dataFlag = false;
 
-  const changeDataFlag = () => {
-    dataFlag = true;
-  };
+  const changeDataFlag = () => { dataFlag = true; };
 
   let bigArr = new Array(sitnum1 * sitInterp * sitnum2 * sitInterp).fill(1);
   let bigArrg = new Array(
-    (sitnum1 * sitInterp + sitOrder * 2) *
-    (sitnum2 * sitInterp + sitOrder * 2)
+    (sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)
   ).fill(1),
-    bigArrgnew = new Array(
-      (sitnum1 * sitInterp + sitOrder * 2) *
-      (sitnum2 * sitInterp + sitOrder * 2)
-    ).fill(1),
     smoothBig = new Array(
-      (sitnum1 * sitInterp + sitOrder * 2) *
-      (sitnum2 * sitInterp + sitOrder * 2)
+      (sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)
     ).fill(1);
 
   let container;
@@ -97,8 +83,8 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   const ALT_KEY = 18;
   const CTRL_KEY = 17;
   const CMD_KEY = 91;
-  const AMOUNTX = sitnum1 * sitInterp + sitOrder * 2;
-  const AMOUNTY = sitnum2 * sitInterp + sitOrder * 2;
+  const AMOUNTX = sitnum1 * sitInterp + sitOrder * 2;  // 136
+  const AMOUNTY = sitnum2 * sitInterp + sitOrder * 2;  // 136
   const SEPARATION = 100;
   const groupX = 5, groupY = 150, groupZ = 230;
   let positions;
@@ -122,22 +108,16 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }
 
   function init() {
-    container = document.getElementById('standing-canvas');
+    container = containerRef.current;
     if (!container) return;
 
-    // 确保容器有实际尺寸，fallback 到父容器或窗口尺寸
-    let w = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth;
-    let h = container.clientHeight || container.parentElement?.clientHeight || window.innerHeight;
+    // 获取容器实际尺寸
+    let w = container.clientWidth;
+    let h = container.clientHeight;
     if (w < 10) w = window.innerWidth * 0.7;
     if (h < 10) h = window.innerHeight * 0.8;
 
-    camera = new THREE.PerspectiveCamera(
-      40,
-      w / h,
-      1,
-      150000
-    );
-
+    camera = new THREE.PerspectiveCamera(40, w / h, 1, 150000);
     camera.position.z = 300;
     camera.position.y = 200;
 
@@ -169,9 +149,13 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(w, h);
-    renderer.outputEncoding = THREE.sRGBEncoding;
 
-    // 清空旧的子节点后再挂载
+    // three.js 0.177+ 使用 outputColorSpace 替代 outputEncoding
+    if (renderer.outputColorSpace !== undefined) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
+
+    // 清空旧子节点后挂载
     while (container.firstChild) {
       container.removeChild(container.firstChild);
     }
@@ -211,8 +195,8 @@ const StandingCanvas = React.forwardRef((props, refs) => {
 
       if (!controlsFlag && selectHelper.element) {
         const elementLocal = selectHelper.element.getBoundingClientRect();
-        const selectMatrix = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom];
-        const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix);
+        const sm = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom];
+        const sitInterArr = checkRectangleIntersection(sm, sitMatrix);
         if (sitInterArr) {
           sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
         }
@@ -237,50 +221,29 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     if (selectHelper.isShiftPressed && colSelectFlag) {
       selectEndArr = [event.clientX, event.clientY];
       selectMatrix = [...selectStartArr, ...selectEndArr];
-
-      if (selectStartArr[0] > selectEndArr[0]) {
-        selectMatrix[0] = selectEndArr[0];
-        selectMatrix[2] = selectStartArr[0];
-      } else {
-        selectMatrix[0] = selectStartArr[0];
-        selectMatrix[2] = selectEndArr[0];
-      }
-
-      if (selectStartArr[1] > selectEndArr[1]) {
-        selectMatrix[1] = selectEndArr[1];
-        selectMatrix[3] = selectStartArr[1];
-      } else {
-        selectMatrix[1] = selectStartArr[1];
-        selectMatrix[3] = selectEndArr[1];
-      }
+      if (selectStartArr[0] > selectEndArr[0]) { selectMatrix[0] = selectEndArr[0]; selectMatrix[2] = selectStartArr[0]; }
+      else { selectMatrix[0] = selectStartArr[0]; selectMatrix[2] = selectEndArr[0]; }
+      if (selectStartArr[1] > selectEndArr[1]) { selectMatrix[1] = selectEndArr[1]; selectMatrix[3] = selectStartArr[1]; }
+      else { selectMatrix[1] = selectStartArr[1]; selectMatrix[3] = selectEndArr[1]; }
 
       if (!controlsFlag) {
         const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix);
-        if (sitInterArr) {
-          sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
-          sitIndexEndArr = [...sitIndexArr];
-        }
+        if (sitInterArr) { sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY); sitIndexEndArr = [...sitIndexArr]; }
         const width = Math.abs(Math.round(selectEndArr[0] - selectStartArr[0]));
         const height = Math.abs(Math.round(selectEndArr[1] - selectStartArr[1]));
-        if (props.changeStateData) {
-          props.changeStateData({ width, height });
-        }
+        if (props.changeStateData) { props.changeStateData({ width, height }); }
       }
     }
   }
 
   function pointUp(event) {
     if (selectHelper.isShiftPressed) {
-      if (props.changeSelect) {
-        props.changeSelect({ sit: sitIndexEndArr, back: [] });
-      }
-      selectStartArr = [];
-      selectEndArr = [];
-      colSelectFlag = false;
+      if (props.changeSelect) { props.changeSelect({ sit: sitIndexEndArr, back: [] }); }
+      selectStartArr = []; selectEndArr = []; colSelectFlag = false;
     }
   }
 
-  // 初始化座椅粒子
+  // 初始化粒子系统
   function initSet() {
     const numParticles = AMOUNTX * AMOUNTY;
     positions = new Float32Array(numParticles * 3);
@@ -294,9 +257,9 @@ const StandingCanvas = React.forwardRef((props, refs) => {
         positions[i + 1] = 0;
         positions[i + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
         scales[j] = 1;
-        colors[i] = 0 / 255;
-        colors[i + 1] = 0 / 255;
-        colors[i + 2] = 255 / 255;
+        colors[i] = 0;
+        colors[i + 1] = 0;
+        colors[i + 2] = 1;  // 蓝色
         i += 3;
         j++;
       }
@@ -305,13 +268,19 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     sitGeometry = new THREE.BufferGeometry();
     sitGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
-    const sprite = new THREE.TextureLoader().load("./circle.png");
+    // 使用绝对路径加载纹理（Electron/Vite 中 ./circle.png 可能无法解析）
+    const sprite = new THREE.TextureLoader().load("/circle.png");
+
     material = new THREE.PointsMaterial({
       vertexColors: true,
       transparent: true,
       map: sprite,
       size: 1,
+      // 确保深度测试和写入正确
+      depthWrite: false,
+      sizeAttenuation: true,
     });
+
     sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
     sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     particles = new THREE.Points(sitGeometry, material);
@@ -325,10 +294,10 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }
 
   function onWindowResize() {
-    const container = document.getElementById('standing-canvas');
-    if (!container || !renderer || !camera) return;
-    let w = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth;
-    let h = container.clientHeight || container.parentElement?.clientHeight || window.innerHeight;
+    const c = containerRef.current;
+    if (!c || !renderer || !camera) return;
+    let w = c.clientWidth;
+    let h = c.clientHeight;
     if (w < 10) w = window.innerWidth * 0.7;
     if (h < 10) h = window.innerHeight * 0.8;
     renderer.setSize(w, h);
@@ -346,9 +315,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     selectHelper.isShiftPressed = !value;
     if (value) {
       selectHelper.onSelectOver();
-      if (flag && props.changeSelect) {
-        props.changeSelect({ sit: [0, 72, 0, 72] });
-      }
+      if (flag && props.changeSelect) { props.changeSelect({ sit: [0, 72, 0, 72] }); }
     }
   }
 
@@ -390,7 +357,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
         positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
 
         let rgb;
-        if (sitIndexArr && !sitIndexArr.every((a) => a === 0)) {
+        if (sitIndexArr && sitIndexArr.length > 0 && !sitIndexArr.every((a) => a === 0)) {
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
             rgb = jet(0, valuej1, smoothBig[l]);
             dataArr.push(bigArrg[l]);
@@ -411,7 +378,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     }
 
     if (!sitIndexArr.length || sitIndexArr.every((a) => a === 0)) {
-      dataArr = bigArrg;
+      dataArr = [...bigArrg];
     }
 
     var T = clock.getDelta();
@@ -424,32 +391,19 @@ const StandingCanvas = React.forwardRef((props, refs) => {
       const mean = press / (point === 0 ? 1 : point);
 
       if (props.data && props.data.current && props.data.current.changeData) {
-        props.data.current.changeData({
-          meanPres: mean.toFixed(2),
-          maxPres: max,
-          point: point,
-          totalPres: press,
-        });
+        props.data.current.changeData({ meanPres: mean.toFixed(2), maxPres: max, point: point, totalPres: press });
       }
 
-      if (totalArr.length < 20) {
-        totalArr.push(press);
-      } else {
-        totalArr.shift();
-        totalArr.push(press);
-      }
+      if (totalArr.length < 20) { totalArr.push(press); }
+      else { totalArr.shift(); totalArr.push(press); }
 
       const maxTotal = findMax(totalArr);
       if (!local && props.data && props.data.current && props.data.current.handleCharts) {
         props.data.current.handleCharts(totalArr, maxTotal + 1000);
       }
 
-      if (totalPointArr.length < 20) {
-        totalPointArr.push(point);
-      } else {
-        totalPointArr.shift();
-        totalPointArr.push(point);
-      }
+      if (totalPointArr.length < 20) { totalPointArr.push(point); }
+      else { totalPointArr.shift(); totalPointArr.push(point); }
 
       const max1 = findMax(totalPointArr);
       if (!local && props.data && props.data.current && props.data.current.handleChartsArea) {
@@ -466,16 +420,13 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }
 
   function render() {
+    if (!renderer || !scene || !camera || !controls || !particles) return;
     sitRenew();
     if (controlsFlag) {
-      controls.mouseButtons = {
-        LEFT: THREE.MOUSE.PAN,
-        MIDDLE: THREE.MOUSE.ZOOM,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
+      controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
       controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
       controls.update();
-    } else if (!controlsFlag) {
+    } else {
       controls.keys = [];
       controls.mouseButtons = [];
     }
@@ -488,9 +439,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     ndata1 = wsPointData;
     ndata1 = ndata1.map((a) => (a - valuef1 < 0 ? 0 : a));
     const ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-    if (ndata1Num < valuelInit) {
-      ndata1 = new Array(sitnum1 * sitnum2).fill(0);
-    }
+    if (ndata1Num < valuelInit) { ndata1 = new Array(sitnum1 * sitnum2).fill(0); }
   }
 
   function sitValue(prop) {
@@ -505,48 +454,31 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }
 
   function changeGroupRotate(obj) {
-    if (typeof obj.x === 'number') {
-      group.rotation.x = -((obj.x) * 6) / 12;
-    }
-    if (typeof obj.z === 'number') {
-      particles.rotation.z = (obj.z) * 6 / 12;
-    }
+    if (typeof obj.x === 'number') { group.rotation.x = -((obj.x) * 6) / 12; }
+    if (typeof obj.z === 'number') { particles.rotation.z = (obj.z) * 6 / 12; }
   }
 
   function reset() {
-    controls.reset();
+    if (controls) controls.reset();
     group.rotation.x = -(Math.PI * 2) / 12;
     group.rotation.y = 0;
-    particles.rotation.z = 0;
+    if (particles) particles.rotation.z = 0;
     group.position.x = groupX;
     group.position.y = groupY;
     group.position.z = groupZ;
   }
 
   useImperativeHandle(refs, () => ({
-    sitData,
-    changeDataFlag,
-    sitValue,
-    changeSelectFlag,
-    sitRenew,
-    changeGroupRotate,
-    reset,
+    sitData, changeDataFlag, sitValue, changeSelectFlag, sitRenew, changeGroupRotate, reset,
   }));
 
   function onKeyDown(event) {
-    if (event.key === 'Shift') {
-      controls.mouseButtons = null;
-      controls.keys = null;
-    }
+    if (event.key === 'Shift' && controls) { controls.mouseButtons = null; controls.keys = null; }
   }
 
   function onKeyUp(event) {
-    if (event.key === 'Shift') {
-      controls.mouseButtons = {
-        LEFT: THREE.MOUSE.PAN,
-        MIDDLE: THREE.MOUSE.ZOOM,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
+    if (event.key === 'Shift' && controls) {
+      controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
       controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
     }
   }
@@ -559,17 +491,25 @@ const StandingCanvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      // 清理 group 中的对象
+      while (group.children.length > 0) {
+        group.remove(group.children[0]);
+      }
       group = new THREE.Group();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', onWindowResize);
       document.removeEventListener('keydown', handleKeyDown);
+      // 清理 renderer
+      if (renderer) {
+        renderer.dispose();
+      }
     };
   }, []);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div id="standing-canvas" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
+    <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
     </div>
   );
 });
