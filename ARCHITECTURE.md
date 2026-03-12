@@ -1,12 +1,14 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-03-12 18:00
+**最后更新**: 2026-03-12 12:40
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-03-12 12:40 | ld | 修复缺陷 | 彻底修复串口 Cannot lock port 问题。根因确认：CH340 USB转串口芯片在 macOS 上，当一个端口被打开后会锁住同一总线上的其他端口。重构 connectPort 为两阶段架构：阶段一“探测”——通过分隔符+帧长度双重验证逐个串行探测波特率，每个探测完关闭端口后等 500ms 再探测下一个；阶段二“连接”——全部探测完成后等 1s 确保端口锁彻底释放，再通过 newSerialPortLinkWithRetry 逐个打开连接。修改文件：serialServer.js。 |
+| 2026-03-12 12:22 | ld | 修复缺陷 | 修复串口设备连接时 Cannot lock port 端口锁定问题及波特率误检问题。(1) detectBaudRate 新增双重验证：先检测分隔符 AA 55 03 99，再验证帧长度是否匹配该波特率对应的设备类型（921600→1​30/146/18，1000000→1024，3000000→4096），防止脚垫被误识为坐垫；(2) 每次波特率探测后加 300ms 延时等待端口锁释放，探测失败时最多重试 2 次；(3) 新增 newSerialPortLinkWithRetry 函数，端口打开失败时自动重试最多 3 次，每次间隔 500ms。修改文件：serialServer.js、config.js。 |
 | 2026-03-12 20:00 | hand | 修复缺陷 | 彻底修复右手清零失效。根因确认：HR的Packet1在硬件层面系统性丢失（sensorType=2的Packet1几乎每次都丢失），导致HR永远只有128字节数据。修复策略从“要求256字节完整帧”改为“接受128字节也能正确工作”：(1)后端 gloveLatestData接受128或256字节；(2)tareGrip接受>=128字节的基线；(3)前端 BackendBridge._normalizeGloveArr()将128字节补零到256给热力图使用；(4)前端增加清零重试机制。修改文件：serialServer.js、BackendBridge.js、GripAssessment.jsx。 |
 | 2026-03-12 19:00 | hand | 修复缺陷 | 中间版本：尝试通过要求256字节完整帧来修复右手清零，但经日志确认HR的Packet1硬件层面系统性丢失，该方案不可行。已被20:00版本替代。 |
 | 2026-03-12 18:00 | hand | 修复缺陷 | 彻底修复右手清零偶发失效。根因：左右手共用串口，Packet1(130字节)到达时覆盖dataItem.type但不更新dataItem.arr，导致type/arr不匹配，清零基线被错误应用到另一只手的数据。修复：(1)parseData中手套数据统一从gloveLatestData获取，不再使用dataMap[path]的arr；(2)Packet1处理时不再覆盖dataItem.type/stamp，仅缓存前半数据等待Packet2合并。修改文件：serialServer.js。 |

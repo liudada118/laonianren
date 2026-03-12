@@ -673,6 +673,14 @@ function applyActiveMode(mode) {
 
 const BAUD_CANDIDATES = [921600, 1000000, 3000000]
 
+// 波特率 → 期望的帧长度集合（分隔符切割后的数据帧字节数）
+// 用于波特率检测时双重验证：先检测分隔符，再验证帧长度是否匹配
+const BAUD_EXPECTED_FRAME_LENGTHS = {
+  921600:  [130, 146, 18],  // 手套: 130/146字节帧 + 18字节IMU帧
+  1000000: [1024],          // 起坐垫: 1024字节帧
+  3000000: [4096],          // 脚垫: 4096字节帧
+}
+
 function bufferContainsSequence(buffer, sequence) {
   if (!buffer || buffer.length < sequence.length) return false
   for (let i = 0; i <= buffer.length - sequence.length; i++) {
@@ -688,52 +696,127 @@ function bufferContainsSequence(buffer, sequence) {
   return false
 }
 
-async function detectBaudRate(path, timeoutMs = 800) {
-  for (let i = 0; i < BAUD_CANDIDATES.length; i++) {
-    const baudRate = BAUD_CANDIDATES[i]
-    const ok = await new Promise((resolve) => {
-      let cache = Buffer.alloc(0)
-      let timer = null
-      let port = null
+/**
+ * 从 buffer 中提取分隔符切割后的第一个完整帧的长度
+ * 返回帧长度，或 -1 表示未找到完整帧
+ */
+function extractFrameLength(buffer, sequence) {
+  if (!buffer || buffer.length < sequence.length) return -1
+  // 找到第一个分隔符的位置
+  let firstDelim = -1
+  for (let i = 0; i <= buffer.length - sequence.length; i++) {
+    let match = true
+    for (let j = 0; j < sequence.length; j++) {
+      if (buffer[i + j] !== sequence[j]) { match = false; break }
+    }
+    if (match) { firstDelim = i; break }
+  }
+  if (firstDelim < 0) return -1
+  // 从第一个分隔符后找第二个分隔符
+  const dataStart = firstDelim + sequence.length
+  for (let i = dataStart; i <= buffer.length - sequence.length; i++) {
+    let match = true
+    for (let j = 0; j < sequence.length; j++) {
+      if (buffer[i + j] !== sequence[j]) { match = false; break }
+    }
+    if (match) {
+      return i - dataStart  // 两个分隔符之间的数据长度就是帧长度
+    }
+  }
+  return -1  // 只找到一个分隔符，没有完整帧
+}
 
-      const cleanup = (result) => {
-        if (timer) clearTimeout(timer)
-        if (port) {
-          port.off('data', onData)
-          port.off('error', onError)
-          if (port.isOpen) {
-            port.close(() => resolve(result))
-            return
+async function detectBaudRate(path, timeoutMs = 1500, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[baud] ${path} retry #${attempt}`)
+      await new Promise(r => setTimeout(r, 500))
+    }
+    for (let i = 0; i < BAUD_CANDIDATES.length; i++) {
+      const baudRate = BAUD_CANDIDATES[i]
+      const expectedLengths = BAUD_EXPECTED_FRAME_LENGTHS[baudRate] || []
+
+      const result = await new Promise((resolve) => {
+        let cache = Buffer.alloc(0)
+        let timer = null
+        let port = null
+        let resolved = false
+        let delimiterFound = false
+
+        const cleanup = (result) => {
+          if (resolved) return
+          resolved = true
+          if (timer) clearTimeout(timer)
+          if (port) {
+            port.off('data', onData)
+            port.off('error', onError)
+            if (port.isOpen) {
+              port.close(() => resolve(result))
+              return
+            }
+          }
+          resolve(result)
+        }
+
+        const onData = (data) => {
+          cache = Buffer.concat([cache, Buffer.from(data)])
+          // 限制缓存大小，保留足够的数据用于帧长度检测（最大帧 4096 + 分隔符开销）
+          if (cache.length > 12288) {
+            cache = cache.slice(-12288)
+          }
+          // 第一步：检测分隔符
+          if (!delimiterFound && bufferContainsSequence(cache, splitArr)) {
+            delimiterFound = true
+            console.log(`[baud] ${path} @${baudRate} delimiter found, checking frame length...`)
+          }
+          // 第二步：检测帧长度是否匹配
+          if (delimiterFound) {
+            const frameLen = extractFrameLength(cache, splitArr)
+            if (frameLen > 0) {
+              if (expectedLengths.includes(frameLen)) {
+                console.log(`[baud] ${path} @${baudRate} frame length ${frameLen} matches!`)
+                cleanup('match')
+              } else {
+                console.log(`[baud] ${path} @${baudRate} frame length ${frameLen} does NOT match expected ${JSON.stringify(expectedLengths)}`)
+                cleanup('mismatch')
+              }
+            }
+            // 帧长度还没提取到，继续等待更多数据
           }
         }
-        resolve(result)
-      }
 
-      const onData = (data) => {
-        cache = Buffer.concat([cache, Buffer.from(data)])
-        if (cache.length > 1024) {
-          cache = cache.slice(-1024)
+        const onError = (err) => {
+          console.log(`[baud] ${path} @${baudRate} error:`, err?.message || err)
+          cleanup('error')
         }
-        if (bufferContainsSequence(cache, splitArr)) {
-          cleanup(true)
+
+        try {
+          port = new SerialPort({ path, baudRate, autoOpen: true })
+          port.on('data', onData)
+          port.on('error', onError)
+        } catch (e) {
+          console.log(`[baud] ${path} @${baudRate} open failed:`, e?.message || e)
+          cleanup('error')
+          return
         }
-      }
 
-      const onError = () => cleanup(false)
+        timer = setTimeout(() => {
+          if (delimiterFound) {
+            // 找到了分隔符但没来得及验证帧长度，也算通过（兼容旧逻辑）
+            console.log(`[baud] ${path} @${baudRate} delimiter found but frame length not verified (timeout), accepting`)
+            cleanup('match')
+          } else {
+            cleanup('timeout')
+          }
+        }, timeoutMs)
+      })
 
-      try {
-        port = new SerialPort({ path, baudRate, autoOpen: true })
-        port.on('data', onData)
-        port.on('error', onError)
-      } catch (e) {
-        cleanup(false)
-        return
-      }
+      // 每次尝试后等待端口锁释放（macOS 需要时间释放文件锁）
+      await new Promise(r => setTimeout(r, 300))
 
-      timer = setTimeout(() => cleanup(false), timeoutMs)
-    })
-
-    if (ok) return baudRate
+      if (result === 'match') return baudRate
+      // mismatch/error/timeout 继续尝试下一个波特率
+    }
   }
   return null
 }
@@ -2903,12 +2986,65 @@ const newSerialPortLink = ({ path, parser, baudRate = 1000000 }) => {
         console.log(err, "err");
       }
     );
-    //绠￠亾娣诲姞瑙ｆ瀽鍣?
     port.pipe(parser);
   } catch (e) {
     console.log(e, "e");
   }
   return port
+}
+
+/**
+ * 带重试的串口连接，解决 macOS 上 Cannot lock port 问题
+ * detectBaudRate 关闭端口后，系统可能还未释放文件锁，立即重新打开会失败
+ * 此函数会自动重试最多 maxRetries 次，每次间隔 retryDelay ms
+ */
+async function newSerialPortLinkWithRetry({ path, parser, baudRate = 1000000, maxRetries = 3, retryDelay = 500 }) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[port] ${path} retry #${attempt} after ${retryDelay}ms`)
+      await new Promise(r => setTimeout(r, retryDelay))
+    }
+    const port = newSerialPortLink({ path, parser, baudRate })
+    if (port) {
+      // 检查端口是否真正打开成功
+      const opened = await new Promise((resolve) => {
+        if (port.isOpen) {
+          resolve(true)
+          return
+        }
+        const onOpen = () => {
+          port.off('error', onErr)
+          resolve(true)
+        }
+        const onErr = (err) => {
+          port.off('open', onOpen)
+          if (err && /lock|unavailable|EBUSY/i.test(err.message)) {
+            console.log(`[port] ${path} lock error on attempt ${attempt}:`, err.message)
+            resolve(false)
+          } else {
+            // 其他错误不影响端口打开
+            resolve(true)
+          }
+        }
+        port.once('open', onOpen)
+        port.once('error', onErr)
+        // 超时保护
+        setTimeout(() => {
+          port.off('open', onOpen)
+          port.off('error', onErr)
+          resolve(port.isOpen)
+        }, 2000)
+      })
+      if (opened) {
+        console.log(`[port] ${path} opened successfully` + (attempt > 0 ? ` (after ${attempt} retries)` : ''))
+        return port
+      }
+      // 打开失败，关闭后重试
+      try { if (port.isOpen) port.close() } catch (e) {}
+    }
+  }
+  console.log(`[port] ${path} failed to open after ${maxRetries} retries`)
+  return null
 }
 
 /**
@@ -3047,44 +3183,56 @@ async function connectPort() {
     ports = getPort(ports)
   }
   console.log(ports, 'ports')
-  // 鍒涘缓骞惰繛鎺ユ暟鎹€氶亾骞朵笖璁剧疆鍥炶皟
+
+  // ============================================================
+  // 阶段一：通过分隔符 + 帧长度双重验证，通过波特率探测确定每个端口的设备类型
+  // 关键：每次只打开一个端口，探测完关闭后再探测下一个，避免 CH340 驱动端口锁冲突
+  // ============================================================
+  const baudDetectResults = {}  // path -> detectedBaud
+  console.log('[phase1] Starting baud rate detection for', ports.length, 'ports')
+  for (let i = 0; i < ports.length; i++) {
+    const { path } = ports[i]
+    let detectedBaud = null
+    if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+      try {
+        const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
+        detectedBaud = baudMap[path] || null
+      } catch (e) {}
+      console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || baudRate)
+    } else {
+      detectedBaud = await detectBaudRate(path)
+    }
+    baudDetectResults[path] = detectedBaud
+    console.log('[phase1]', path, '=>', detectedBaud || 'null (will use default ' + baudRate + ')')
+    // 探测完后等待端口完全释放，再探测下一个
+    await new Promise(r => setTimeout(r, 500))
+  }
+  console.log('[phase1] Detection complete:', JSON.stringify(baudDetectResults))
+
+  // 探测全部完成后，等待一段时间确保所有端口锁彻底释放
+  await new Promise(r => setTimeout(r, 1000))
+
+  // ============================================================
+  // 阶段二：根据探测结果逐个打开端口并建立连接
+  // ============================================================
+  console.log('[phase2] Starting port connections')
   for (let i = 0; i < ports.length; i++) {
 
       const portInfo = ports[i]
 
-
-
-
       const { path } = portInfo
-      let portBaudRate = baudRate
-    // parserArr[path]
+      const detectedBaud = baudDetectResults[path]
+      let portBaudRate = detectedBaud || baudRate
+
       const parserItem = parserArr[path] = parserArr[path] ? parserArr[path] : {}
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
       parserItem.baudRate = portBaudRate
-      // parserItem 
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
 
     const { parser } = parserItem
 
-    // if()
-
       if (!(parserItem.port && parserItem.port.isOpen)) {
-        let detectedBaud = null
-        if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
-          // 测试模式：从环境变量获取预设波特率
-          try {
-            const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
-            detectedBaud = baudMap[path] || null
-          } catch (e) {}
-          console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || portBaudRate)
-        } else {
-          detectedBaud = await detectBaudRate(path)
-        }
-        if (detectedBaud) {
-          portBaudRate = detectedBaud
-        }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
-        parserItem.baudRate = portBaudRate
         // 根据探测到的波特率自动设置设备大类
         const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
         if (deviceCategory) {
@@ -3092,13 +3240,16 @@ async function connectPort() {
             dataItem.type = 'sit'
             dataItem.premission = true
           } else if (deviceCategory === 'foot') {
-            // 脚垫类型需要通过 AT 指令获取 MAC 地址后再细分 foot1-4
             dataItem.type = 'foot'
           }
-          // hand 类型由帧内类型位（130字节帧）动态设置为 HL/HR
           console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
         }
-        const port = newSerialPortLink({ path, parser: parserItem.parser, baudRate: portBaudRate })
+        // 使用带重试的端口连接
+        const port = await newSerialPortLinkWithRetry({ path, parser: parserItem.parser, baudRate: portBaudRate })
+        if (!port) {
+          console.log('[port] ' + path + ' skipped: unable to open port')
+          continue
+        }
 
       // linkIngPort.push(port)
 
