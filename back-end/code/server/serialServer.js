@@ -362,15 +362,8 @@ function applyFootFilter(arr, mode, footType) {
     denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
   }
   if (cfg.optimizeEnabled) {
-    if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
-      // 步道模式：缓存当前传感器数据，每次到达即触发合并 64×256 坏线补值
-      // 缺少的传感器用全0数组填充，不要求4个全到齐
-      gaitFootCache[footType] = arr
-      zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
-    } else {
-      // 静态模式：单个 64×64 做坏线补值
-      zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
-    }
+    // 步道模式和静态模式都对每个传感器单独做 64×64 坏线补值
+    zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
   }
   return arr
 }
