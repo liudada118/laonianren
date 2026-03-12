@@ -355,14 +355,23 @@ function zeroLineRepair64x64(arr, badThresh, goodThresh) {
  * @param {number[]} arr - 4096 长度一维数组
  * @param {string} mode - 'standing' 或 'gait'
  */
-function applyFootFilter(arr, mode) {
+function applyFootFilter(arr, mode, footType) {
   const cfg = footFilterConfig[mode]
   if (!cfg) return arr
   if (cfg.filterEnabled) {
     denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
   }
   if (cfg.optimizeEnabled) {
-    zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+    if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
+      // 步道模式：缓存当前传感器数据，待 4 个都到齐后合并 64×256 做坏线补值
+      gaitFootCache[footType] = arr
+      if (gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4) {
+        zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
+      }
+    } else {
+      // 静态模式：单个 64×64 做坏线补值
+      zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+    }
   }
   return arr
 }
@@ -604,6 +613,94 @@ let footFilterConfig = {
     optimizeBad: 40,
     optimizeGood: 100,
   },
+}
+
+// ─── 步道传感器缓存（用于合并 64×256 坏线补值） ───
+const gaitFootCache = { foot1: null, foot2: null, foot3: null, foot4: null }
+
+/**
+ * 将 4 个 64×64 传感器合并为 64×256，做坏线补值，再拆回 4 个 64×64
+ */
+function zeroLineRepairMerged(badThresh, goodThresh) {
+  const f1 = gaitFootCache.foot1
+  const f2 = gaitFootCache.foot2
+  const f3 = gaitFootCache.foot3
+  const f4 = gaitFootCache.foot4
+  if (!f1 || !f2 || !f3 || !f4) return
+  
+  const ROWS = 64, COLS = 256
+  // 合并为 64×256 一维数组（foot1..foot4 按列拼接）
+  const merged = new Array(ROWS * COLS)
+  const parts = [f1, f2, f3, f4]
+  for (let p = 0; p < 4; p++) {
+    for (let r = 0; r < 64; r++) {
+      for (let c = 0; c < 64; c++) {
+        merged[r * COLS + p * 64 + c] = parts[p][r * 64 + c]
+      }
+    }
+  }
+  
+  // 计算每行和每列的总和
+  const rowSums = new Float32Array(ROWS)
+  const colSums = new Float32Array(COLS)
+  for (let r = 0; r < ROWS; r++) {
+    let total = 0
+    for (let c = 0; c < COLS; c++) total += merged[r * COLS + c]
+    rowSums[r] = total
+  }
+  for (let c = 0; c < COLS; c++) {
+    let total = 0
+    for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
+    colSums[c] = total
+  }
+  
+  // 修复坏行（单行 + 连续两行）
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (rowSums[r] >= badThresh) continue
+    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
+      }
+    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
+               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        const vPrev = merged[(r - 1) * COLS + c]
+        const vNext = merged[(r + 2) * COLS + c]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      r++
+    }
+  }
+  
+  // 修复坏列（单列 + 连续两列）
+  for (let c = 1; c < COLS - 1; c++) {
+    if (colSums[c] >= badThresh) continue
+    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
+      }
+    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        const vPrev = merged[r * COLS + (c - 1)]
+        const vNext = merged[r * COLS + (c + 2)]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      c++
+    }
+  }
+  
+  // 拆回 4 个 64×64，写回缓存
+  for (let p = 0; p < 4; p++) {
+    const target = parts[p]
+    for (let r = 0; r < 64; r++) {
+      for (let c = 0; c < 64; c++) {
+        target[r * 64 + c] = merged[r * COLS + p * 64 + c]
+      }
+    }
+  }
 }
 
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
@@ -3738,9 +3835,18 @@ async function connectPort() {
           // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
           const flippedArr = flipFoot64x64Vertical(pointArr)
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
-          const filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
+          // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
+          let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
+          if (!filterMode) {
+            // 兜底：根据 dataItem.type 推断
+            if (['foot1','foot2','foot3','foot4'].includes(dataItem.type)) {
+              filterMode = 'gait'
+            } else if (dataItem.type === 'foot') {
+              filterMode = 'standing'
+            }
+          }
           if (filterMode) {
-            applyFootFilter(flippedArr, filterMode)
+            applyFootFilter(flippedArr, filterMode, dataItem.type)
           }
           dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
