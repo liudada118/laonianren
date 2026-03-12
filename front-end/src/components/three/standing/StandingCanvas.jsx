@@ -93,13 +93,13 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     const buf = createBuffers();
     let { positions, colors, scales, ndata, bigArr, bigArrg, smoothBig } = buf;
 
-    // 初始化位置
+    // 初始化位置（逆时针旋转 90 度：原 (ix,iy) → 新 X=(AY-1-iy), 新 Z=ix）
     let idx3 = 0, idx1 = 0;
     for (let ix = 0; ix < AX; ix++) {
       for (let iy = 0; iy < AY; iy++) {
-        positions[idx3]     = ix * SEP - (AX * SEP) / 2 + ix * 20;
+        positions[idx3]     = (AY - 1 - iy) * SEP - (AY * SEP) / 2;
         positions[idx3 + 1] = 0;
-        positions[idx3 + 2] = iy * SEP - (AY * SEP) / 2;
+        positions[idx3 + 2] = ix * SEP - (AX * SEP) / 2;
         scales[idx1] = 1;
         colors[idx3] = 0; colors[idx3 + 1] = 0; colors[idx3 + 2] = 1;
         idx3 += 3; idx1++;
@@ -121,7 +121,9 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     });
 
     const particles = new THREE.Points(geometry, material);
-    particles.scale.set(0.0062, 0.0062, 0.0062);
+    // 缩小到 80%：0.0062 * 0.8 = 0.00496
+    const SCALE = 0.0062 * 0.8;
+    particles.scale.set(SCALE, SCALE, SCALE);
     particles.rotation.x = Math.PI / 3;
 
     const group = new THREE.Group();
@@ -202,9 +204,10 @@ const StandingCanvas = React.forwardRef((props, refs) => {
           const val = bigArrg[l] * 10;
           smoothBig[l] += (val - smoothBig[l] + 0.5) / params.initValue;
 
-          positions[k]     = ix * SEP - (AX * SEP) / 2;
+          // 逆时针旋转 90 度：原 (ix,iy) → 新 X=(AY-1-iy), 新 Z=ix
+          positions[k]     = (AY - 1 - iy) * SEP - (AY * SEP) / 2;
           positions[k + 1] = smoothBig[l] * params.heightScale;
-          positions[k + 2] = iy * SEP - (AY * SEP) / 2;
+          positions[k + 2] = ix * SEP - (AX * SEP) / 2;
 
           let rgb;
           if (hasSelection) {

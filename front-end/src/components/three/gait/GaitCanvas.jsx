@@ -59,15 +59,15 @@ export default function GaitCanvas({
     const colors    = new Float32Array(TOTAL * 3);
     const scales    = new Float32Array(TOTAL);
 
-    // 初始化位置
+    // 初始化位置（逆时针旋转 90 度：原 (ix,iy) → 新 X=(AY-1-iy), 新 Z=ix）
     const padWidth = AX * SEP;
     const padDepth = AY * SEP;
     let i3 = 0, i1 = 0;
     for (let ix = 0; ix < AX; ix++) {
       for (let iy = 0; iy < AY; iy++) {
-        positions[i3]     = ix * SEP - padWidth / 2;
+        positions[i3]     = (AY - 1 - iy) * SEP - padDepth / 2;
         positions[i3 + 1] = 0;
-        positions[i3 + 2] = iy * SEP - padDepth / 2;
+        positions[i3 + 2] = ix * SEP - padWidth / 2;
         scales[i1] = 1;
         colors[i3] = 0; colors[i3 + 1] = 0; colors[i3 + 2] = 1;
         i3 += 3; i1++;
@@ -89,7 +89,9 @@ export default function GaitCanvas({
     });
 
     const particles = new THREE.Points(geometry, material);
-    particles.scale.set(0.0062, 0.0062, 0.0062);
+    // 放大 2 倍：0.0062 * 2 = 0.0124
+    const SCALE = 0.0062 * 2;
+    particles.scale.set(SCALE, SCALE, SCALE);
     particles.rotation.x = Math.PI / 3;
 
     const group = new THREE.Group();
@@ -186,9 +188,10 @@ export default function GaitCanvas({
           const val = bigArrg[l] * 10;
           smoothBig[l] += (val - smoothBig[l] + 0.5) / params.initValue;
 
-          positions[k]     = ix * SEP - padWidth / 2;
+          // 逆时针旋转 90 度：原 (ix,iy) → 新 X=(AY-1-iy), 新 Z=ix
+          positions[k]     = (AY - 1 - iy) * SEP - padDepth / 2;
           positions[k + 1] = smoothBig[l] * params.heightScale;
-          positions[k + 2] = iy * SEP - padDepth / 2;
+          positions[k + 2] = ix * SEP - padWidth / 2;
 
           const rgb = jet(0, params.colorRange, smoothBig[l]);
           colors[k]     = rgb[0] / 255;
