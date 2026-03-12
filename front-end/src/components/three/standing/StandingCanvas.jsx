@@ -125,9 +125,15 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     container = document.getElementById('standing-canvas');
     if (!container) return;
 
+    // 确保容器有实际尺寸，fallback 到父容器或窗口尺寸
+    let w = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth;
+    let h = container.clientHeight || container.parentElement?.clientHeight || window.innerHeight;
+    if (w < 10) w = window.innerWidth * 0.7;
+    if (h < 10) h = window.innerHeight * 0.8;
+
     camera = new THREE.PerspectiveCamera(
       40,
-      container.clientWidth / container.clientHeight,
+      w / h,
       1,
       150000
     );
@@ -162,12 +168,14 @@ const StandingCanvas = React.forwardRef((props, refs) => {
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setSize(w, h);
     renderer.outputEncoding = THREE.sRGBEncoding;
 
-    if (container.childNodes.length === 0) {
-      container.appendChild(renderer.domElement);
+    // 清空旧的子节点后再挂载
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
     }
+    container.appendChild(renderer.domElement);
 
     renderer.setClearColor(0x000000);
 
@@ -319,8 +327,12 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   function onWindowResize() {
     const container = document.getElementById('standing-canvas');
     if (!container || !renderer || !camera) return;
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    camera.aspect = container.clientWidth / container.clientHeight;
+    let w = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth;
+    let h = container.clientHeight || container.parentElement?.clientHeight || window.innerHeight;
+    if (w < 10) w = window.innerWidth * 0.7;
+    if (h < 10) h = window.innerHeight * 0.8;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
 
@@ -556,8 +568,8 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }, []);
 
   return (
-    <div>
-      <div id="standing-canvas" style={{ width: '100%', height: '100%' }}></div>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <div id="standing-canvas" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
     </div>
   );
 });
