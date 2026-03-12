@@ -798,7 +798,7 @@ export default function GaitAssessment() {
   const handleExportCsv = async () => {
     setCsvExporting(true);
     try {
-      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: 'gait' });
+      const resp = await backendBridge.exportCsv({ assessmentId: assessmentIdRef.current, sampleType: '5' });
       if (resp?.data?.fileName) {
         const url = backendBridge.getCsvDownloadUrl(resp.data.fileName);
         const a = document.createElement('a');
