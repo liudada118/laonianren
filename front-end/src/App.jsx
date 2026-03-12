@@ -9,6 +9,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import AssessmentHistory from './pages/AssessmentHistory';
 import HistoryReportView from './pages/HistoryReportView';
+import HistoryComprehensiveView from './pages/HistoryComprehensiveView';
 import NotFound from './pages/NotFound';
 
 // Assessment Pages
@@ -31,6 +32,7 @@ function App() {
             <Route path="/assessment/gait" element={<GaitAssessment />} />
             <Route path="/history" element={<AssessmentHistory />} />
             <Route path="/history/report" element={<HistoryReportView />} />
+            <Route path="/history/comprehensive" element={<HistoryComprehensiveView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </ToastProvider>

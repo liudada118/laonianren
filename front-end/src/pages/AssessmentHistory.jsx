@@ -310,13 +310,26 @@ export default function AssessmentHistory() {
                             );
                           })}
                         </div>
-                        {/* 一键导出所有已完成报告 */}
+                        {/* 一键操作区 */}
                         {getCompletedCount(item.assessments) > 0 && (
-                          <div className="mt-3 flex items-center gap-3">
+                          <div className="mt-3 flex items-center gap-3 flex-wrap">
+                            {/* 综合报告按钮 */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // 依次打开所有已完成的报告页面（用户可在每个报告页单独导出 PDF）
+                                navigate(`/history/comprehensive?id=${item.id}`);
+                              }}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                              style={{ color: 'white', background: 'linear-gradient(135deg, #0066CC, #0891B2)', border: 'none', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,102,204,0.25)' }}>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              生成综合报告
+                            </button>
+                            {/* 打开所有报告按钮 */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 const completedTypes = ASSESSMENT_KEYS.filter(k => item.assessments?.[k]?.completed);
                                 completedTypes.forEach((type, idx) => {
                                   setTimeout(() => {
@@ -329,7 +342,7 @@ export default function AssessmentHistory() {
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
-                              一键打开所有报告（{getCompletedCount(item.assessments)}份）
+                              打开单项报告（{getCompletedCount(item.assessments)}份）
                             </button>
                           </div>
                         )}
