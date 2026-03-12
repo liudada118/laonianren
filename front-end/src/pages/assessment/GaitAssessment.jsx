@@ -436,7 +436,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-evolution">
           <div className="zeiss-section-title">3. 完整足印与平均步态</div>
           <div className="zeiss-card p-4 mb-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>足底压力演变（落地 → 离地）</h4>
+            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>瞬时足底压力演变（落地 → 离地）</h4>
             <div className="overflow-x-auto">
               {pressureEvolutionData ? (
                 <PressureEvolutionChart evolutionData={pressureEvolutionData} />

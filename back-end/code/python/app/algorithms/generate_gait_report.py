@@ -275,8 +275,8 @@ def load_and_analyze_wrapper(d1, d2, d3, d4, t1, t2, t3, t4):
     # 2. 基于干净数据计算左右曲线和中心
     print("正在计算动态中心与压力曲线...")
     center_l, center_r = analyze_foot_distribution(total_matrix)
-    
-    left_curve = [] 
+
+    left_curve = []
     right_curve = []
     
     for matrix in total_matrix:
@@ -743,17 +743,11 @@ def adc_to_force(adc_values):
 
 def get_largest_connected_region_cv(matrix):
     # matrix: 输入压力矩阵
-    # 返回: 矩阵中最大连通域的所有点坐标坐标集
+    # 返回: 矩阵中所有非零点的坐标集（保留完整足印，不再只取最大连通域）
 
     binary = (matrix > 0).astype(np.uint8)
-    # num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    num_labels, labels, stats, _ = unite_broken_arch_components(binary, dist_threshold=3.0)
-
-    if num_labels <= 1: return [] 
-
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    max_label = 1 + np.argmax(areas)
-    coords = np.column_stack(np.where(labels == max_label))
+    coords = np.column_stack(np.where(binary > 0))
+    if len(coords) == 0: return []
     return coords
 
 
@@ -1810,20 +1804,26 @@ def build_footprint_heatmap_data(left_regions, right_regions, total_matrix, left
         ys, xs = region[:, 0], region[:, 1]
         heatmap[ys, xs] += pressure_sum[ys, xs]
 
+    # 水平镜像：修正传感器坐标系与实际左右脚方向的映射
+    heatmap = np.fliplr(heatmap)
+
     # 裁剪 + 插值平滑（渲染用smooth，tooltip用raw）
     UPSCALE = 3
     raw, smooth, crop_r, crop_c, orig_H, orig_W = _smooth_and_crop(heatmap, upscale=UPSCALE, sigma=0.8, pad=3)
 
-    # 提取 FPA 线数据（坐标转换到smooth坐标系）
+    # 提取 FPA 线数据（坐标转换到镜像+裁剪+缩放后的坐标系）
     fpa_lines = []
     for idx in left_peaks:
         if idx >= len(total_matrix): continue
         frame = np.array(total_matrix[idx])
         angle, heel, fore = analyze_fpa_geometry(frame, False, center_l, center_r)
         if angle is not None and heel is not None and fore is not None:
+            # 镜像列坐标：col -> (W-1-col)，然后减去裁剪偏移，再乘以缩放
+            heel_col_m = (W - 1 - float(heel[0]))
+            fore_col_m = (W - 1 - float(fore[0]))
             fpa_lines.append({
-                'heel': [round((float(heel[0]) - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
-                'fore': [round((float(fore[0]) - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
+                'heel': [round((heel_col_m - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
+                'fore': [round((fore_col_m - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
                 'angle': round(float(angle), 1),
                 'isRight': False,
             })
@@ -1832,9 +1832,11 @@ def build_footprint_heatmap_data(left_regions, right_regions, total_matrix, left
         frame = np.array(total_matrix[idx])
         angle, heel, fore = analyze_fpa_geometry(frame, True, center_l, center_r)
         if angle is not None and heel is not None and fore is not None:
+            heel_col_m = (W - 1 - float(heel[0]))
+            fore_col_m = (W - 1 - float(fore[0]))
             fpa_lines.append({
-                'heel': [round((float(heel[0]) - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
-                'fore': [round((float(fore[0]) - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
+                'heel': [round((heel_col_m - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
+                'fore': [round((fore_col_m - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
                 'angle': round(float(angle), 1),
                 'isRight': True,
             })
@@ -2049,10 +2051,15 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
         loads, frames, start_time_base = best_step_data
         loads = np.array(loads)
         frames = np.array(frames)
+        peak_idx = np.argmax(loads)
 
-        # 裁剪 ROI
-        accumulated = np.sum(frames, axis=0)
-        valid_indices = np.where(accumulated > 0)
+        # 裁剪 ROI — 仅基于峰值帧确定区域，避免步宽过大时裁剪范围过宽
+        peak_frame = frames[peak_idx]
+        valid_indices = np.where(peak_frame > 0)
+        if len(valid_indices[0]) == 0:
+            # 峰值帧无数据，退而用全部帧累积
+            accumulated = np.sum(frames, axis=0)
+            valid_indices = np.where(accumulated > 0)
         if len(valid_indices[0]) == 0:
             rmin, rmax, cmin, cmax = 0, MAT_H, 0, MAT_W
         else:
@@ -2154,10 +2161,13 @@ def plot_all_largest_regions_heatmap(left_regions, right_regions, total_matrix, 
         ys, xs = region[:, 0], region[:, 1]
         heatmap[ys, xs] += pressure_sum[ys, xs]
 
-    for region in right_regions: 
+    for region in right_regions:
         if region is None or len(region) == 0: continue
         ys, xs = region[:, 0], region[:, 1]
         heatmap[ys, xs] += pressure_sum[ys, xs]
+
+    # 水平镜像：修正传感器坐标系与实际左右脚方向的映射
+    heatmap = np.fliplr(heatmap)
 
     # === [关键修改] 调用平滑函数 ===
     # 放大10倍，sigma自动计算(约6.0)
@@ -2184,53 +2194,43 @@ def plot_all_largest_regions_heatmap(left_regions, right_regions, total_matrix, 
     def draw_fpa_overlay(frame_idx, is_right):
         """内部辅助函数：在当前ax上绘制单帧的FPA线"""
         if frame_idx >= len(total_matrix): return
-        
+
         # 提取对应峰值时刻的原始帧进行几何分析
         frame = np.array(total_matrix[frame_idx])
         angle, heel, fore = analyze_fpa_geometry(frame, is_right, center_l, center_r)
-        
+
         if angle is not None and heel is not None and fore is not None:
-            hx, hy = heel
-            fx, fy = fore
-            
-            # 1. [核心修改] 延长辅助线
-            # 为了让线看起来贯穿整个脚，我们可以稍微向两端延长一点点，视觉效果更好
-            # 简单的向量延长逻辑
+            # 镜像列坐标（与 heatmap 的 fliplr 一致）
+            hx, hy = (W - 1 - heel[0]), heel[1]
+            fx, fy = (W - 1 - fore[0]), fore[1]
+
             vec_x, vec_y = fx - hx, fy - hy
-            ext_ratio = 0.3 # 向两端延长 15%
-            
-            # plot_hx = hx - vec_x * ext_ratio
-            # plot_hy = hy - vec_y * ext_ratio
+            ext_ratio = 0.3
+
             plot_fx = fx + vec_x * ext_ratio
             plot_fy = fy + vec_y * ext_ratio
             plot_hx = hx
             plot_hy = hy
-            # plot_fx = fx
-            # plot_fy = fy
-            
+
             # 画实线 (轴线)
-            # ax.plot([plot_hx, plot_fx], [plot_hy, plot_fy], color='black', linewidth=1.0, alpha=0.9, zorder=10)
             ax.plot([plot_hx, plot_fx], [plot_hy, plot_fy], color='white', linewidth=1.0, alpha=0.9, zorder=10)
             ax.plot([plot_hx, plot_fx], [plot_hy, plot_fy], color='black', linewidth=0.6, alpha=0.8, zorder=11)
-            
+
             # 画虚线 (垂直参考线) - 从足跟中心向上画
             foot_len = math.sqrt(vec_x**2 + vec_y**2)
             ax.plot([hx, hx], [hy, hy - foot_len * 1.2], color='black', linestyle='--', linewidth=1.0, alpha=0.5, zorder=9)
-            
-            # 画关键点 (只画计算用的原始点，不画延长点)
-            # ax.scatter([hx, fx], [hy, fy], color='black', s=20, zorder=21)
-            
-            # 文字标签 (保持之前的样式)
+
+            # 文字标签
             offset_x = 5 if is_right else -5
             ha = 'left' if is_right else 'right'
             text_str = f"{angle:.1f}°"
             is_out = (angle > 0)
             text_color = 'yellow' if is_out else 'cyan'
-            
-            ax.text(fx + offset_x, fy, text_str, color=text_color, fontsize=9, fontweight='bold', 
+
+            ax.text(fx + offset_x, fy, text_str, color=text_color, fontsize=9, fontweight='bold',
                     ha=ha, va='bottom', zorder=25,
                     bbox=dict(facecolor='#303030', alpha=0.7, edgecolor='none', pad=1.5))
-    
+
     # 遍历左脚峰值
     for idx in left_peaks:
         draw_fpa_overlay(idx, is_right=False)
@@ -2536,22 +2536,26 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
         loads = np.array(loads)
         frames = np.array(frames)
         
-        # --- 裁剪逻辑 ---
-        accumulated_step = np.sum(frames, axis=0)
-        valid_indices = np.where(accumulated_step > 0)
-        
+        # --- 裁剪逻辑 — 仅基于峰值帧确定区域，避免步宽过大时裁剪范围过宽 ---
+        peak_idx = np.argmax(loads)
+        peak_frame = frames[peak_idx]
+        valid_indices = np.where(peak_frame > 0)
+        if len(valid_indices[0]) == 0:
+            accumulated_step = np.sum(frames, axis=0)
+            valid_indices = np.where(accumulated_step > 0)
+
         if len(valid_indices[0]) == 0:
             rmin, rmax, cmin, cmax = 0, MAT_H, 0, MAT_W
         else:
             min_r, max_r = np.min(valid_indices[0]), np.max(valid_indices[0]) + 1
             min_c, max_c = np.min(valid_indices[1]), np.max(valid_indices[1]) + 1
-            
+
             pad = 2
             rmin = max(0, min_r - pad)
             rmax = min(MAT_H, max_r + pad)
             cmin = max(0, min_c - pad)
             cmax = min(MAT_W, max_c + pad)
-            
+
             if (rmax - rmin) < 5: rmax = min(MAT_H, rmin + 5)
             if (cmax - cmin) < 5: cmax = min(MAT_W, cmin + 5)
 
@@ -2716,7 +2720,7 @@ def analyze_gait_and_build_report(d1, d2, d3, d4, t1, t2, t3, t4, output_pdf, wo
 
     # 初步计算中心和曲线 (基于原始数据)
     raw_center_l, raw_center_r = analyze_foot_distribution(raw_total_matrix)
-    raw_left_curve = [] 
+    raw_left_curve = []
     raw_right_curve = []
     for matrix in raw_total_matrix:
         frame = np.array(matrix)
@@ -2749,8 +2753,8 @@ def analyze_gait_and_build_report(d1, d2, d3, d4, t1, t2, t3, t4, output_pdf, wo
     # 重新计算中心和曲线 (基于裁剪后的数据)
     print("基于裁剪后的动态数据重新计算中心与曲线...")
     center_l, center_r = analyze_foot_distribution(total_matrix)
-    
-    left_curve = [] 
+
+    left_curve = []
     right_curve = []
     
     for matrix in total_matrix:
@@ -3290,18 +3294,23 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     right_on = lr_on_off["right"]["foot_on"]
     right_off = lr_on_off["right"]["toe_off"]
 
-    # 8. 足偏角
-    fpa_l, fpa_r = calculate_average_fpa_from_peaks(total_matrix, lx, rx, center_l, center_r)
-    # 每步 FPA
+    # 8. 足偏角 — 使用raw数据确保与足印热力图脚印数量一致
+    # raw_lx 检测的是物理右脚, raw_rx 检测的是物理左脚（标签互换）
+    # 角度值本身正确，只需交换左右归属
+    fpa_raw_l, fpa_raw_r = calculate_average_fpa_from_peaks(raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r)
+    fpa_l = fpa_raw_r   # raw_rx 算的是物理左脚
+    fpa_r = fpa_raw_l   # raw_lx 算的是物理右脚
+    # 每步 FPA — raw_rx 是物理左脚
     fpa_per_step_left = []
-    for idx in lx:
-        if idx < len(total_matrix):
-            angle = calculate_single_fpa(np.array(total_matrix[idx]), False, center_l, center_r)
+    for idx in raw_rx:
+        if idx < len(raw_total_matrix):
+            angle = calculate_single_fpa(np.array(raw_total_matrix[idx]), True, raw_center_l, raw_center_r)
             fpa_per_step_left.append(round(float(angle), 1) if not np.isnan(angle) else 0)
+    # 每步 FPA — raw_lx 是物理右脚
     fpa_per_step_right = []
-    for idx in rx:
-        if idx < len(total_matrix):
-            angle = calculate_single_fpa(np.array(total_matrix[idx]), True, center_l, center_r)
+    for idx in raw_lx:
+        if idx < len(raw_total_matrix):
+            angle = calculate_single_fpa(np.array(raw_total_matrix[idx]), False, raw_center_l, raw_center_r)
             fpa_per_step_right.append(round(float(angle), 1) if not np.isnan(angle) else 0)
 
     # 9. 速度
