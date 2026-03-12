@@ -1653,41 +1653,49 @@ app.post('/setActiveMode', (req, res) => {
 // 解决左右手共用串口、数据交替到达导致某只手基线偶尔缺失的时序问题
 app.post('/tareGrip', async (req, res) => {
   try {
-    const MAX_WAIT = 2000   // 最多等待 2 秒
+    const MAX_WAIT = 5000   // 最多等待 5 秒（HR 的 Packet1 经常丢失，需要更长时间等待完整帧）
     const INTERVAL = 100    // 每 100ms 检查一次
     const startTime = Date.now()
 
     // 尝试从 gloveLatestData 和 dataMap 中读取 HL/HR 基线
     // 只使用最近 FRESHNESS_MS 内的新鲜数据，避免用旧数据作为基线
-    const FRESHNESS_MS = 2000
+    const FRESHNESS_MS = 5000  // 数据新鲜度窗口 5 秒（配合等待时间）
     function tryRecordBaseline() {
       let taredCount = 0
       const now = Date.now()
       // 优先从 gloveLatestData 缓存读取（左右手独立存储，不会被覆盖）
-      if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr && gloveLatestData.HL.arr.length
+      // 只接受长度为 256 的完整帧数据作为基线（128 字节表示 Packet1 缓存丢失，数据不完整）
+      const EXPECTED_ARR_LEN = 256
+      if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr
+          && gloveLatestData.HL.arr.length === EXPECTED_ARR_LEN
           && (now - gloveLatestData.HL.stamp) < FRESHNESS_MS) {
         gripBaseline.HL = [...gloveLatestData.HL.arr]
         taredCount++
         console.log('[tareGrip] HL 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HL.arr.length, gloveLatestData.HL.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HL.arr.length, now - gloveLatestData.HL.stamp)
+      } else if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr) {
+        console.log('[tareGrip] HL 缓存数据不合格: 长度=%d(需要%d), 年龄=%dms(需要<%d)', gloveLatestData.HL.arr.length, EXPECTED_ARR_LEN, now - gloveLatestData.HL.stamp, FRESHNESS_MS)
       }
-      if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr && gloveLatestData.HR.arr.length
+      if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr
+          && gloveLatestData.HR.arr.length === EXPECTED_ARR_LEN
           && (now - gloveLatestData.HR.stamp) < FRESHNESS_MS) {
         gripBaseline.HR = [...gloveLatestData.HR.arr]
         taredCount++
         console.log('[tareGrip] HR 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HR.arr.length, gloveLatestData.HR.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HR.arr.length, now - gloveLatestData.HR.stamp)
+      } else if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr) {
+        console.log('[tareGrip] HR 缓存数据不合格: 长度=%d(需要%d), 年龄=%dms(需要<%d)', gloveLatestData.HR.arr.length, EXPECTED_ARR_LEN, now - gloveLatestData.HR.stamp, FRESHNESS_MS)
       }
-      // 回退到 dataMap（兼容旧逻辑，同样检查时间戳新鲜度）
+      // 回退到 dataMap（兼容旧逻辑，同样检查时间戳新鲜度和数据长度）
       if (!gripBaseline.HL || !gripBaseline.HR) {
         Object.keys(dataMap).forEach((key) => {
           const item = dataMap[key]
           if (!item || !item.type || !item.stamp) return
           if ((now - item.stamp) >= FRESHNESS_MS) return  // 跳过过期数据
-          if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length) {
+          if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length === EXPECTED_ARR_LEN) {
             gripBaseline.HL = [...item.arr]
             taredCount++
             console.log('[tareGrip] HL 基线已记录(从dataMap), 长度=%d', item.arr.length)
           }
-          if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length) {
+          if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length === EXPECTED_ARR_LEN) {
             gripBaseline.HR = [...item.arr]
             taredCount++
             console.log('[tareGrip] HR 基线已记录(从dataMap), 长度=%d', item.arr.length)
@@ -2960,6 +2968,8 @@ function parseData(parserArr, objs) {
 
   // 手套数据统一从 gloveLatestData 获取（保证 type 和 arr 一致性）
   // gloveLatestData 在 Packet2 合并时同步写入，type/arr/stamp 始终匹配
+  if (!global._lastGloveDebugTs) global._lastGloveDebugTs = 0
+  const _shouldDebugLog = (Date.now() - global._lastGloveDebugTs) > 2000
   ;['HL', 'HR'].forEach((gloveType) => {
     const cached = gloveLatestData[gloveType]
     if (!cached) {
@@ -2974,10 +2984,21 @@ function parseData(parserArr, objs) {
       let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
       if (gripBaseline[gloveType] && arr.length) {
         const base = gripBaseline[gloveType]
+        if (_shouldDebugLog) {
+          const avgBefore = arr.reduce((a, b) => a + b, 0) / arr.length
+          const avgBase = base.reduce((a, b) => a + b, 0) / base.length
+          console.log('[parseData] %s 减基线: arrLen=%d, baseLen=%d, avgBefore=%.1f, avgBase=%.1f', gloveType, arr.length, base.length, avgBefore, avgBase)
+        }
         arr = arr.map((v, i) => {
           const diff = v - (base[i] || 0)
           return diff > 0 ? diff : 0
         })
+        if (_shouldDebugLog) {
+          const avgAfter = arr.reduce((a, b) => a + b, 0) / arr.length
+          console.log('[parseData] %s 减基线后: avgAfter=%.1f', gloveType, avgAfter)
+        }
+      } else if (_shouldDebugLog && arr.length) {
+        console.log('[parseData] %s 无基线, 直接推送原始数据, avg=%.1f', gloveType, arr.reduce((a, b) => a + b, 0) / arr.length)
       }
       json[gloveType].status = 'online'
       json[gloveType].arr = arr
@@ -2988,6 +3009,7 @@ function parseData(parserArr, objs) {
       json[gloveType].status = 'offline'
     }
   })
+  if (_shouldDebugLog) global._lastGloveDebugTs = Date.now()
 
   if (json.foot) {
     if (!json.foot4) {
@@ -3309,20 +3331,24 @@ async function connectPort() {
 
           // 与缓存的 Packet1 合并为完整 256 字节 sensor 数据
           const cached = glovePacket1Cache[sensorType]
+          let fullFrame = false
           if (cached) {
             dataItem.arr = [...cached.data, ...sensorData]
             delete glovePacket1Cache[sensorType]
+            fullFrame = true  // 256 字节完整帧
           } else {
-            dataItem.arr = sensorData
+            dataItem.arr = sensorData  // 128 字节不完整帧（Packet1 缓存丢失）
+            console.log('[glove] Packet1缓存丢失, sensorType=%d, 只有%d字节', sensorType, sensorData.length)
           }
 
           // 解析并校验四元数
           const rawQuat = bytes4ToInt10(imuRaw)
           dataItem.rotate = validateQuaternion(rawQuat) || rawQuat
 
-          // 将完整帧数据同步到手套缓存（按 HL/HR 分别存储，解决共用串口覆盖问题）
+          // 只有完整帧（256字节）才写入 gloveLatestData 缓存
+          // 避免不完整数据污染缓存，导致 tareGrip 记录错误基线
           const gloveType = constantObj.type[sensorType]
-          if (gloveType) {
+          if (gloveType && fullFrame) {
             gloveLatestData[gloveType] = {
               type: gloveType,
               arr: [...dataItem.arr],

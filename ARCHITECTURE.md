@@ -7,6 +7,7 @@
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-03-12 19:00 | hand | 修复缺陷 | 彻底修复右手清零失效。根因确认：HR的Packet1经常丢失，导致gloveLatestData.HR.arr只有128字节（正常应为256），基线长度不匹配，后半部分数据未清零。修复：(1)只有完整帧(256字节)才写入gloveLatestData缓存；(2)tareGrip只接受长度为256的基线数据；(3)后端最大等待时间从2s增加到5s；(4)前端增加清零重试机制(最多3次)。修改文件：serialServer.js、GripAssessment.jsx。 |
 | 2026-03-12 18:00 | hand | 修复缺陷 | 彻底修复右手清零偶发失效。根因：左右手共用串口，Packet1(130字节)到达时覆盖dataItem.type但不更新dataItem.arr，导致type/arr不匹配，清零基线被错误应用到另一只手的数据。修复：(1)parseData中手套数据统一从gloveLatestData获取，不再使用dataMap[path]的arr；(2)Packet1处理时不再覆盖dataItem.type/stamp，仅缓存前半数据等待Packet2合并。修改文件：serialServer.js。 |
 | 2026-03-12 17:00 | hand | 性能优化 | 优化手部模型热力图渲染性能。(1)heatmap.js：预分配Float32Array缓冲区避免GC压力，预计算高斯核，blur pass从3次减为2次；(2)HandModel.jsx：按需渲染(dirty flag)替代60fps全速渲染，通过轮询HeatmapCanvas._version替代React setState驱动，pixelRatio上限2x；(3)GripAssessment.jsx：去掉setHeatmapVersion的setState调用，消除每帧React re-render。修改文件：heatmap.js、HandModel.jsx、GripAssessment.jsx。 |
 | 2026-03-12 16:00 | hand | 修复缺陷 | 修复第二次进入握力评估时清零失效。根因：clearGripBaseline未清除gloveLatestData缓存，导致第二次进入时用旧数据作为基线。修复：(1)clearGripBaseline同时清除gloveLatestData；(2)tareGrip增加时间戳新鲜度检查(2s)，拒绝过期数据；(3)异步重试机制等待新鲜数据到达。修改文件：serialServer.js。 |
