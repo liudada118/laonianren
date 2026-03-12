@@ -135,6 +135,41 @@ export default function GaitCanvas({
 
     if (onSceneReady) onSceneReady({ scene, camera, renderer });
 
+    /* ─── 坏线补值：检测并修复 64×256 矩阵中异常低值的行/列 ─── */
+    function zeroLine64x256(arr, rows, cols, rowThreshLow, rowThreshHigh) {
+      // 计算每行和每列的总和
+      const rowSums = new Float32Array(rows);
+      const colSums = new Float32Array(cols);
+      for (let r = 0; r < rows; r++) {
+        let total = 0;
+        for (let c = 0; c < cols; c++) total += arr[r * cols + c];
+        rowSums[r] = total;
+      }
+      for (let c = 0; c < cols; c++) {
+        let total = 0;
+        for (let r = 0; r < rows; r++) total += arr[r * cols + c];
+        colSums[c] = total;
+      }
+
+      // 修复坏行：前后邻居行总和 > threshHigh，当前行 < threshLow
+      for (let r = 1; r < rows - 1; r++) {
+        if (rowSums[r - 1] > rowThreshHigh && rowSums[r] < rowThreshLow && rowSums[r + 1] > rowThreshHigh) {
+          for (let c = 0; c < cols; c++) {
+            arr[r * cols + c] = (arr[(r - 1) * cols + c] + arr[(r + 1) * cols + c]) / 2;
+          }
+        }
+      }
+
+      // 修复坏列：前后邻居列总和 > threshHigh，当前列 < threshLow
+      for (let c = 1; c < cols - 1; c++) {
+        if (colSums[c - 1] > rowThreshHigh && colSums[c] < rowThreshLow && colSums[c + 1] > rowThreshHigh) {
+          for (let r = 0; r < rows; r++) {
+            arr[r * cols + c] = (arr[r * cols + (c - 1)] + arr[r * cols + (c + 1)]) / 2;
+          }
+        }
+      }
+    }
+
     /* ─── 合并 4 个传感器矩阵为 64×256 flat 数组 ─── */
     // 每个 64×64 传感器顺时针旋转 90 度后再拼接
     // 顺时针 90°：原 (row,col) → 新 (col, 63-row)
@@ -181,6 +216,12 @@ export default function GaitCanvas({
       particles.rotation.z = (tp.rotZ ?? 0) * deg;
 
       mergeSensorData();
+
+      // 坏线补值：检测并修复异常低值的行/列（用相邻行/列均值填充）
+      // 行方向：64 行，每行 256 个值；列方向：256 列，每列 64 个值
+      // 行阈值：low=300, high=800（行总和范围较大，因为每行有 256 个像素）
+      // 列阈值：low=80, high=200（列总和较小，因为每列只有 64 个像素）
+      zeroLine64x256(ndata, NX, NY, 300, 800);
 
       // 过滤
       for (let i = 0; i < ndata.length; i++) {
