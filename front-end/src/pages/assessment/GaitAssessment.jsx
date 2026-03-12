@@ -688,16 +688,16 @@ export default function GaitAssessment() {
   const sceneRef = useRef(null);
 
   // 粒子系统共用参数
-  const [particleParams, setParticleParams] = useState(() => loadParams());
+  const [particleParams, setParticleParams] = useState(() => loadParams('gait'));
   const handleParamChange = useCallback((key, value) => {
     setParticleParams(prev => {
       const next = { ...prev, [key]: value };
-      saveParams(next);
+      saveParams(next, 'gait');
       return next;
     });
   }, []);
   const handleParamReset = useCallback(() => {
-    const defaults = resetParams();
+    const defaults = resetParams('gait');
     setParticleParams(defaults);
   }, []);
 

@@ -180,16 +180,16 @@ export default function StandingAssessment() {
   }, [optimizeEnabled]);
 
   // 粒子系统共用参数
-  const [particleParams, setParticleParams] = useState(() => loadParams());
+  const [particleParams, setParticleParams] = useState(() => loadParams('standing'));
   const handleParamChange = useCallback((key, value) => {
     setParticleParams(prev => {
       const next = { ...prev, [key]: value };
-      saveParams(next);
+      saveParams(next, 'standing');
       return next;
     });
   }, []);
   const handleParamReset = useCallback(() => {
-    const defaults = resetParams();
+    const defaults = resetParams('standing');
     setParticleParams(defaults);
   }, []);
 

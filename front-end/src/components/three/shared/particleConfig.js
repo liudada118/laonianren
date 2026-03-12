@@ -2,16 +2,36 @@
  * particleConfig - 粒子系统参数配置
  *
  * 数据处理参数（gaussSigma, filterThreshold, initValue, colorRange, heightScale）：
- *   步道和静态共用，存储在 localStorage 'particleParams'
+ *   静态和步道各自独立，分别存储在 'particleParams_standing' / 'particleParams_gait'
  *
  * 空间变换参数（posX, posY, posZ, rotX, rotY, rotZ, particleSize, scale）：
  *   静态和步道各自独立，分别存储在 'particleTransform_standing' / 'particleTransform_gait'
  */
 
-const SHARED_KEY = 'particleParams';
+const PARAMS_KEY_PREFIX = 'particleParams_';
 const TRANSFORM_KEY_PREFIX = 'particleTransform_';
 
-/* ─── 共用数据处理参数 ─── */
+// 兼容旧版共用 key（迁移用）
+const LEGACY_SHARED_KEY = 'particleParams';
+
+/* ─── 数据处理参数默认值（按场景独立） ─── */
+const STANDING_PARAMS_DEFAULTS = {
+  gaussSigma: 2.5,
+  filterThreshold: 2,
+  initValue: 2.5,
+  colorRange: 700,
+  heightScale: 2.6,
+};
+
+const GAIT_PARAMS_DEFAULTS = {
+  gaussSigma: 2.5,
+  filterThreshold: 2,
+  initValue: 2.5,
+  colorRange: 700,
+  heightScale: 2.6,
+};
+
+// 通用兜底默认值
 const SHARED_DEFAULTS = {
   gaussSigma: 2.5,
   filterThreshold: 2,
@@ -20,8 +40,15 @@ const SHARED_DEFAULTS = {
   heightScale: 2.6,
 };
 
+// 按场景获取数据处理参数默认值
+function getParamsDefaults(scene) {
+  if (scene === 'standing') return STANDING_PARAMS_DEFAULTS;
+  if (scene === 'gait') return GAIT_PARAMS_DEFAULTS;
+  return SHARED_DEFAULTS;
+}
+
 export const SHARED_RANGES = {
-  gaussSigma:      { min: 0.5, max: 10, step: 0.5, label: '高斯模糊', unit: 'σ' },
+  gaussSigma:      { min: 0.5, max: 10, step: 0.1, label: '高斯模糊', unit: 'σ' },
   filterThreshold: { min: 0,   max: 50, step: 1,   label: '过滤阈值', unit: '' },
   initValue:       { min: 1,   max: 20, step: 0.5,  label: '平滑系数', unit: '' },
   colorRange:      { min: 50,  max: 1000, step: 10, label: '颜色范围', unit: '' },
@@ -86,28 +113,39 @@ export const TRANSFORM_RANGES = {
 // 兼容旧代码的 PARAM_RANGES（合并）
 export const PARAM_RANGES = { ...SHARED_RANGES, ...TRANSFORM_RANGES };
 
-/* ─── 共用参数 load / save / reset ─── */
-export function loadParams() {
+/* ─── 数据处理参数 load / save / reset（按 scene 区分） ─── */
+export function loadParams(scene) {
+  const defaults = getParamsDefaults(scene);
+  if (scene) {
+    try {
+      const stored = localStorage.getItem(PARAMS_KEY_PREFIX + scene);
+      if (stored) return { ...defaults, ...JSON.parse(stored) };
+    } catch (e) { /* ignore */ }
+  }
+  // 兼容旧版：尝试从旧的共用 key 读取
   try {
-    const stored = localStorage.getItem(SHARED_KEY);
-    if (stored) return { ...SHARED_DEFAULTS, ...JSON.parse(stored) };
+    const legacy = localStorage.getItem(LEGACY_SHARED_KEY);
+    if (legacy) return { ...defaults, ...JSON.parse(legacy) };
   } catch (e) { /* ignore */ }
-  return { ...SHARED_DEFAULTS };
+  return { ...defaults };
 }
 
-export function saveParams(params) {
+export function saveParams(params, scene) {
+  if (!scene) return;
   try {
+    const defaults = getParamsDefaults(scene);
     const data = {};
-    for (const k of Object.keys(SHARED_DEFAULTS)) {
+    for (const k of Object.keys(defaults)) {
       if (params[k] !== undefined) data[k] = params[k];
     }
-    localStorage.setItem(SHARED_KEY, JSON.stringify(data));
+    localStorage.setItem(PARAMS_KEY_PREFIX + scene, JSON.stringify(data));
   } catch (e) { /* ignore */ }
 }
 
-export function resetParams() {
-  saveParams(SHARED_DEFAULTS);
-  return { ...SHARED_DEFAULTS };
+export function resetParams(scene) {
+  const defaults = getParamsDefaults(scene);
+  saveParams(defaults, scene);
+  return { ...defaults };
 }
 
 /* ─── 独立空间变换参数 load / save / reset（按 scene 区分） ─── */
