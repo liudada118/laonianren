@@ -357,7 +357,7 @@ function zeroLineRepair64x64(arr, badThresh, goodThresh) {
  */
 function applyFootFilter(arr, mode, footType) {
   const cfg = footFilterConfig[mode]
-  if (!cfg) return arr
+  if (!cfg) { console.log('[applyFootFilter] no cfg for mode:', mode); return arr }
   if (cfg.filterEnabled) {
     denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
   }
@@ -365,13 +365,18 @@ function applyFootFilter(arr, mode, footType) {
     if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
       // 步道模式：缓存当前传感器数据，待 4 个都到齐后合并 64×256 做坏线补值
       gaitFootCache[footType] = arr
-      if (gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4) {
+      const hasAll = !!(gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4)
+      console.log('[applyFootFilter] gait cache %s, hasAll=%s, bad=%d, good=%d', footType, hasAll, cfg.optimizeBad, cfg.optimizeGood)
+      if (hasAll) {
         zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
       }
     } else {
       // 静态模式：单个 64×64 做坏线补值
+      console.log('[applyFootFilter] standing optimize, bad=%d, good=%d', cfg.optimizeBad, cfg.optimizeGood)
       zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
     }
+  } else {
+    console.log('[applyFootFilter] optimize disabled for mode:', mode)
   }
   return arr
 }
@@ -652,6 +657,15 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     let total = 0
     for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
     colSums[c] = total
+  }
+  
+  // 调试：输出行/列总和统计
+  const badRows = [], badCols = []
+  for (let r = 0; r < ROWS; r++) if (rowSums[r] < badThresh) badRows.push(`r${r}:${rowSums[r].toFixed(0)}`)
+  for (let c = 0; c < COLS; c++) if (colSums[c] < badThresh) badCols.push(`c${c}:${colSums[c].toFixed(0)}`)
+  if (badRows.length || badCols.length) {
+    console.log('[zeroLineRepairMerged] badRows=%s, badCols=%s, badThresh=%d, goodThresh=%d', 
+      badRows.join(',') || 'none', badCols.join(',') || 'none', badThresh, goodThresh)
   }
   
   // 修复坏行（单行 + 连续两行）
