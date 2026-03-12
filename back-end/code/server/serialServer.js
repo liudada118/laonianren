@@ -362,8 +362,14 @@ function applyFootFilter(arr, mode, footType) {
     denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
   }
   if (cfg.optimizeEnabled) {
-    // 步道模式和静态模式都对每个传感器单独做 64×64 坏线补值
-    zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+    if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
+      // 步道模式：缓存当前传感器数据，每次到达即触发合并 64×256 坏线补值
+      gaitFootCache[footType] = arr
+      zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
+    } else {
+      // 静态模式：单个 64×64 做坏线补值
+      zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+    }
   }
   return arr
 }
@@ -623,7 +629,6 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   const ROWS = 64, COLS = 256
   // 合并为 64×256：每个 64×64 传感器先顺时针旋转 90 度（与前端一致），再按列拼接
   // 顺时针旋转 90°：newRow = col, newCol = 63 - row
-  // 缺少的传感器用全0填充
   const merged = new Array(ROWS * COLS).fill(0)
   const parts = [f1, f2, f3, f4]
   for (let p = 0; p < 4; p++) {
@@ -637,29 +642,32 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     }
   }
   
-  // 计算每行和每列的总和
+  // 确定有数据的传感器列范围（用于行总和计算，避免全0传感器拉低行总和）
+  const activeParts = []
+  if (gaitFootCache.foot1) activeParts.push(0)
+  if (gaitFootCache.foot2) activeParts.push(1)
+  if (gaitFootCache.foot3) activeParts.push(2)
+  if (gaitFootCache.foot4) activeParts.push(3)
+  
+  // 计算每行总和：只累加有数据的传感器列范围
   const rowSums = new Float32Array(ROWS)
-  const colSums = new Float32Array(COLS)
   for (let r = 0; r < ROWS; r++) {
     let total = 0
-    for (let c = 0; c < COLS; c++) total += merged[r * COLS + c]
+    for (const p of activeParts) {
+      const colStart = p * 64
+      const colEnd = colStart + 64
+      for (let c = colStart; c < colEnd; c++) total += merged[r * COLS + c]
+    }
     rowSums[r] = total
   }
+  
+  // 计算每列总和（正常计算，跨所有行）
+  const colSums = new Float32Array(COLS)
   for (let c = 0; c < COLS; c++) {
     let total = 0
     for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
     colSums[c] = total
   }
-  
-  // 打印坏行坏列统计
-  const badRows = [], badCols = []
-  for (let r = 0; r < ROWS; r++) if (rowSums[r] < badThresh) badRows.push(r)
-  for (let c = 0; c < COLS; c++) if (colSums[c] < badThresh) badCols.push(c)
-  console.log('[zeroLineRepairMerged] 坏行(%d): %s', badRows.length, badRows.slice(0, 20).join(','))
-  console.log('[zeroLineRepairMerged] 坏列(%d): %s', badCols.length, badCols.slice(0, 30).join(','))
-  // 打印一些行列总和样例
-  console.log('[zeroLineRepairMerged] rowSums前10: %s', Array.from(rowSums).slice(0, 10).map(v => v.toFixed(0)).join(','))
-  console.log('[zeroLineRepairMerged] colSums前10: %s', Array.from(colSums).slice(0, 10).map(v => v.toFixed(0)).join(','))
   
   let repairedRows = 0, repairedCols = 0
   
@@ -667,15 +675,12 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   for (let r = 1; r < ROWS - 1; r++) {
     if (rowSums[r] >= badThresh) continue
     if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
-      // 单行坏线
       for (let c = 0; c < COLS; c++) {
         merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
       }
       repairedRows++
-      console.log('[zeroLineRepairMerged] 修复单行 r=%d, prevSum=%.0f, nextSum=%.0f', r, rowSums[r-1], rowSums[r+1])
     } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
                rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
-      // 连续两行坏线
       for (let c = 0; c < COLS; c++) {
         const vPrev = merged[(r - 1) * COLS + c]
         const vNext = merged[(r + 2) * COLS + c]
@@ -683,28 +688,20 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
         merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
       }
       repairedRows += 2
-      console.log('[zeroLineRepairMerged] 修复双行 r=%d,%d, prevSum=%.0f, nextSum=%.0f', r, r+1, rowSums[r-1], rowSums[r+2])
       r++
     }
   }
   
-  // 修复坏列（只补 1~2 列，跳过传感器边界区域）
-  // 传感器边界列：63,64, 127,128, 191,192（旋转后的合并矩阵中每64列一个边界）
-  const boundarySet = new Set([63, 64, 127, 128, 191, 192])
+  // 修复坏列（只补 1~2 列，不跳过边界，与前端完全一致）
   for (let c = 1; c < COLS - 1; c++) {
-    if (boundarySet.has(c)) continue  // 跳过传感器边界
     if (colSums[c] >= badThresh) continue
     if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
-      // 单列坏线
       for (let r = 0; r < ROWS; r++) {
         merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
       }
       repairedCols++
-      console.log('[zeroLineRepairMerged] 修复单列 c=%d, prevSum=%.0f, nextSum=%.0f', c, colSums[c-1], colSums[c+1])
     } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
-               !boundarySet.has(c + 1) &&
                colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
-      // 连续两列坏线
       for (let r = 0; r < ROWS; r++) {
         const vPrev = merged[r * COLS + (c - 1)]
         const vNext = merged[r * COLS + (c + 2)]
@@ -712,18 +709,19 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
         merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
       }
       repairedCols += 2
-      console.log('[zeroLineRepairMerged] 修复双列 c=%d,%d, prevSum=%.0f, nextSum=%.0f', c, c+1, colSums[c-1], colSums[c+2])
       c++
     }
   }
   
-  console.log('[zeroLineRepairMerged] 完成: 修复了 %d 行, %d 列', repairedRows, repairedCols)
+  if (repairedRows || repairedCols) {
+    console.log('[zeroLineRepairMerged] 修复了 %d 行, %d 列', repairedRows, repairedCols)
+  }
   
   // 逆时针旋转 90° 拆回 4 个 64×64，只写回有真实缓存的传感器
   // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
   const cacheKeys = ['foot1', 'foot2', 'foot3', 'foot4']
   for (let p = 0; p < 4; p++) {
-    if (!gaitFootCache[cacheKeys[p]]) continue  // 跳过没有数据的传感器
+    if (!gaitFootCache[cacheKeys[p]]) continue
     const target = parts[p]
     const colOffset = p * 64
     for (let newRow = 0; newRow < 64; newRow++) {
