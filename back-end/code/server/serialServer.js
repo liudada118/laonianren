@@ -713,16 +713,16 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     }
   }
   
-  // 诊断日志：打印 foot2/foot3 连接处附近的 colSums
+  // 诊断日志：只打印有值的行和列
   if (!global._colDiagCount) global._colDiagCount = 0
-  if (global._colDiagCount < 5) {
+  if (global._colDiagCount < 3) {
     global._colDiagCount++
-    console.log('[colSums诊断] c125-132: %s', 
-      Array.from(colSums).slice(125, 133).map((v,i) => `c${125+i}=${v.toFixed(0)}`).join(', '))
-    console.log('[colSums诊断] c60-68: %s',
-      Array.from(colSums).slice(60, 69).map((v,i) => `c${60+i}=${v.toFixed(0)}`).join(', '))
-    console.log('[colSums诊断] c189-196: %s',
-      Array.from(colSums).slice(189, 197).map((v,i) => `c${189+i}=${v.toFixed(0)}`).join(', '))
+    const nonZeroRows = []
+    for (let r = 0; r < ROWS; r++) if (rowSums[r] > 0) nonZeroRows.push(`r${r}=${rowSums[r].toFixed(0)}`)
+    const nonZeroCols = []
+    for (let c = 0; c < COLS; c++) if (colSums[c] > 0) nonZeroCols.push(`c${c}=${colSums[c].toFixed(0)}`)
+    console.log('[rowSums>0] %s', nonZeroRows.join(', '))
+    console.log('[colSums>0] %s', nonZeroCols.join(', '))
   }
   if (repairedRows || repairedCols) {
     console.log('[zeroLineRepairMerged] 修复了 %d 行, %d 列', repairedRows, repairedCols)
