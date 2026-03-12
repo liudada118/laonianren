@@ -462,6 +462,10 @@ let activeSampleType = null
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
 const glovePacket1Cache = {}
 
+// 手套最新数据缓存：按 HL/HR 分别存储最新完整帧数据
+// 解决左右手共用同一串口 path 导致 dataMap[path] 的 type/arr 被交替覆盖的问题
+let gloveLatestData = { HL: null, HR: null }
+
 // 握力清零基线：记录清零时刻的传感器值，后续数据减去基线（负值归零）
 let gripBaseline = { HL: null, HR: null }
 
@@ -1645,26 +1649,43 @@ app.post('/setActiveMode', (req, res) => {
 
 
 // 握力传感器清零：记录当前 HL/HR 的传感器值作为基线
+// 修复：优先从 gloveLatestData 缓存读取，解决左右手共用串口导致 dataMap 中只能读到一只手数据的问题
 app.post('/tareGrip', (req, res) => {
   try {
     let taredCount = 0
-    // 遍历 dataMap，找到 HL 和 HR 类型的最新数据作为基线
-    Object.keys(dataMap).forEach((key) => {
-      const item = dataMap[key]
-      if (!item || !item.type) return
-      if (item.type === 'HL' && item.arr && item.arr.length) {
-        gripBaseline.HL = [...item.arr]
-        taredCount++
-        console.log('[tareGrip] HL 基线已记录, 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
-      }
-      if (item.type === 'HR' && item.arr && item.arr.length) {
-        gripBaseline.HR = [...item.arr]
-        taredCount++
-        console.log('[tareGrip] HR 基线已记录, 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
-      }
-    })
-    console.log('[tareGrip] 清零完成, 已记录 %d 个设备基线', taredCount)
-    res.json(new HttpResult(0, { taredCount }, '清零成功'))
+
+    // 优先从 gloveLatestData 缓存读取 HL/HR 基线（左右手独立存储，不会被覆盖）
+    if (gloveLatestData.HL && gloveLatestData.HL.arr && gloveLatestData.HL.arr.length) {
+      gripBaseline.HL = [...gloveLatestData.HL.arr]
+      taredCount++
+      console.log('[tareGrip] HL 基线已记录(从缓存), 长度=%d, 平均值=%.1f', gloveLatestData.HL.arr.length, gloveLatestData.HL.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HL.arr.length)
+    }
+    if (gloveLatestData.HR && gloveLatestData.HR.arr && gloveLatestData.HR.arr.length) {
+      gripBaseline.HR = [...gloveLatestData.HR.arr]
+      taredCount++
+      console.log('[tareGrip] HR 基线已记录(从缓存), 长度=%d, 平均值=%.1f', gloveLatestData.HR.arr.length, gloveLatestData.HR.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HR.arr.length)
+    }
+
+    // 如果缓存中没有，回退到从 dataMap 中查找（兼容旧逻辑）
+    if (!gripBaseline.HL || !gripBaseline.HR) {
+      Object.keys(dataMap).forEach((key) => {
+        const item = dataMap[key]
+        if (!item || !item.type) return
+        if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length) {
+          gripBaseline.HL = [...item.arr]
+          taredCount++
+          console.log('[tareGrip] HL 基线已记录(从 dataMap), 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
+        }
+        if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length) {
+          gripBaseline.HR = [...item.arr]
+          taredCount++
+          console.log('[tareGrip] HR 基线已记录(从 dataMap), 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
+        }
+      })
+    }
+
+    console.log('[tareGrip] 清零完成, 已记录 %d 个设备基线, HL=%s, HR=%s', taredCount, gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
+    res.json(new HttpResult(0, { taredCount, HL: !!gripBaseline.HL, HR: !!gripBaseline.HR }, '清零成功'))
   } catch (e) {
     console.error('[tareGrip] 错误:', e)
     res.json(new HttpResult(1, {}, '清零失败: ' + e.message))
@@ -2893,6 +2914,35 @@ function parseData(parserArr, objs) {
     }
 
   })
+
+  // 补充手套数据：左右手共用一个串口，dataMap[path] 只保存最后一帧的 type
+  // 从 gloveLatestData 缓存中补充被覆盖的另一只手的数据
+  ;['HL', 'HR'].forEach((gloveType) => {
+    if (!json[gloveType] && gloveLatestData[gloveType]) {
+      const cached = gloveLatestData[gloveType]
+      const dataStamp = new Date().getTime() - cached.stamp
+      json[gloveType] = {}
+      if (dataStamp < 1000) {
+        // 应用清零基线
+        let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
+        if (gripBaseline[gloveType] && arr.length) {
+          const base = gripBaseline[gloveType]
+          arr = arr.map((v, i) => {
+            const diff = v - (base[i] || 0)
+            return diff > 0 ? diff : 0
+          })
+        }
+        json[gloveType].status = 'online'
+        json[gloveType].arr = arr
+        json[gloveType].rotate = cached.rotate
+        json[gloveType].stamp = cached.stamp
+        json[gloveType].HZ = cached.HZ
+      } else {
+        json[gloveType].status = 'offline'
+      }
+    }
+  })
+
   if (json.foot) {
     if (!json.foot4) {
       json.foot4 = json.foot
@@ -3225,6 +3275,19 @@ async function connectPort() {
           const rawQuat = bytes4ToInt10(imuRaw)
           dataItem.rotate = validateQuaternion(rawQuat) || rawQuat
 
+          // 将完整帧数据同步到手套缓存（按 HL/HR 分别存储，解决共用串口覆盖问题）
+          const gloveType = constantObj.type[sensorType]
+          if (gloveType) {
+            gloveLatestData[gloveType] = {
+              type: gloveType,
+              arr: [...dataItem.arr],
+              rotate: dataItem.rotate,
+              stamp: stamp,
+              HZ: dataItem.HZ,
+              port: path,
+            }
+          }
+
           // 帧率计算
           if (sendDataLength < 30) {
             sendDataLength++
@@ -3345,10 +3408,14 @@ async function stopPort() {
     }
   })
 
-  // 娓呴櫎鍙戦€佹暟鎹畾鏃跺櫒
+  // 娓門除鍙戦€佹暟鎹畾鏃跺櫒
   clearInterval(playtimer)
 
-  // 灏唄z娓呴櫎鎺?
+  // 清除手套数据缓存
+  gloveLatestData.HL = null
+  gloveLatestData.HR = null
+
+  // 灰唇z娓門除鎺?
   MaxHZ = undefined
   resetSensorHzCache()
 }
