@@ -387,14 +387,27 @@ class BackendBridge {
     }
   }
 
+  // 将手套数据规范化为 256 字节（HR 的 Packet1 硬件层面系统性丢失，经常只有 128 字节）
+  _normalizeGloveArr(arr) {
+    if (!Array.isArray(arr) || arr.length < 128) return null;
+    if (arr.length === 256) return arr;
+    // 128 字节：补零到 256，前端热力图和数据映射期望 256 个值
+    const padded = new Array(256).fill(0);
+    for (let i = 0; i < arr.length; i++) padded[i] = arr[i];
+    return padded;
+  }
+
   _processGloveData(data) {
     // 处理HL（左手）
     if (data.HL) {
       const status = data.HL.status;
       this._updateDeviceStatus('HL', status);
-      if (status === 'online' && Array.isArray(data.HL.arr) && data.HL.arr.length === 256) {
-        this._emit('leftHandData', data.HL.arr);
-        this._countFrame('HL');
+      if (status === 'online') {
+        const arr = this._normalizeGloveArr(data.HL.arr);
+        if (arr) {
+          this._emit('leftHandData', arr);
+          this._countFrame('HL');
+        }
       }
     }
 
@@ -402,9 +415,12 @@ class BackendBridge {
     if (data.HR) {
       const status = data.HR.status;
       this._updateDeviceStatus('HR', status);
-      if (status === 'online' && Array.isArray(data.HR.arr) && data.HR.arr.length === 256) {
-        this._emit('rightHandData', data.HR.arr);
-        this._countFrame('HR');
+      if (status === 'online') {
+        const arr = this._normalizeGloveArr(data.HR.arr);
+        if (arr) {
+          this._emit('rightHandData', arr);
+          this._countFrame('HR');
+        }
       }
     }
   }
@@ -415,9 +431,12 @@ class BackendBridge {
     if (data.HL) {
       const status = data.HL.status;
       this._updateDeviceStatus('HL', status);
-      if (status === 'online' && Array.isArray(data.HL.arr) && data.HL.arr.length === 256) {
-        this._emit('leftHandData', data.HL.arr);
-        this._countFrame('HL');
+      if (status === 'online') {
+        const arr = this._normalizeGloveArr(data.HL.arr);
+        if (arr) {
+          this._emit('leftHandData', arr);
+          this._countFrame('HL');
+        }
       }
     }
 
@@ -425,9 +444,12 @@ class BackendBridge {
     if (data.HR) {
       const status = data.HR.status;
       this._updateDeviceStatus('HR', status);
-      if (status === 'online' && Array.isArray(data.HR.arr) && data.HR.arr.length === 256) {
-        this._emit('rightHandData', data.HR.arr);
-        this._countFrame('HR');
+      if (status === 'online') {
+        const arr = this._normalizeGloveArr(data.HR.arr);
+        if (arr) {
+          this._emit('rightHandData', arr);
+          this._countFrame('HR');
+        }
       }
     }
 
