@@ -274,12 +274,34 @@ export default function GripAssessment() {
       console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
       addSimLog('已设置为手套模式 (mode=1)', 'info');
       // 设置模式后延迟 500ms 执行清零，确保已收到稳定的基线数据
-      setTimeout(() => {
-        backendBridge.tareGrip().then((r) => {
-          console.log('[GripAssessment] 握力清零完成:', r);
-          addSimLog('左右手传感器已清零', 'info');
-        }).catch(e => console.error('[GripAssessment] tareGrip failed:', e));
-      }, 500);
+      // 如果某只手清零失败（HR 的 Packet1 经常丢失），自动重试最多 3 次
+      const doTareWithRetry = async (attempt = 1, maxAttempts = 3) => {
+        try {
+          const r = await backendBridge.tareGrip();
+          console.log('[GripAssessment] 握力清零完成 (attempt=%d):', attempt, r);
+          const data = r?.data || r;
+          if (data && data.HL && data.HR) {
+            addSimLog('左右手传感器已清零', 'info');
+          } else if (attempt < maxAttempts) {
+            const failedHands = [];
+            if (!data?.HL) failedHands.push('左手');
+            if (!data?.HR) failedHands.push('右手');
+            addSimLog(`${failedHands.join('、')}清零失败，1秒后重试 (${attempt}/${maxAttempts})`, 'warn');
+            console.warn('[GripAssessment] 清零不完整, HL=%s HR=%s, 重试...', data?.HL, data?.HR);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return doTareWithRetry(attempt + 1, maxAttempts);
+          } else {
+            addSimLog('清零重试已达上限，部分传感器可能未清零', 'warn');
+          }
+        } catch (e) {
+          console.error('[GripAssessment] tareGrip failed (attempt=%d):', attempt, e);
+          if (attempt < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return doTareWithRetry(attempt + 1, maxAttempts);
+          }
+        }
+      };
+      setTimeout(() => { doTareWithRetry(); }, 500);
     }).catch(e => console.error('[GripAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
