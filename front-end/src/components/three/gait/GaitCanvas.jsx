@@ -169,11 +169,16 @@ export default function GaitCanvas({
       };
 
       // 实时更新空间变换
-      const tfScale = (tp.scale ?? 1);
+      const tfScale = (tp.scale ?? 1.0);
       const s = BASE_SCALE * tfScale;
       particles.scale.set(s, s, s);
-      material.size = tp.particleSize ?? 1;
-      group.position.set(tp.posX ?? 0, tp.posY ?? 0, tp.posZ ?? 0);
+      material.size = tp.particleSize ?? 3.7;
+      group.position.set(tp.posX ?? 100, tp.posY ?? 295, tp.posZ ?? 350);
+      // rotation（保留原有的 rotation.x = Math.PI/3，叠加用户调节值）
+      const deg = Math.PI / 180;
+      particles.rotation.x = Math.PI / 3 + (tp.rotX ?? 0) * deg;
+      particles.rotation.y = (tp.rotY ?? 0) * deg;
+      particles.rotation.z = (tp.rotZ ?? 0) * deg;
 
       mergeSensorData();
 
