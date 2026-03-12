@@ -39,12 +39,13 @@ function getCircleTexture() {
 export default function GaitCanvas({
   sensorData = {},
   particleParams = {},
+  transformParams = {},
   showHeatmap = true,
   onSceneReady = null,
 }) {
   const containerRef = useRef(null);
-  const propsRef = useRef({ sensorData, particleParams });
-  propsRef.current = { sensorData, particleParams };
+  const propsRef = useRef({ sensorData, particleParams, transformParams });
+  propsRef.current = { sensorData, particleParams, transformParams };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -89,9 +90,8 @@ export default function GaitCanvas({
     });
 
     const particles = new THREE.Points(geometry, material);
-    // 放大 3 倍：0.0062 * 3 = 0.0186
-    const SCALE = 0.0062 * 3;
-    particles.scale.set(SCALE, SCALE, SCALE);
+    const BASE_SCALE = 0.0062 * 3;
+    particles.scale.set(BASE_SCALE, BASE_SCALE, BASE_SCALE);
     particles.rotation.x = Math.PI / 3;
 
     const group = new THREE.Group();
@@ -159,7 +159,7 @@ export default function GaitCanvas({
 
     /* ─── 数据更新 ─── */
     function renewData() {
-      const { particleParams: pp } = propsRef.current;
+      const { particleParams: pp, transformParams: tp } = propsRef.current;
       const params = {
         gaussSigma:      pp.gaussSigma ?? 2,
         filterThreshold: pp.filterThreshold ?? 2,
@@ -167,6 +167,13 @@ export default function GaitCanvas({
         colorRange:      pp.colorRange ?? 200,
         heightScale:     pp.heightScale ?? 2,
       };
+
+      // 实时更新空间变换
+      const tfScale = (tp.scale ?? 1);
+      const s = BASE_SCALE * tfScale;
+      particles.scale.set(s, s, s);
+      material.size = tp.particleSize ?? 1;
+      group.position.set(tp.posX ?? 0, tp.posY ?? 0, tp.posZ ?? 0);
 
       mergeSensorData();
 
