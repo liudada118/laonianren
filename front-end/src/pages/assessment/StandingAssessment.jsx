@@ -5,7 +5,7 @@ import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
 import StandingCanvas from '../../components/three/standing/StandingCanvas';
 import ParticleControlPanel from '../../components/three/shared/ParticleControlPanel';
-import { loadParams, saveParams, resetParams } from '../../components/three/shared/particleConfig';
+import { loadParams, saveParams, resetParams, loadTransform, saveTransform, resetTransform } from '../../components/three/shared/particleConfig';
 import { serialService } from '../../lib/SerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import {
@@ -181,6 +181,20 @@ export default function StandingAssessment() {
   const handleParamReset = useCallback(() => {
     const defaults = resetParams();
     setParticleParams(defaults);
+  }, []);
+
+  // 空间变换参数（静态独立）
+  const [transformParams, setTransformParams] = useState(() => loadTransform('standing'));
+  const handleTransformChange = useCallback((key, value) => {
+    setTransformParams(prev => {
+      const next = { ...prev, [key]: value };
+      saveTransform('standing', next);
+      return next;
+    });
+  }, []);
+  const handleTransformReset = useCallback(() => {
+    const defaults = resetTransform('standing');
+    setTransformParams(defaults);
   }, []);
 
   // 实时数据
@@ -728,6 +742,7 @@ export default function StandingAssessment() {
               showHeatmap={showHeatmap}
               externalDataRef={insoleDataRef}
               particleParams={particleParams}
+              transformParams={transformParams}
             />
 
             {/* 粒子参数调节面板 */}
@@ -735,6 +750,9 @@ export default function StandingAssessment() {
               params={particleParams}
               onChange={handleParamChange}
               onReset={handleParamReset}
+              transform={transformParams}
+              onTransformChange={handleTransformChange}
+              onTransformReset={handleTransformReset}
               showHeatmap={showHeatmap}
               onHeatmapChange={setShowHeatmap}
             />

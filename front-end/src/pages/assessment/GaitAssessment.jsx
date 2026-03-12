@@ -4,7 +4,7 @@ import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
 import GaitCanvas from '../../components/three/gait/GaitCanvas';
 import ParticleControlPanel from '../../components/three/shared/ParticleControlPanel';
-import { loadParams, saveParams, resetParams } from '../../components/three/shared/particleConfig';
+import { loadParams, saveParams, resetParams, loadTransform, saveTransform, resetTransform } from '../../components/three/shared/particleConfig';
 import { backendBridge } from '../../lib/BackendBridge';
 import GaitRegionChart from '../../components/report/GaitRegionChart';
 import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
@@ -661,6 +661,20 @@ export default function GaitAssessment() {
     setParticleParams(defaults);
   }, []);
 
+  // 空间变换参数（步道独立）
+  const [transformParams, setTransformParams] = useState(() => loadTransform('gait'));
+  const handleTransformChange = useCallback((key, value) => {
+    setTransformParams(prev => {
+      const next = { ...prev, [key]: value };
+      saveTransform('gait', next);
+      return next;
+    });
+  }, []);
+  const handleTransformReset = useCallback(() => {
+    const defaults = resetTransform('gait');
+    setTransformParams(defaults);
+  }, []);
+
   /* 实时统计 */
   const [sensorStats, setSensorStats] = useState({
     totals: [0, 0, 0, 0],
@@ -1022,6 +1036,7 @@ export default function GaitAssessment() {
               sensorData={sensorData}
               showHeatmap={showHeatmap}
               particleParams={particleParams}
+              transformParams={transformParams}
               onSceneReady={(scene) => { sceneRef.current = scene; }}
             />
 
@@ -1030,6 +1045,9 @@ export default function GaitAssessment() {
               params={particleParams}
               onChange={handleParamChange}
               onReset={handleParamReset}
+              transform={transformParams}
+              onTransformChange={handleTransformChange}
+              onTransformReset={handleTransformReset}
               showHeatmap={showHeatmap}
               onHeatmapChange={setShowHeatmap}
               extra={

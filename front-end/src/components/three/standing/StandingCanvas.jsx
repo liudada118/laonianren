@@ -85,6 +85,17 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     };
   }
 
+  function getTransform() {
+    const t = props.transformParams || {};
+    return {
+      posX:         t.posX ?? 0,
+      posY:         t.posY ?? 0,
+      posZ:         t.posZ ?? 0,
+      particleSize: t.particleSize ?? 1,
+      scale:        t.scale ?? 1,
+    };
+  }
+
   /* ─── 初始化 ─── */
   useEffect(() => {
     const container = containerRef.current;
@@ -121,9 +132,8 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     });
 
     const particles = new THREE.Points(geometry, material);
-    // 缩小到 80% 再缩小 2 倍：0.0062 * 0.4 = 0.00248
-    const SCALE = 0.0062 * 0.4;
-    particles.scale.set(SCALE, SCALE, SCALE);
+    const BASE_SCALE = 0.0062 * 0.4;
+    particles.scale.set(BASE_SCALE, BASE_SCALE, BASE_SCALE);
     particles.rotation.x = Math.PI / 3;
 
     const group = new THREE.Group();
@@ -182,6 +192,14 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     /* ─── 数据更新（每帧调用） ─── */
     function renewData() {
       const params = getParams();
+      const tf = getTransform();
+
+      // 实时更新空间变换
+      const s = BASE_SCALE * tf.scale;
+      particles.scale.set(s, s, s);
+      material.size = tf.particleSize;
+      group.position.set(GX + tf.posX, GY + tf.posY, GZ + tf.posZ);
+
       readExternalData(ndata);
 
       // 过滤

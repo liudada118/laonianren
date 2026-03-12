@@ -1,29 +1,59 @@
 /**
- * ParticleControlPanel - 粒子系统共用参数调节面板
+ * ParticleControlPanel - 粒子系统参数调节面板
  *
- * 浮动在 3D 可视化区域右上角，提供以下参数调节：
- *   - 高斯模糊 (gaussSigma)
- *   - 过滤阈值 (filterThreshold)
- *   - 平滑系数 (initValue)
- *   - 颜色范围 (colorRange)
- *   - 高度缩放 (heightScale)
+ * 分两组：
+ *   1. 数据处理（共用）：高斯模糊、过滤阈值、平滑系数、颜色范围、高度缩放
+ *   2. 空间变换（独立）：X/Y/Z 位置、粒子大小、整体缩放
  *
  * Props:
- *   - params: 当前参数对象
- *   - onChange: (key, value) => void
- *   - onReset: () => void
+ *   - params: 共用数据处理参数
+ *   - onChange: (key, value) => void  共用参数变更
+ *   - onReset: () => void  重置共用参数
+ *   - transform: 空间变换参数
+ *   - onTransformChange: (key, value) => void
+ *   - onTransformReset: () => void
  *   - showHeatmap / onHeatmapChange: 热力图开关（可选）
- *   - extra: 额外的控件（如滤波开关等）
+ *   - extra: 额外的控件
  */
 import React, { useState } from 'react';
-import { PARAM_RANGES } from './particleConfig';
+import { SHARED_RANGES, TRANSFORM_RANGES } from './particleConfig';
 
-const PARAM_KEYS = ['gaussSigma', 'filterThreshold', 'initValue', 'colorRange', 'heightScale'];
+const SHARED_KEYS = ['gaussSigma', 'filterThreshold', 'initValue', 'colorRange', 'heightScale'];
+const TRANSFORM_KEYS = ['posX', 'posY', 'posZ', 'particleSize', 'scale'];
+
+function SliderRow({ paramKey, range, value, onChange }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-0.5">
+        <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted, #9ca3af)' }}>
+          {range.label}
+        </span>
+        <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>
+          {typeof value === 'number' ? (Number.isInteger(range.step) ? value : value.toFixed(1)) : value}
+          {range.unit ? ` ${range.unit}` : ''}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={value}
+        onChange={e => onChange(paramKey, Number(e.target.value))}
+        className="w-full h-1 rounded-full appearance-none cursor-pointer"
+        style={{ background: 'var(--border-light, #e5e7eb)' }}
+      />
+    </div>
+  );
+}
 
 export default function ParticleControlPanel({
   params,
   onChange,
   onReset,
+  transform,
+  onTransformChange,
+  onTransformReset,
   showHeatmap,
   onHeatmapChange,
   extra,
@@ -63,13 +93,15 @@ export default function ParticleControlPanel({
       {/* 参数面板 */}
       {!collapsed && (
         <div
-          className="rounded-b-lg px-3 py-2.5 space-y-2.5"
+          className="rounded-b-lg px-3 py-2.5 space-y-2"
           style={{
             background: 'rgba(255,255,255,0.92)',
             backdropFilter: 'blur(12px)',
             border: '1px solid rgba(255,255,255,0.5)',
             borderTop: 'none',
             boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+            maxHeight: '70vh',
+            overflowY: 'auto',
           }}
         >
           {/* 热力图开关 */}
@@ -90,49 +122,71 @@ export default function ParticleControlPanel({
           {/* 额外控件插槽 */}
           {extra}
 
-          {/* 参数滑块 */}
-          {PARAM_KEYS.map(key => {
-            const range = PARAM_RANGES[key];
-            const value = params[key] ?? range.min;
-            return (
-              <div key={key}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted, #9ca3af)' }}>
-                    {range.label}
-                  </span>
-                  <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>
-                    {typeof value === 'number' ? (Number.isInteger(range.step) ? value : value.toFixed(1)) : value}
-                    {range.unit ? ` ${range.unit}` : ''}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={range.min}
-                  max={range.max}
-                  step={range.step}
-                  value={value}
-                  onChange={e => onChange(key, Number(e.target.value))}
-                  className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                  style={{ background: 'var(--border-light, #e5e7eb)' }}
-                />
-              </div>
-            );
-          })}
+          {/* 数据处理（共用） */}
+          <div>
+            <div
+              className="text-[10px] font-semibold mb-1.5 pb-0.5"
+              style={{ color: 'var(--text-secondary, #4a5568)', borderBottom: '1px solid rgba(0,0,0,0.06)' }}
+            >
+              数据处理（共用）
+            </div>
+            <div className="space-y-2">
+              {SHARED_KEYS.map(key => {
+                const range = SHARED_RANGES[key];
+                return (
+                  <SliderRow key={key} paramKey={key} range={range} value={params[key] ?? range.min} onChange={onChange} />
+                );
+              })}
+            </div>
+            <button
+              onClick={onReset}
+              className="w-full text-[10px] py-1 mt-1.5 rounded-md transition-colors font-medium"
+              style={{
+                color: 'var(--text-muted, #9ca3af)',
+                background: 'var(--bg-tertiary, #f3f4f6)',
+                border: '1px solid var(--border-light, #e5e7eb)',
+              }}
+              onMouseEnter={e => { e.target.style.background = 'var(--bg-secondary, #e5e7eb)'; }}
+              onMouseLeave={e => { e.target.style.background = 'var(--bg-tertiary, #f3f4f6)'; }}
+            >
+              重置数据参数
+            </button>
+          </div>
 
-          {/* 重置按钮 */}
-          <button
-            onClick={onReset}
-            className="w-full text-[10px] py-1.5 rounded-md transition-colors font-medium"
-            style={{
-              color: 'var(--text-muted, #9ca3af)',
-              background: 'var(--bg-tertiary, #f3f4f6)',
-              border: '1px solid var(--border-light, #e5e7eb)',
-            }}
-            onMouseEnter={e => { e.target.style.background = 'var(--bg-secondary, #e5e7eb)'; }}
-            onMouseLeave={e => { e.target.style.background = 'var(--bg-tertiary, #f3f4f6)'; }}
-          >
-            恢复默认
-          </button>
+          {/* 空间变换（独立） */}
+          {transform && onTransformChange && (
+            <div>
+              <div
+                className="text-[10px] font-semibold mb-1.5 pb-0.5"
+                style={{ color: 'var(--text-secondary, #4a5568)', borderBottom: '1px solid rgba(0,0,0,0.06)' }}
+              >
+                空间变换（独立）
+              </div>
+              <div className="space-y-2">
+                {TRANSFORM_KEYS.map(key => {
+                  const range = TRANSFORM_RANGES[key];
+                  return (
+                    <SliderRow key={key} paramKey={key} range={range} value={transform[key] ?? range.min} onChange={onTransformChange} />
+                  );
+                })}
+              </div>
+              {onTransformReset && (
+                <button
+                  onClick={onTransformReset}
+                  className="w-full text-[10px] py-1 mt-1.5 rounded-md transition-colors font-medium"
+                  style={{
+                    color: 'var(--text-muted, #9ca3af)',
+                    background: 'var(--bg-tertiary, #f3f4f6)',
+                    border: '1px solid var(--border-light, #e5e7eb)',
+                  }}
+                  onMouseEnter={e => { e.target.style.background = 'var(--bg-secondary, #e5e7eb)'; }}
+                  onMouseLeave={e => { e.target.style.background = 'var(--bg-tertiary, #f3f4f6)'; }}
+                >
+                  重置空间参数
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
