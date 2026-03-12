@@ -90,9 +90,7 @@ export default function GaitCanvas({
 
     const particles = new THREE.Points(geometry, material);
     particles.scale.set(0.0062, 0.0062, 0.0062);
-    // 基础倾斜 + 顺时针旋转 90 度（绕 Y 轴 -90 度）
     particles.rotation.x = Math.PI / 3;
-    particles.rotation.z = -Math.PI / 2;
 
     const group = new THREE.Group();
     group.add(particles);
