@@ -135,66 +135,20 @@ function handRBase(arr) {
   return res;
 }
 
-function flipVertical(arr, width, height) {
-  if (!Array.isArray(arr) || arr.length !== width * height) return arr;
-  const res = new Array(arr.length);
-  for (let row = 0; row < height; row++) {
-    const srcRow = height - 1 - row;
-    for (let col = 0; col < width; col++) {
-      res[row * width + col] = arr[srcRow * width + col];
-    }
-  }
-  return res;
-}
-
-function handRVideo1470506(arr) {
-  let handArr = handRBase(arr);
-
-  let handPointArr = [
-    [21,3],[20,3],[19,3],[3,10],[3,11],[3,12],[0,15],[0,16],[0,17],[2,23],[2,24],[2,25],[7,27],[7,28],[7,29],
-    [21,4],[20,4],[19,4],[4,10],[4,11],[4,12],[1,15],[1,16],[1,17],[3,23],[3,24],[3,25],[8,27],[8,28],[8,29],
-    [22,5],[21,5],[20,5],[5,10],[5,11],[5,12],[2,16],[2,17],[2,18],[4,23],[4,24],[4,25],[9,27],[9,28],[9,29],
-    [22,6],[21,6],[20,6],[6,11],[6,12],[6,13],[3,16],[3,17],[3,18],[5,23],[5,24],[5,25],[10,27],[10,28],[10,29],
-    [23,8],[22,8],[21,8],[10,12],[10,13],[10,14],[9,17],[9,18],[9,19],[9,22],[9,23],[9,24],[12,26],[12,27],[12,28],
-    [15,18],[15,18],[15,19],[15,20],[15,21],[15,22],[15,23],[15,24],[15,25],[15,26],[15,27],[15,28],
-    [17,15],[17,15],[17,16],[17,17],[17,18],[17,19],[17,20],[17,21],[17,22],[17,23],[17,24],[17,25],[17,26],[17,27],[17,28],
-    [19,15],[19,15],[19,16],[19,17],[19,18],[19,19],[19,20],[19,21],[19,22],[19,23],[19,24],[19,25],[19,26],[19,27],[19,28],
-    [21,15],[21,15],[21,16],[21,17],[21,18],[21,19],[21,20],[21,21],[21,22],[21,23],[21,24],[21,25],[21,26],[21,27],[21,28],
-    [23,15],[23,15],[23,16],[23,17],[23,18],[23,19],[23,20],[23,21],[23,22],[23,23],[23,24],[23,25],[23,26],[23,27],[23,28]
-  ];
-
-  for (let i = 0; i < 5; i++) {
-    for (let j = 0; j < 5; j++) {
-      for (let k = 0; k < 3; k++) {
-        if (j === 0) handPointArr[i * 15 + j * 3 + k][1] -= 1;
-        if (j === 3) handPointArr[i * 15 + j * 3 + k][1] -= 1;
-        if (j === 4) handPointArr[i * 15 + j * 3 + k][1] -= 1;
-      }
-    }
-  }
-
-  handPointArr = handPointArr.map((a) => [a[0] + 1, a[1]]);
-  let newZeroArr = new Array(1024).fill(0);
-  handPointArr.forEach((a, index) => {
-    if ([0, 15, 30, 45, 60].includes(index)) {
-      // skip
-    } else if ([1, 2, 16, 17, 31, 32, 46, 47, 61, 62].includes(index)) {
-      newZeroArr[(a[0]) * 32 + 31 - a[1]] = handArr[index];
-    } else {
-      newZeroArr[(a[0]) * 32 + 31 - a[1]] = handArr[index];
-      newZeroArr[(a[0] + 1) * 32 + 31 - a[1]] = handArr[index];
-    }
-  });
-
-  newZeroArr = flipVertical(newZeroArr, 32, 32);
-  return newZeroArr;
-}
-
 /**
  * Map right hand raw 256-value sensor data to 32x32 heatmap array
+ *
+ * Uses handRBase() to extract sensor values using right-hand ADC indices,
+ * then handSkinChange() to map them onto the same 32x32 grid layout as the left hand.
+ * This is correct because the 3D hand model is mirrored via scaleX=-1 for the right hand,
+ * so the heatmap texture UV mapping remains identical to the left hand.
+ *
+ * Previously used handRVideo1470506() which had a different grid layout,
+ * causing the thumb to be placed at row 8-11 instead of row 14-21,
+ * falling outside the 3D model's thumb UV region.
  */
 export function mapRightHand(arr) {
-  return handRVideo1470506(arr);
+  return handSkinChange(handRBase(arr));
 }
 
 /**

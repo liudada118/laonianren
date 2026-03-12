@@ -392,6 +392,8 @@ class BackendBridge {
     if (!Array.isArray(arr) || arr.length < 128) return null;
     if (arr.length === 256) return arr;
     // 128 字节：补零到 256，前端热力图和数据映射期望 256 个值
+    // 注意：128字节是 Packet2 数据，放在 [0..127]，后半补零
+    // 这样手掌和手指中间连接处的数据能正确映射
     const padded = new Array(256).fill(0);
     for (let i = 0; i < arr.length; i++) padded[i] = arr[i];
     return padded;
