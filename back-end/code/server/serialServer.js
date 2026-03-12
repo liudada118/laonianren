@@ -658,18 +658,47 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
     colSums[c] = total
   }
   
-  // 修复坏行：找到连续坏行段，用两端正常行线性插值填充
-  _repairBadSegments(merged, rowSums, ROWS, COLS, badThresh, goodThresh, 'row')
-  
-  // 重新计算列总和（行修复后列总和可能变化）
-  for (let c = 0; c < COLS; c++) {
-    let total = 0
-    for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
-    colSums[c] = total
+  // 修复坏行（只补 1~2 行）
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (rowSums[r] >= badThresh) continue
+    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
+      // 单行坏线
+      for (let c = 0; c < COLS; c++) {
+        merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
+      }
+    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
+               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
+      // 连续两行坏线
+      for (let c = 0; c < COLS; c++) {
+        const vPrev = merged[(r - 1) * COLS + c]
+        const vNext = merged[(r + 2) * COLS + c]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      r++
+    }
   }
   
-  // 修复坏列
-  _repairBadSegments(merged, colSums, COLS, ROWS, badThresh, goodThresh, 'col')
+  // 修复坏列（只补 1~2 列）
+  for (let c = 1; c < COLS - 1; c++) {
+    if (colSums[c] >= badThresh) continue
+    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
+      // 单列坏线
+      for (let r = 0; r < ROWS; r++) {
+        merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
+      }
+    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
+      // 连续两列坏线
+      for (let r = 0; r < ROWS; r++) {
+        const vPrev = merged[r * COLS + (c - 1)]
+        const vNext = merged[r * COLS + (c + 2)]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      c++
+    }
+  }
   
   // 逆时针旋转 90° 拆回 4 个 64×64，写回原始数组
   // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
@@ -686,52 +715,7 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   }
 }
 
-/**
- * 通用坏段修复：找到连续坏行/坏列段，用两端正常行/列线性插值填充
- */
-function _repairBadSegments(merged, sums, mainLen, crossLen, badThresh, goodThresh, direction) {
-  const COLS = 256
-  let i = 0
-  while (i < mainLen) {
-    if (sums[i] >= badThresh) { i++; continue }
-    const start = i
-    while (i < mainLen && sums[i] < badThresh) i++
-    const end = i
-    
-    const prevGood = start > 0 && sums[start - 1] > goodThresh
-    const nextGood = end < mainLen && sums[end] > goodThresh
-    if (!prevGood && !nextGood) continue
-    
-    const badLen = end - start
-    for (let b = 0; b < badLen; b++) {
-      const idx = start + b
-      const t = (b + 1) / (badLen + 1)
-      for (let j = 0; j < crossLen; j++) {
-        let vPrev, vNext
-        if (direction === 'row') {
-          vPrev = prevGood ? merged[(start - 1) * COLS + j] : 0
-          vNext = nextGood ? merged[end * COLS + j] : 0
-        } else {
-          vPrev = prevGood ? merged[j * COLS + (start - 1)] : 0
-          vNext = nextGood ? merged[j * COLS + end] : 0
-        }
-        let val
-        if (prevGood && nextGood) {
-          val = vPrev * (1 - t) + vNext * t
-        } else if (prevGood) {
-          val = vPrev * (1 - t)
-        } else {
-          val = vNext * t
-        }
-        if (direction === 'row') {
-          merged[idx * COLS + j] = val
-        } else {
-          merged[j * COLS + idx] = val
-        }
-      }
-    }
-  }
-}
+
 
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
 const glovePacket1Cache = {}
