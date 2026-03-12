@@ -125,7 +125,7 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }
 }
 
 /* ─── 步态报告组件（使用真实数据） ─── */
-export function GaitReportContent({ patientInfo, pythonResult: externalResult }) {
+export function GaitReportContent({ patientInfo, pythonResult: externalResult, onClose }) {
   const [realData, setRealData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -135,10 +135,9 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
       setLoading(false);
       return;
     }
-    fetch('/gait_report_data/report_data.json')
-      .then(res => res.json())
-      .then(data => { setRealData(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    // 没有传入真实数据时，不再 fallback 到静态假数据
+    setRealData(null);
+    setLoading(false);
   }, [externalResult]);
 
   const sections = [
@@ -327,6 +326,19 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
     return <div className="flex items-center justify-center h-full"><div className="text-sm" style={{ color: 'var(--text-muted)' }}>正在加载报告数据...</div></div>;
   }
 
+  if (!realData) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <svg className="w-16 h-16 mb-4" style={{ color: 'var(--border-light)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <p className="text-base font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>请先完成步态评估采集</p>
+        {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-sm text-white" style={{ background: 'var(--zeiss-blue)' }}>返回</button>}
+      </div>
+    );
+  }
+
   const walkSpeed = parseFloat(gp.walkingSpeed) || 0;
   const leftStepTime = parseFloat(gp.leftStepTime) || 0;
   const rightStepTime = parseFloat(gp.rightStepTime) || 0;
@@ -343,6 +355,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
       {/* 顶部栏 */}
       <div className="shrink-0 px-4 md:px-6 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-light)', background: 'var(--bg-secondary)' }}>
         <h2 className="text-sm md:text-base font-bold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'} 的步态评估报告</h2>
+        <div className="flex items-center gap-2">
         <button onClick={handlePdfExport} disabled={pdfExporting}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
           style={{ color: pdfExporting ? 'var(--text-muted)' : '#DC2626', background: pdfExporting ? 'var(--bg-tertiary)' : '#FEF2F2', border: '1px solid #FCA5A530', cursor: pdfExporting ? 'wait' : 'pointer' }}>
@@ -353,6 +366,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
           )}
           {pdfExporting ? '导出中...' : '导出 PDF'}
         </button>
+        {onClose && (
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors" style={{ color: 'var(--text-muted)' }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        )}
+        </div>
       </div>
     <div className="flex flex-1 overflow-hidden">
       <nav className="w-48 shrink-0 p-3 overflow-y-auto hidden lg:block" style={{ borderRight: '1px solid var(--border-light)' }}>
@@ -421,8 +440,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
             <div className="overflow-x-auto">
               {pressureEvolutionData ? (
                 <PressureEvolutionChart evolutionData={pressureEvolutionData} />
+              ) : images.pressureEvolution ? (
+                <img src={images.pressureEvolution} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
               ) : (
-                <img src={images.pressureEvolution || '/gait_report_data/pressure_evolution.png'} alt="Foot Pressure Evolution" className="w-full min-w-[700px]" style={{ imageRendering: 'auto' }} />
+                <div className="flex items-center justify-center py-12 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无足底压力演变数据</span>
+                </div>
               )}
             </div>
           </div>
@@ -431,8 +454,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
             <div>
               {gaitAverageData ? (
                 <GaitAverageChart gaitAvgData={gaitAverageData} />
+              ) : images.gaitAverage ? (
+                <img src={images.gaitAverage} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
               ) : (
-                <img src={images.gaitAverage || '/gait_report_data/gait_average.png'} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+                <div className="flex items-center justify-center py-12 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无步态平均数据</span>
+                </div>
               )}
             </div>
           </div>
@@ -444,8 +471,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult })
           <div className="zeiss-card p-4">
             {footprintHeatmapData ? (
               <FootprintHeatmapChart heatmapData={footprintHeatmapData} />
+            ) : images.footprintHeatmap ? (
+              <img src={images.footprintHeatmap} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
             ) : (
-              <img src={images.footprintHeatmap || '/gait_report_data/footprint_heatmap.png'} alt="Footprint Heatmap" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
+              <div className="flex items-center justify-center py-12 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无足印热力图数据</span>
+              </div>
             )}
           </div>
         </section>
