@@ -2920,69 +2920,72 @@ function parseData(parserArr, objs) {
         return
       }
       if (obj.port.isOpen) {
-      // 统一使用 data.arr（手套在 packet2 到达时已合并，其他设备直接赋值 arr）
-      let blueArr = data.arr && data.arr.length ? data.arr : []
 
-      // 握力清零：对 HL/HR 数据减去基线，负值归零
-      if ((data.type === 'HL' || data.type === 'HR') && gripBaseline[data.type] && blueArr.length) {
-        const base = gripBaseline[data.type]
-        blueArr = blueArr.map((v, i) => {
-          const diff = v - (base[i] || 0)
-          return diff > 0 ? diff : 0
-        })
-      }
-      // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
-      const dataStamp = new Date().getTime() - data.stamp
-      json[data.type] = {}
-
-      // 鏍规嵁鍙戦€佹椂闂翠笌鏈€鏂版椂闂存埑鐨勫樊鍊? 鍒ゆ柇璁惧鐨勫湪绂荤嚎鐘舵€?
-      if (dataStamp < 1000) {
-
-        json[data.type].status = 'online'
-        // console.log(first)
-        // if (data.type.includes(file)) json[data.type].arr = blueArr
-        json[data.type].arr = blueArr
-        json[data.type].rotate = data.rotate
-        json[data.type].stamp = data.stamp
-        json[data.type].HZ = data.HZ
-        if (data.cop) json[data.type].cop = data.cop
-        if (data.breatheData) json[data.type].cop = data.breatheData
-        // json[data.type].stampDiff = new Date().getTime() - data.stamp
+      // 手套设备（HL/HR）跳过 dataMap 的 arr，统一由下方 gloveLatestData 处理
+      // 原因：左右手共用一个串口，Packet1 会覆盖 dataItem.type 但不更新 dataItem.arr，
+      // 导致 type 和 arr 不匹配，清零基线被错误应用。
+      if (data.type === 'HL' || data.type === 'HR') {
+        // 仅记录串口在线状态，不使用 data.arr
+        const dataStamp = new Date().getTime() - data.stamp
+        if (dataStamp < 1000) {
+          // 标记串口在线，具体数据由 gloveLatestData 提供
+        } else {
+          // 串口超时，不做处理，由下方 gloveLatestData 判断
+        }
       } else {
-        json[data.type].status = 'offline'
+        // 非手套设备：保持原有逻辑
+        let blueArr = data.arr && data.arr.length ? data.arr : []
+        const dataStamp = new Date().getTime() - data.stamp
+        json[data.type] = {}
+        if (dataStamp < 1000) {
+          json[data.type].status = 'online'
+          json[data.type].arr = blueArr
+          json[data.type].rotate = data.rotate
+          json[data.type].stamp = data.stamp
+          json[data.type].HZ = data.HZ
+          if (data.cop) json[data.type].cop = data.cop
+          if (data.breatheData) json[data.type].cop = data.breatheData
+        } else {
+          json[data.type].status = 'offline'
+        }
       }
     } else {
-      json[data.type] = {}
-      json[data.type].status = 'offline'
+      if (data && data.type) {
+        json[data.type] = {}
+        json[data.type].status = 'offline'
+      }
     }
 
   })
 
-  // 补充手套数据：左右手共用一个串口，dataMap[path] 只保存最后一帧的 type
-  // 从 gloveLatestData 缓存中补充被覆盖的另一只手的数据
+  // 手套数据统一从 gloveLatestData 获取（保证 type 和 arr 一致性）
+  // gloveLatestData 在 Packet2 合并时同步写入，type/arr/stamp 始终匹配
   ;['HL', 'HR'].forEach((gloveType) => {
-    if (!json[gloveType] && gloveLatestData[gloveType]) {
-      const cached = gloveLatestData[gloveType]
-      const dataStamp = new Date().getTime() - cached.stamp
-      json[gloveType] = {}
-      if (dataStamp < 1000) {
-        // 应用清零基线
-        let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
-        if (gripBaseline[gloveType] && arr.length) {
-          const base = gripBaseline[gloveType]
-          arr = arr.map((v, i) => {
-            const diff = v - (base[i] || 0)
-            return diff > 0 ? diff : 0
-          })
-        }
-        json[gloveType].status = 'online'
-        json[gloveType].arr = arr
-        json[gloveType].rotate = cached.rotate
-        json[gloveType].stamp = cached.stamp
-        json[gloveType].HZ = cached.HZ
-      } else {
-        json[gloveType].status = 'offline'
+    const cached = gloveLatestData[gloveType]
+    if (!cached) {
+      // 没有缓存数据，设为离线
+      if (!json[gloveType]) json[gloveType] = { status: 'offline' }
+      return
+    }
+    const dataStamp = new Date().getTime() - cached.stamp
+    json[gloveType] = {}
+    if (dataStamp < 1000) {
+      // 应用清零基线：用对应手的基线减去对应手的数据（type/arr 保证一致）
+      let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
+      if (gripBaseline[gloveType] && arr.length) {
+        const base = gripBaseline[gloveType]
+        arr = arr.map((v, i) => {
+          const diff = v - (base[i] || 0)
+          return diff > 0 ? diff : 0
+        })
       }
+      json[gloveType].status = 'online'
+      json[gloveType].arr = arr
+      json[gloveType].rotate = cached.rotate
+      json[gloveType].stamp = cached.stamp
+      json[gloveType].HZ = cached.HZ
+    } else {
+      json[gloveType].status = 'offline'
     }
   })
 
@@ -3231,17 +3234,16 @@ async function connectPort() {
         }
         // Packet1: 130字节 = 2(order+type) + 128(sensor前半)
         // 参考 serial_parser_two.py: 缓存 packet1，等待 packet2 到达后合并
+        // 注意：不覆盖 dataItem.type 和 dataItem.stamp，避免 type/arr 不匹配
+        // （Packet1 只有前半数据，完整数据在 Packet2 到达时才合并写入）
         else if (pointArr.length == 130) {
           const sensorType = pointArr[1]    // 1=HL, 2=HR
           const sensorData = pointArr.slice(2)  // 128 字节 sensor 前半
 
-          dataItem.type = constantObj.type[sensorType]
-          dataItem.stamp = new Date().getTime()
-
-          // 按 sensorType 缓存 packet1
+          // 仅缓存 Packet1 数据，不修改 dataItem（等 Packet2 到达后再统一更新）
           glovePacket1Cache[sensorType] = {
             data: sensorData,
-            stamp: dataItem.stamp,
+            stamp: new Date().getTime(),
           }
         } else if (pointArr.length == 1024) {
           // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
