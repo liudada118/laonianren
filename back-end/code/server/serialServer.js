@@ -1649,42 +1649,82 @@ app.post('/setActiveMode', (req, res) => {
 
 
 // 握力传感器清零：记录当前 HL/HR 的传感器值作为基线
-// 修复：优先从 gloveLatestData 缓存读取，解决左右手共用串口导致 dataMap 中只能读到一只手数据的问题
-app.post('/tareGrip', (req, res) => {
+// 修复：采用异步重试机制，等待左右手数据都就绪后再记录基线
+// 解决左右手共用串口、数据交替到达导致某只手基线偶尔缺失的时序问题
+app.post('/tareGrip', async (req, res) => {
   try {
-    let taredCount = 0
+    const MAX_WAIT = 2000   // 最多等待 2 秒
+    const INTERVAL = 100    // 每 100ms 检查一次
+    const startTime = Date.now()
 
-    // 优先从 gloveLatestData 缓存读取 HL/HR 基线（左右手独立存储，不会被覆盖）
-    if (gloveLatestData.HL && gloveLatestData.HL.arr && gloveLatestData.HL.arr.length) {
-      gripBaseline.HL = [...gloveLatestData.HL.arr]
-      taredCount++
-      console.log('[tareGrip] HL 基线已记录(从缓存), 长度=%d, 平均值=%.1f', gloveLatestData.HL.arr.length, gloveLatestData.HL.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HL.arr.length)
-    }
-    if (gloveLatestData.HR && gloveLatestData.HR.arr && gloveLatestData.HR.arr.length) {
-      gripBaseline.HR = [...gloveLatestData.HR.arr]
-      taredCount++
-      console.log('[tareGrip] HR 基线已记录(从缓存), 长度=%d, 平均值=%.1f', gloveLatestData.HR.arr.length, gloveLatestData.HR.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HR.arr.length)
+    // 尝试从 gloveLatestData 和 dataMap 中读取 HL/HR 基线
+    // 只使用最近 FRESHNESS_MS 内的新鲜数据，避免用旧数据作为基线
+    const FRESHNESS_MS = 2000
+    function tryRecordBaseline() {
+      let taredCount = 0
+      const now = Date.now()
+      // 优先从 gloveLatestData 缓存读取（左右手独立存储，不会被覆盖）
+      if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr && gloveLatestData.HL.arr.length
+          && (now - gloveLatestData.HL.stamp) < FRESHNESS_MS) {
+        gripBaseline.HL = [...gloveLatestData.HL.arr]
+        taredCount++
+        console.log('[tareGrip] HL 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HL.arr.length, gloveLatestData.HL.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HL.arr.length, now - gloveLatestData.HL.stamp)
+      }
+      if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr && gloveLatestData.HR.arr.length
+          && (now - gloveLatestData.HR.stamp) < FRESHNESS_MS) {
+        gripBaseline.HR = [...gloveLatestData.HR.arr]
+        taredCount++
+        console.log('[tareGrip] HR 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HR.arr.length, gloveLatestData.HR.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HR.arr.length, now - gloveLatestData.HR.stamp)
+      }
+      // 回退到 dataMap（兼容旧逻辑，同样检查时间戳新鲜度）
+      if (!gripBaseline.HL || !gripBaseline.HR) {
+        Object.keys(dataMap).forEach((key) => {
+          const item = dataMap[key]
+          if (!item || !item.type || !item.stamp) return
+          if ((now - item.stamp) >= FRESHNESS_MS) return  // 跳过过期数据
+          if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length) {
+            gripBaseline.HL = [...item.arr]
+            taredCount++
+            console.log('[tareGrip] HL 基线已记录(从dataMap), 长度=%d', item.arr.length)
+          }
+          if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length) {
+            gripBaseline.HR = [...item.arr]
+            taredCount++
+            console.log('[tareGrip] HR 基线已记录(从dataMap), 长度=%d', item.arr.length)
+          }
+        })
+      }
+      return taredCount
     }
 
-    // 如果缓存中没有，回退到从 dataMap 中查找（兼容旧逻辑）
-    if (!gripBaseline.HL || !gripBaseline.HR) {
-      Object.keys(dataMap).forEach((key) => {
-        const item = dataMap[key]
-        if (!item || !item.type) return
-        if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length) {
-          gripBaseline.HL = [...item.arr]
-          taredCount++
-          console.log('[tareGrip] HL 基线已记录(从 dataMap), 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
+    // 先清除旧基线，避免残留
+    gripBaseline.HL = null
+    gripBaseline.HR = null
+
+    // 首次尝试
+    tryRecordBaseline()
+
+    // 如果两只手都已记录，直接返回
+    if (gripBaseline.HL && gripBaseline.HR) {
+      console.log('[tareGrip] 清零完成(首次), HL=✓, HR=✓')
+      res.json(new HttpResult(0, { taredCount: 2, HL: true, HR: true }, '清零成功'))
+      return
+    }
+
+    // 否则进入等待重试循环，等待另一只手的数据到达
+    console.log('[tareGrip] 首次未全部就绪, HL=%s HR=%s, 开始等待重试...', gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
+    await new Promise((resolve) => {
+      const timer = setInterval(() => {
+        tryRecordBaseline()
+        if ((gripBaseline.HL && gripBaseline.HR) || (Date.now() - startTime >= MAX_WAIT)) {
+          clearInterval(timer)
+          resolve()
         }
-        if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length) {
-          gripBaseline.HR = [...item.arr]
-          taredCount++
-          console.log('[tareGrip] HR 基线已记录(从 dataMap), 长度=%d, 平均值=%.1f', item.arr.length, item.arr.reduce((a, b) => a + b, 0) / item.arr.length)
-        }
-      })
-    }
+      }, INTERVAL)
+    })
 
-    console.log('[tareGrip] 清零完成, 已记录 %d 个设备基线, HL=%s, HR=%s', taredCount, gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
+    const taredCount = (gripBaseline.HL ? 1 : 0) + (gripBaseline.HR ? 1 : 0)
+    console.log('[tareGrip] 清零完成(等待%dms), 已记录 %d 个设备基线, HL=%s, HR=%s', Date.now() - startTime, taredCount, gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
     res.json(new HttpResult(0, { taredCount, HL: !!gripBaseline.HL, HR: !!gripBaseline.HR }, '清零成功'))
   } catch (e) {
     console.error('[tareGrip] 错误:', e)
@@ -1693,10 +1733,13 @@ app.post('/tareGrip', (req, res) => {
 })
 
 // 清除握力基线（退出握力评估时调用）
+// 同时清除 gloveLatestData 缓存，避免第二次进入时用旧数据作为基线
 app.post('/clearGripBaseline', (req, res) => {
   gripBaseline.HL = null
   gripBaseline.HR = null
-  console.log('[clearGripBaseline] 基线已清除')
+  gloveLatestData.HL = null
+  gloveLatestData.HR = null
+  console.log('[clearGripBaseline] 基线和手套缓存已清除')
   res.json(new HttpResult(0, {}, '基线已清除'))
 })
 

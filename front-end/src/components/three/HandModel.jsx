@@ -2,12 +2,20 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
+/**
+ * HandModel - 3D hand model with real-time heatmap overlay
+ *
+ * Performance optimizations:
+ * - On-demand rendering: only re-renders when heatmap data changes (dirty flag)
+ * - Polls HeatmapCanvas._version via ref instead of React setState
+ * - Avoids React re-render cycle for texture updates
+ * - Reduced requestAnimationFrame overhead with idle frame skipping
+ */
 export function HandModel({
   isRecording = false,
   pressureValue = 0,
   isLeftHand = true,
-  heatmapCanvas = null,
-  heatmapVersion = 0
+  heatmapCanvas = null
 }) {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -19,19 +27,16 @@ export function HandModel({
   const modelRef = useRef(null);
   const modelLoadedRef = useRef(false);
   const baseScaleRef = useRef(1);
-  const textureNeedsApplyRef = useRef(false);
-  // 用 ref 跟踪最新的 heatmapVersion，在 animate 循环中检查
-  const heatmapVersionRef = useRef(0);
+  // Track the HeatmapCanvas instance for polling _version
+  const heatmapCanvasRef = useRef(null);
+  // Last applied version from HeatmapCanvas._version
   const lastAppliedVersionRef = useRef(-1);
   // 用 ref 跟踪 isLeftHand，确保模型加载完成后能读到最新值
   const isLeftHandRef = useRef(isLeftHand);
-  // 保存原始材质信息
-  const originalMaterialsRef = useRef([]);
 
   // 创建自定义 ShaderMaterial 混合原始材质和热力图
   const createHeatmapOverlayMaterial = useCallback((originalMaterial, heatmapTexture) => {
     // Use a clean light gray base color for the hand model
-    // Don't use original material's map texture as it contains the old block-style heatmap
     const origColor = new THREE.Color(0.82, 0.82, 0.85);
 
     // Get heatmap texture dimensions for texel size calculation
@@ -158,28 +163,6 @@ export function HandModel({
     }
   }, [createHeatmapOverlayMaterial]);
 
-  // 更新热力图纹理（不重新创建材质）
-  const updateHeatmapTexture = useCallback((group, texture) => {
-    if (!group || !texture) return;
-    group.traverse((child) => {
-      if (child.isMesh) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach((mat) => {
-            if (mat.uniforms && mat.uniforms.uHeatmap) {
-              mat.uniforms.uHeatmap.value = texture;
-              mat.uniformsNeedUpdate = true;
-            }
-          });
-        } else {
-          if (child.material.uniforms && child.material.uniforms.uHeatmap) {
-            child.material.uniforms.uHeatmap.value = texture;
-            child.material.uniformsNeedUpdate = true;
-          }
-        }
-      }
-    });
-  }, []);
-
   // 应用左右手镜像 scale 的辅助函数
   const applyHandScale = useCallback((model, baseScale, leftHand) => {
     if (!model) return;
@@ -209,7 +192,7 @@ export function HandModel({
     // Renderer setup
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap at 2x to avoid excessive GPU load on HiDPI
     renderer.shadowMap.enabled = true;
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -232,7 +215,7 @@ export function HandModel({
     handGroupRef.current = handGroup;
     scene.add(handGroup);
 
-    // Load GLB model - 使用相对路径兼容 Electron
+    // Load GLB model
     const loader = new GLTFLoader();
     const modelUrl = '/assets/hand0423g.glb';
     console.log('[HandModel] 开始加载模型:', modelUrl);
@@ -279,6 +262,9 @@ export function HandModel({
           console.log('[HandModel] 模型加载完成，应用自定义 shader');
           applyTextureToModel(handGroup, heatmapTextureRef.current);
         }
+
+        // Force initial render after model load
+        needsRenderRef.current = true;
       },
       (progress) => {
         if (progress.total) {
@@ -294,34 +280,48 @@ export function HandModel({
     handGroup.position.set(-1, -1, 0);
 
     // Grid helper
-    const gridHelper = new THREE.GridHelper(10, 20, 0xffffff, 0xffffff);
-    gridHelper.material.opacity = 0.1;
+    const gridHelper = new THREE.GridHelper(10, 20,
+      new THREE.Color(0.7, 0.7, 0.7),
+      new THREE.Color(0.85, 0.85, 0.85)
+    );
     gridHelper.material.transparent = true;
     gridHelper.position.y = -4;
     scene.add(gridHelper);
 
-    // Animation loop - 在这里检查纹理更新
-    let frameCount = 0;
+    // On-demand rendering: only re-render when data changes
+    const needsRenderRef_ = { current: true }; // initial render needed
+    // Expose to outer scope via component ref
+    needsRenderRef.current = true;
+
     const animate = () => {
       animationRef.current = requestAnimationFrame(animate);
-      frameCount++;
 
-      // 在渲染循环中检查纹理是否需要更新
-      const currentVersion = heatmapVersionRef.current;
-      if (currentVersion !== lastAppliedVersionRef.current) {
-        const texture = heatmapTextureRef.current;
-        if (texture && modelLoadedRef.current && handGroupRef.current) {
-          texture.needsUpdate = true;
-          lastAppliedVersionRef.current = currentVersion;
-
-          // 每100帧打印一次调试信息
-          if (frameCount % 100 === 0) {
-            console.log(`[HandModel] animate: 纹理更新 version=${currentVersion}, canvas=${texture.image?.width}x${texture.image?.height}`);
+      // Check if HeatmapCanvas has new data by polling _version
+      const hc = heatmapCanvasRef.current;
+      if (hc && hc._version !== undefined) {
+        const currentVersion = hc._version;
+        if (currentVersion !== lastAppliedVersionRef.current) {
+          // New heatmap data available
+          const texture = heatmapTextureRef.current;
+          if (texture && modelLoadedRef.current && handGroupRef.current) {
+            texture.needsUpdate = true;
+            lastAppliedVersionRef.current = currentVersion;
+            needsRenderRef_.current = true;
           }
         }
       }
 
-      renderer.render(scene, camera);
+      // Also check the component-level dirty flag (for model load, resize, etc.)
+      if (needsRenderRef.current) {
+        needsRenderRef_.current = true;
+        needsRenderRef.current = false;
+      }
+
+      // Only render when dirty
+      if (needsRenderRef_.current) {
+        renderer.render(scene, camera);
+        needsRenderRef_.current = false;
+      }
     };
     animate();
 
@@ -333,6 +333,7 @@ export function HandModel({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
+      needsRenderRef_.current = true;
     };
     window.addEventListener('resize', handleResize);
 
@@ -360,15 +361,21 @@ export function HandModel({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ref for triggering render from outside the animate closure
+  const needsRenderRef = useRef(true);
+
   // 创建/更新 heatmap 纹理 - 只在 heatmapCanvas 首次传入时创建纹理并绑定到模型
   useEffect(() => {
-    if (!heatmapCanvas) {
-      return;
-    }
+    if (!heatmapCanvas) return;
+
+    // heatmapCanvas is now a HeatmapCanvas instance (not a DOM canvas)
+    // Store reference for polling _version in animate loop
+    heatmapCanvasRef.current = heatmapCanvas;
+    const domCanvas = heatmapCanvas.canvas; // The actual DOM canvas element
 
     // 创建纹理（只创建一次）
     if (!heatmapTextureRef.current) {
-      const texture = new THREE.CanvasTexture(heatmapCanvas);
+      const texture = new THREE.CanvasTexture(domCanvas);
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
       texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -376,32 +383,22 @@ export function HandModel({
       // Disable premultiplied alpha to ensure transparent pixels stay transparent
       texture.premultiplyAlpha = false;
       heatmapTextureRef.current = texture;
-      console.log('[HandModel] 创建新的 CanvasTexture, canvas尺寸:', heatmapCanvas.width, 'x', heatmapCanvas.height);
-
-      // Don't apply texture until we have actual data (heatmapVersion > 0)
-      // This prevents showing stale/empty heatmap on initial load
+      console.log('[HandModel] 创建新的 CanvasTexture, canvas尺寸:', domCanvas.width, 'x', domCanvas.height);
     }
 
-    // Apply custom shader to model (always, to override built-in heatmap texture)
-    if (heatmapTextureRef.current) {
-      if (modelLoadedRef.current && handGroupRef.current) {
-        // Check if shader materials are already applied
-        let hasShaderMat = false;
-        handGroupRef.current.traverse((child) => {
-          if (child.isMesh && child.material?.uniforms?.uHeatmap) {
-            hasShaderMat = true;
-          }
-        });
-        if (!hasShaderMat) {
-          applyTextureToModel(handGroupRef.current, heatmapTextureRef.current);
+    // Apply custom shader to model if not already applied
+    if (heatmapTextureRef.current && modelLoadedRef.current && handGroupRef.current) {
+      let hasShaderMat = false;
+      handGroupRef.current.traverse((child) => {
+        if (child.isMesh && child.material?.uniforms?.uHeatmap) {
+          hasShaderMat = true;
         }
+      });
+      if (!hasShaderMat) {
+        applyTextureToModel(handGroupRef.current, heatmapTextureRef.current);
       }
     }
-
-    // 更新 version ref，让 animate 循环知道需要刷新纹理
-    heatmapVersionRef.current = heatmapVersion;
-
-  }, [heatmapCanvas, heatmapVersion, applyTextureToModel]);
+  }, [heatmapCanvas, applyTextureToModel]); // Only re-run when canvas instance changes, NOT on every version
 
   // Mirror model for left/right hand
   useEffect(() => {
@@ -413,6 +410,7 @@ export function HandModel({
     if (!model) return;
     const baseScale = baseScaleRef.current || 1;
     applyHandScale(model, baseScale, isLeftHand);
+    needsRenderRef.current = true; // trigger re-render for mirror change
   }, [isLeftHand, applyHandScale]);
 
   return (

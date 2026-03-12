@@ -2,6 +2,12 @@
  * Heatmap Canvas - GPU-accelerated heatmap rendering for pressure sensor data
  * Adapted from the original heatmap.js for the sarcopenia assessment system
  * Enhanced with smooth Gaussian blur and rainbow gradient (blue to red)
+ *
+ * Performance optimizations:
+ * - Reusable Float32Array buffers to avoid GC pressure
+ * - Reduced blur passes (2 instead of 3, GPU shader provides additional smoothing)
+ * - Pre-computed Gaussian kernel
+ * - Throttled rendering with dirty flag
  */
 import * as THREE from 'three';
 
@@ -328,60 +334,77 @@ function createHeatmapMaterial(dataTexture, gradientTexture, texelSize) {
   });
 }
 
-/* ─── Gaussian blur helper for CPU-side data upscaling ─── */
+/* ─── Optimized Gaussian blur with reusable buffers ─── */
+
+/**
+ * Pre-compute a 1D Gaussian kernel (computed once, reused across frames)
+ */
+const BLUR_RADIUS = 3;
+const BLUR_SIGMA = 2.0;
+const KERNEL_SIZE = BLUR_RADIUS * 2 + 1;
+const GAUSSIAN_KERNEL = new Float32Array(KERNEL_SIZE);
+{
+  let sum = 0;
+  for (let i = 0; i < KERNEL_SIZE; i++) {
+    const d = i - BLUR_RADIUS;
+    GAUSSIAN_KERNEL[i] = Math.exp(-(d * d) / (2 * BLUR_SIGMA * BLUR_SIGMA));
+    sum += GAUSSIAN_KERNEL[i];
+  }
+  for (let i = 0; i < KERNEL_SIZE; i++) GAUSSIAN_KERNEL[i] /= sum;
+}
 
 /**
  * Upscale a small grid (srcW x srcH) to a larger grid (dstW x dstH)
- * using bilinear interpolation, then apply Gaussian blur
+ * using bilinear interpolation, then apply Gaussian blur.
+ *
+ * Performance optimized:
+ * - Accepts pre-allocated buffers to avoid GC pressure
+ * - Uses pre-computed Gaussian kernel
+ * - Reduced default blur passes from 3 to 2 (GPU shader adds additional smoothing)
  */
-function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
+function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses, buffers) {
+  const total = dstW * dstH;
+  // Use pre-allocated buffers or create new ones
+  const upscaled = buffers?.upscaled || new Float32Array(total);
+  const hBlur = buffers?.hBlur || new Float32Array(total);
+  const vBlur = buffers?.vBlur || new Float32Array(total);
+
   // Step 1: Bilinear upscale
-  const upscaled = new Float32Array(dstW * dstH);
   for (let dy = 0; dy < dstH; dy++) {
+    const sy = (dy / dstH) * srcH;
+    const y0 = Math.floor(sy);
+    const y1 = Math.min(y0 + 1, srcH - 1);
+    const fy = sy - y0;
+    const y0Off = y0 * srcW;
+    const y1Off = y1 * srcW;
+    const dyOff = dy * dstW;
     for (let dx = 0; dx < dstW; dx++) {
       const sx = (dx / dstW) * srcW;
-      const sy = (dy / dstH) * srcH;
       const x0 = Math.floor(sx);
-      const y0 = Math.floor(sy);
       const x1 = Math.min(x0 + 1, srcW - 1);
-      const y1 = Math.min(y0 + 1, srcH - 1);
       const fx = sx - x0;
-      const fy = sy - y0;
-      const v00 = srcArr[y0 * srcW + x0] || 0;
-      const v10 = srcArr[y0 * srcW + x1] || 0;
-      const v01 = srcArr[y1 * srcW + x0] || 0;
-      const v11 = srcArr[y1 * srcW + x1] || 0;
-      upscaled[dy * dstW + dx] = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
+      const v00 = srcArr[y0Off + x0] || 0;
+      const v10 = srcArr[y0Off + x1] || 0;
+      const v01 = srcArr[y1Off + x0] || 0;
+      const v11 = srcArr[y1Off + x1] || 0;
+      upscaled[dyOff + dx] = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
     }
   }
 
-  // Step 2: Separable Gaussian blur (horizontal then vertical) - O(n) per pixel
-  const radius = 3;
-  const sigma = 2.0;
-  // Pre-compute 1D Gaussian kernel
-  const kernelSize = radius * 2 + 1;
-  const kernel = new Float32Array(kernelSize);
-  let kernelSum = 0;
-  for (let i = 0; i < kernelSize; i++) {
-    const d = i - radius;
-    kernel[i] = Math.exp(-(d * d) / (2 * sigma * sigma));
-    kernelSum += kernel[i];
-  }
-  for (let i = 0; i < kernelSize; i++) kernel[i] /= kernelSum;
-
+  // Step 2: Separable Gaussian blur (horizontal then vertical)
   let current = upscaled;
-  for (let pass = 0; pass < (blurPasses || 3); pass++) {
+  const passes = blurPasses || 2;
+  for (let pass = 0; pass < passes; pass++) {
     // Horizontal pass
-    const hBlur = new Float32Array(dstW * dstH);
     for (let y = 0; y < dstH; y++) {
       const rowOff = y * dstW;
       for (let x = 0; x < dstW; x++) {
         let sum = 0;
         let wSum = 0;
-        for (let k = -radius; k <= radius; k++) {
+        for (let k = -BLUR_RADIUS; k <= BLUR_RADIUS; k++) {
           const nx = x + k;
           if (nx >= 0 && nx < dstW) {
-            const w = kernel[k + radius];
+            const w = GAUSSIAN_KERNEL[k + BLUR_RADIUS];
             sum += current[rowOff + nx] * w;
             wSum += w;
           }
@@ -390,15 +413,14 @@ function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
       }
     }
     // Vertical pass
-    const vBlur = new Float32Array(dstW * dstH);
     for (let x = 0; x < dstW; x++) {
       for (let y = 0; y < dstH; y++) {
         let sum = 0;
         let wSum = 0;
-        for (let k = -radius; k <= radius; k++) {
+        for (let k = -BLUR_RADIUS; k <= BLUR_RADIUS; k++) {
           const ny = y + k;
           if (ny >= 0 && ny < dstH) {
-            const w = kernel[k + radius];
+            const w = GAUSSIAN_KERNEL[k + BLUR_RADIUS];
             sum += hBlur[ny * dstW + x] * w;
             wSum += w;
           }
@@ -406,10 +428,15 @@ function upscaleAndBlur(srcArr, srcW, srcH, dstW, dstH, blurPasses) {
         vBlur[y * dstW + x] = sum / wSum;
       }
     }
-    current = vBlur;
+    // For next pass, read from vBlur
+    if (pass < passes - 1) {
+      // Copy vBlur to current (reuse upscaled buffer)
+      upscaled.set(vBlur);
+      current = upscaled;
+    }
   }
 
-  return current;
+  return vBlur;
 }
 
 /* ─── Main HeatmapCanvas class ─── */
@@ -444,6 +471,21 @@ export class HeatmapCanvas {
       // 合并而不是覆盖，保留 gradient 等默认值
       this.options = { ...this.options, ...options };
     }
+
+    // Pre-allocate reusable buffers for upscaleAndBlur (avoid GC pressure)
+    const texTotal = this.width * this.height;
+    this._blurBuffers = {
+      upscaled: new Float32Array(texTotal),
+      hBlur: new Float32Array(texTotal),
+      vBlur: new Float32Array(texTotal),
+    };
+    // Pre-allocate normalized source buffer
+    this._normalizedSrc = new Float32Array(this.srcWidth * this.srcHeight);
+
+    // Dirty flag for on-demand rendering
+    this._dirty = false;
+    // Version counter (incremented on each changeHeatmap call, read by HandModel via ref)
+    this._version = 0;
 
     this.useGPU = false;
     try {
@@ -492,6 +534,7 @@ export class HeatmapCanvas {
   changeHeatmap(resArr, interp1, interp2, order) {
     if (!this.useGPU) {
       bthClickHandle(resArr, this.canvas, this.srcWidth, this.srcHeight, interp1, interp2, order, this.options);
+      this._version++;
       return;
     }
 
@@ -499,9 +542,9 @@ export class HeatmapCanvas {
     const max = typeof this.options.max === 'number' ? this.options.max : 1;
     const range = max - min || 1;
 
-    // Upscale 32x32 source data to 128x128 with bilinear interpolation and blur
+    // Normalize source data into pre-allocated buffer (no new allocation)
     const srcTotal = this.srcWidth * this.srcHeight;
-    const normalizedSrc = new Float32Array(srcTotal);
+    const normalizedSrc = this._normalizedSrc;
     for (let i = 0; i < srcTotal; i++) {
       const v = Array.isArray(resArr) ? resArr[i] || 0 : 0;
       let n = (v - min) / range;
@@ -510,8 +553,8 @@ export class HeatmapCanvas {
       normalizedSrc[i] = n;
     }
 
-    // Upscale and blur for smooth heatmap
-    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2);
+    // Upscale and blur using pre-allocated buffers (2 passes instead of 3)
+    const blurred = upscaleAndBlur(normalizedSrc, this.srcWidth, this.srcHeight, this.width, this.height, 2, this._blurBuffers);
 
     // Write to GPU texture
     const data = this.dataTexture.image.data;
@@ -538,5 +581,6 @@ export class HeatmapCanvas {
       this.cpuCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
       this.cpuCtx.drawImage(this.gpuCanvas, 0, 0, this.canvas.width, this.canvas.height);
     }
+    this._version++;
   }
 }
