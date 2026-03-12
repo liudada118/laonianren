@@ -3261,8 +3261,18 @@ async function connectPort() {
         // 注意：不覆盖 dataItem.type 和 dataItem.stamp，避免 type/arr 不匹配
         // （Packet1 只有前半数据，完整数据在 Packet2 到达时才合并写入）
         else if (pointArr.length == 130) {
-          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const orderByte = pointArr[0]       // 包顺序位: 应为 1
+          const sensorType = pointArr[1]      // 1=HL, 2=HR
           const sensorData = pointArr.slice(2)  // 128 字节 sensor 前半
+
+          // 追踪日志：每个 Packet1 的到达
+          if (!global._p1LogCount) global._p1LogCount = 0
+          global._p1LogCount++
+          if (global._p1LogCount <= 20) {
+            console.log('[glove-P1] #%d order=%d type=%d path=%s cacheKeys=%s',
+              global._p1LogCount, orderByte, sensorType, path,
+              JSON.stringify(Object.keys(glovePacket1Cache)))
+          }
 
           // 仅缓存 Packet1 数据，不修改 dataItem（等 Packet2 到达后再统一更新）
           glovePacket1Cache[sensorType] = {
@@ -3323,7 +3333,8 @@ async function connectPort() {
         // Packet2: 146字节 = 2(order+type) + 128(sensor后半) + 16(IMU)
         // 参考 serial_parser_two.py: 到达时立即与缓存的 packet1 合并
         } else if (pointArr.length == 146) {
-          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const orderByte = pointArr[0]       // 包顺序位: 应为 2
+          const sensorType = pointArr[1]      // 1=HL, 2=HR
           const sensorData = pointArr.slice(2, 130)  // 中间 128 字节 = sensor 后半
           const imuRaw = pointArr.slice(130)          // 最后 16 字节 = IMU
 
@@ -3334,13 +3345,25 @@ async function connectPort() {
           // 与缓存的 Packet1 合并为完整 256 字节 sensor 数据
           const cached = glovePacket1Cache[sensorType]
           let fullFrame = false
+
+          // 追踪日志：每个 Packet2 的到达和合并状态
+          if (!global._p2LogCount) global._p2LogCount = 0
+          global._p2LogCount++
+          if (global._p2LogCount <= 20) {
+            console.log('[glove-P2] #%d order=%d type=%d path=%s cached=%s cacheKeys=%s',
+              global._p2LogCount, orderByte, sensorType, path,
+              cached ? 'YES(len=' + cached.data.length + ',age=' + (stamp - cached.stamp) + 'ms)' : 'NO',
+              JSON.stringify(Object.keys(glovePacket1Cache)))
+          }
+
           if (cached) {
             dataItem.arr = [...cached.data, ...sensorData]
             delete glovePacket1Cache[sensorType]
             fullFrame = true  // 256 字节完整帧
           } else {
             dataItem.arr = sensorData  // 128 字节不完整帧（Packet1 缓存丢失）
-            console.log('[glove] Packet1缓存丢失, sensorType=%d, 只有%d字节', sensorType, sensorData.length)
+            console.log('[glove] Packet1缓存丢失, sensorType=%d, 只有%d字节, cacheKeys=%s',
+              sensorType, sensorData.length, JSON.stringify(Object.keys(glovePacket1Cache)))
           }
 
           // 解析并校验四元数
