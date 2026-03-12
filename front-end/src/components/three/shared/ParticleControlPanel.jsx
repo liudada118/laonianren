@@ -19,7 +19,7 @@ import React, { useState } from 'react';
 import { SHARED_RANGES, TRANSFORM_RANGES } from './particleConfig';
 
 const SHARED_KEYS = ['gaussSigma', 'filterThreshold', 'initValue', 'colorRange', 'heightScale'];
-const TRANSFORM_KEYS = ['posX', 'posY', 'posZ', 'particleSize', 'scale'];
+const TRANSFORM_KEYS = ['posX', 'posY', 'posZ', 'rotX', 'rotY', 'rotZ', 'particleSize', 'scale'];
 
 function SliderRow({ paramKey, range, value, onChange }) {
   return (

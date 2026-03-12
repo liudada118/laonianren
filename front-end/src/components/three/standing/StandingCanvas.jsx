@@ -90,11 +90,14 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   function getTransform() {
     const t = propsRef.current.transformParams || {};
     return {
-      posX:         t.posX ?? 0,
-      posY:         t.posY ?? 0,
-      posZ:         t.posZ ?? 0,
-      particleSize: t.particleSize ?? 1,
-      scale:        t.scale ?? 1,
+      posX:         t.posX ?? -5,
+      posY:         t.posY ?? 190,
+      posZ:         t.posZ ?? 275,
+      rotX:         t.rotX ?? 0,
+      rotY:         t.rotY ?? 0,
+      rotZ:         t.rotZ ?? 0,
+      particleSize: t.particleSize ?? 1.6,
+      scale:        t.scale ?? 1.9,
     };
   }
 
@@ -201,6 +204,11 @@ const StandingCanvas = React.forwardRef((props, refs) => {
       particles.scale.set(s, s, s);
       material.size = tf.particleSize;
       group.position.set(GX + tf.posX, GY + tf.posY, GZ + tf.posZ);
+      // rotation（保留原有的 rotation.x = Math.PI/3，叠加用户调节值）
+      const deg = Math.PI / 180;
+      particles.rotation.x = Math.PI / 3 + tf.rotX * deg;
+      particles.rotation.y = tf.rotY * deg;
+      particles.rotation.z = tf.rotZ * deg;
 
       readExternalData(ndata);
 
