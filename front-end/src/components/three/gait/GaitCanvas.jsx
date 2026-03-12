@@ -247,7 +247,8 @@ export default function GaitCanvas({
 
       mergeSensorData();
 
-      // 坏线补值已移至后端数据源头处理
+      // 坏线补值：在合并后的 64×256 矩阵上做坏线检测和插值修复
+      zeroLine64x256(ndata, 64, 256);
 
       // 过滤
       for (let i = 0; i < ndata.length; i++) {
