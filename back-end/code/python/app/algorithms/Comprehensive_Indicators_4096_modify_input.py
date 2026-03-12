@@ -2284,7 +2284,7 @@ def cal_cop_fromData(data_array,user_name, user_age, user_gender, user_id, thres
     print("cal_cop_fromData_internal")
 
     #print(f"正在分析数据数组，共 {len(data_array)} 行数据")
-    df = preprocess_data_array(data_array, rotate_90_ccw=rotate_data, mirrored_horizon=True)
+    df = preprocess_data_array(data_array, rotate_90_ccw=rotate_data, mirrored_horizon=rotate_data)
 
     # 矢量化压力曲线
     left_curve, right_curve = extract_pressure_curves(data_array)

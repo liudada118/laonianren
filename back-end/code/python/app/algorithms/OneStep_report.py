@@ -2275,7 +2275,7 @@ def cal_cop_fromData(data_array, threshold_ratio=0.8, fps=42, r_radius=0.1, time
     ✅ 确保所有图片都基于总压力峰值帧
     """
     print(f"正在分析数据数组，共 {len(data_array)} 行数据")
-    df = preprocess_data_array(data_array, rotate_90_ccw=rotate_data, mirrored_horizon=True)
+    df = preprocess_data_array(data_array, rotate_90_ccw=rotate_data, mirrored_horizon=rotate_data)
 
     # 矢量化压力曲线
     left_curve, right_curve = extract_pressure_curves(data_array)
