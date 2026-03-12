@@ -136,8 +136,8 @@ export default function GaitCanvas({
     if (onSceneReady) onSceneReady({ scene, camera, renderer });
 
     /* ─── 合并 4 个传感器矩阵为 64×256 flat 数组 ─── */
-    // 每个 64×64 传感器逆时针旋转 90 度后再拼接
-    // 逆时针 90°：原 (row,col) → 新 (63-col, row)
+    // 每个 64×64 传感器顺时针旋转 90 度后再拼接
+    // 顺时针 90°：原 (row,col) → 新 (col, 63-row)
     function mergeSensorData() {
       const { sensorData: sd } = propsRef.current;
       ndata.fill(0);
@@ -148,9 +148,9 @@ export default function GaitCanvas({
         const colOffset = s * 64;
         for (let row = 0; row < 64 && row < matrix.length; row++) {
           for (let col = 0; col < 64 && col < matrix[row].length; col++) {
-            // 逆时针旋转 90 度：新行 = 63 - col，新列 = row
-            const newRow = 63 - col;
-            const newCol = row;
+            // 顺时针旋转 90 度：新行 = col，新列 = 63 - row
+            const newRow = col;
+            const newCol = 63 - row;
             ndata[newRow * NY + colOffset + newCol] = matrix[row][col];
           }
         }
