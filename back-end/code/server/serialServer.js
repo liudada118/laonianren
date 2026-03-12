@@ -363,11 +363,10 @@ function applyFootFilter(arr, mode, footType) {
   }
   if (cfg.optimizeEnabled) {
     if (mode === 'gait' && footType && ['foot1','foot2','foot3','foot4'].includes(footType)) {
-      // 步道模式：缓存当前传感器数据，待 4 个都到齐后合并 64×256 做坏线补值
+      // 步道模式：缓存当前传感器数据，每次到达即触发合并 64×256 坏线补值
+      // 缺少的传感器用全0数组填充，不要求4个全到齐
       gaitFootCache[footType] = arr
-      if (gaitFootCache.foot1 && gaitFootCache.foot2 && gaitFootCache.foot3 && gaitFootCache.foot4) {
-        zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
-      }
+      zeroLineRepairMerged(cfg.optimizeBad, cfg.optimizeGood)
     } else {
       // 静态模式：单个 64×64 做坏线补值
       zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
@@ -622,18 +621,16 @@ const gaitFootCache = { foot1: null, foot2: null, foot3: null, foot4: null }
  * 将 4 个 64×64 传感器合并为 64×256，做坏线补值，再拆回 4 个 64×64
  */
 function zeroLineRepairMerged(badThresh, goodThresh) {
-  const f1 = gaitFootCache.foot1
-  const f2 = gaitFootCache.foot2
-  const f3 = gaitFootCache.foot3
-  const f4 = gaitFootCache.foot4
-  if (!f1 || !f2 || !f3 || !f4) return
-  
-  console.log('[zeroLineRepairMerged] 开始, badThresh=%d, goodThresh=%d, f1.len=%d, f2.len=%d, f3.len=%d, f4.len=%d',
-    badThresh, goodThresh, f1.length, f2.length, f3.length, f4.length)
+  const ZERO = new Array(4096).fill(0)
+  const f1 = gaitFootCache.foot1 || ZERO
+  const f2 = gaitFootCache.foot2 || ZERO
+  const f3 = gaitFootCache.foot3 || ZERO
+  const f4 = gaitFootCache.foot4 || ZERO
   
   const ROWS = 64, COLS = 256
   // 合并为 64×256：每个 64×64 传感器先顺时针旋转 90 度（与前端一致），再按列拼接
   // 顺时针旋转 90°：newRow = col, newCol = 63 - row
+  // 缺少的传感器用全0填充
   const merged = new Array(ROWS * COLS).fill(0)
   const parts = [f1, f2, f3, f4]
   for (let p = 0; p < 4; p++) {
@@ -729,9 +726,11 @@ function zeroLineRepairMerged(badThresh, goodThresh) {
   
   console.log('[zeroLineRepairMerged] 完成: 修复了 %d 行, %d 列', repairedRows, repairedCols)
   
-  // 逆时针旋转 90° 拆回 4 个 64×64，写回原始数组
+  // 逆时针旋转 90° 拆回 4 个 64×64，只写回有真实缓存的传感器
   // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
+  const cacheKeys = ['foot1', 'foot2', 'foot3', 'foot4']
   for (let p = 0; p < 4; p++) {
+    if (!gaitFootCache[cacheKeys[p]]) continue  // 跳过没有数据的传感器
     const target = parts[p]
     const colOffset = p * 64
     for (let newRow = 0; newRow < 64; newRow++) {
