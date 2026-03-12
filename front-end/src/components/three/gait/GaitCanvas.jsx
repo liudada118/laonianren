@@ -247,10 +247,7 @@ export default function GaitCanvas({
 
       mergeSensorData();
 
-      // 坏线补值（由“优化”开关控制）
-      if (propsRef.current.optimizeEnabled) {
-        zeroLine64x256(ndata, NX, NY);
-      }
+      // 坏线补值已移至后端数据源头处理
 
       // 过滤
       for (let i = 0; i < ndata.length; i++) {

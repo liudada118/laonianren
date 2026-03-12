@@ -676,6 +676,14 @@ export default function GaitAssessment() {
   const [smoothness, setSmoothness] = useState(0.5);
   const [filterEnabled, setFilterEnabled] = useState(true);
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
+
+  // 同步滤波/优化开关到后端（数据源头处理）
+  useEffect(() => {
+    backendBridge.setFootFilter('gait', { filterEnabled }).catch(e => console.warn('设置步道滤波失败:', e));
+  }, [filterEnabled]);
+  useEffect(() => {
+    backendBridge.setFootFilter('gait', { optimizeEnabled }).catch(e => console.warn('设置步道优化失败:', e));
+  }, [optimizeEnabled]);
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
@@ -823,9 +831,9 @@ export default function GaitAssessment() {
           for (let r = 0; r < 64; r++) row.push(raw[r][c]);
           matrix.push(row);
         }
-        const denoised = filterEnabled ? denoiseMatrix(matrix, 15, 20) : matrix;
+        // 滤波和优化已在后端数据源头处理，前端直接使用
         setSensorData(prev => {
-          const newData = { ...prev, [key]: denoised };
+          const newData = { ...prev, [key]: matrix };
           computeStats(newData);
           return newData;
         });
@@ -838,7 +846,7 @@ export default function GaitAssessment() {
         backendBridge.off(event, handler);
       });
     };
-  }, [isGlobalConnected, computeStats, denoiseMatrix, filterEnabled]);
+  }, [isGlobalConnected, computeStats]);
 
   // ─── CSV 导出 ───
   const handleExportCsv = async () => {

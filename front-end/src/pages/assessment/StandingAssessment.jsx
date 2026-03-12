@@ -168,6 +168,16 @@ export default function StandingAssessment() {
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.8);
   const [filterThreshold, setFilterThreshold] = useState(0);
+  const [filterEnabled, setFilterEnabled] = useState(true);
+  const [optimizeEnabled, setOptimizeEnabled] = useState(true);
+
+  // 同步滤波/优化开关到后端（数据源头处理）
+  useEffect(() => {
+    backendBridge.setFootFilter('standing', { filterEnabled }).catch(e => console.warn('设置静态滤波失败:', e));
+  }, [filterEnabled]);
+  useEffect(() => {
+    backendBridge.setFootFilter('standing', { optimizeEnabled }).catch(e => console.warn('设置静态优化失败:', e));
+  }, [optimizeEnabled]);
 
   // 粒子系统共用参数
   const [particleParams, setParticleParams] = useState(() => loadParams());
@@ -455,9 +465,8 @@ export default function StandingAssessment() {
       // 后端推送的是 4096 个值的 flat 数组
       currentRawFlat.current = arr;
       const matrix = parseFrameData(arr);
-      // 应用噪音过滤
-      const filtered = denoiseMatrix(matrix, 12, 15);
-      handleSerialData(filtered);
+      // 滤波和优化已在后端数据源头处理，前端直接使用
+      handleSerialData(matrix);
     };
 
     const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
@@ -475,7 +484,7 @@ export default function StandingAssessment() {
         backendCleanupRef.current = null;
       }
     };
-  }, [isGlobalConnected, handleSerialData, denoiseMatrix]);
+  }, [isGlobalConnected, handleSerialData]);
 
   // ─── 滤波阈值 ───
   useEffect(() => {
@@ -755,6 +764,18 @@ export default function StandingAssessment() {
               onTransformReset={handleTransformReset}
               showHeatmap={showHeatmap}
               onHeatmapChange={setShowHeatmap}
+              extra={
+                <>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
+                    <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>滤波</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={optimizeEnabled} onChange={e => setOptimizeEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
+                    <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>优化</span>
+                  </label>
+                </>
+              }
             />
 
             {/* 处理中遮罩 */}

@@ -242,6 +242,131 @@ function removeSmallIslands64x64(arr, minSize = 9) {
 }
 
 
+/**
+ * 对 64x64 脚垫数据进行去噪滤波（低压力置零 + 小连通域移除）
+ * 与前端 denoiseMatrix 逻辑一致，但操作一维数组
+ */
+function denoiseFootData(arr, threshold, minArea) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  // 步骤1：低压力置零
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] < threshold) arr[i] = 0
+  }
+  // 步骤2：BFS 连通域分析，移除小区域
+  const visited = new Array(arr.length).fill(false)
+  const dirs = [-1, 0, 1]
+  for (let idx = 0; idx < arr.length; idx++) {
+    if (visited[idx] || arr[idx] <= 0) continue
+    const stack = [idx]
+    const component = []
+    visited[idx] = true
+    while (stack.length) {
+      const cur = stack.pop()
+      component.push(cur)
+      const r = Math.floor(cur / size)
+      const c = cur - r * size
+      for (const dr of dirs) {
+        const nr = r + dr
+        if (nr < 0 || nr >= size) continue
+        for (const dc of dirs) {
+          const nc = c + dc
+          if (nc < 0 || nc >= size) continue
+          if (dr === 0 && dc === 0) continue
+          const ni = nr * size + nc
+          if (!visited[ni] && arr[ni] > 0) {
+            visited[ni] = true
+            stack.push(ni)
+          }
+        }
+      }
+    }
+    if (component.length < minArea) {
+      for (const ci of component) arr[ci] = 0
+    }
+  }
+  return arr
+}
+
+/**
+ * 对 64x64 脚垫数据进行坏线补值（检测异常低值行/列，用相邻行/列插值修复）
+ * 支持连续 1~2 行/列坏线
+ */
+function zeroLineRepair64x64(arr, badThresh, goodThresh) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const ROWS = 64, COLS = 64
+
+  // 计算每行和每列的总和
+  const rowSums = new Float32Array(ROWS)
+  const colSums = new Float32Array(COLS)
+  for (let r = 0; r < ROWS; r++) {
+    let total = 0
+    for (let c = 0; c < COLS; c++) total += arr[r * COLS + c]
+    rowSums[r] = total
+  }
+  for (let c = 0; c < COLS; c++) {
+    let total = 0
+    for (let r = 0; r < ROWS; r++) total += arr[r * COLS + c]
+    colSums[c] = total
+  }
+
+  // 修复坏行
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (rowSums[r] >= badThresh) continue
+    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        arr[r * COLS + c] = (arr[(r - 1) * COLS + c] + arr[(r + 1) * COLS + c]) / 2
+      }
+    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
+               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        const vPrev = arr[(r - 1) * COLS + c]
+        const vNext = arr[(r + 2) * COLS + c]
+        arr[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        arr[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      r++
+    }
+  }
+
+  // 修复坏列
+  for (let c = 1; c < COLS - 1; c++) {
+    if (colSums[c] >= badThresh) continue
+    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        arr[r * COLS + c] = (arr[r * COLS + (c - 1)] + arr[r * COLS + (c + 1)]) / 2
+      }
+    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        const vPrev = arr[r * COLS + (c - 1)]
+        const vNext = arr[r * COLS + (c + 2)]
+        arr[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        arr[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      c++
+    }
+  }
+  return arr
+}
+
+/**
+ * 根据当前评估模式对脚垫数据应用滤波和坏线补值
+ * @param {number[]} arr - 4096 长度一维数组
+ * @param {string} mode - 'standing' 或 'gait'
+ */
+function applyFootFilter(arr, mode) {
+  const cfg = footFilterConfig[mode]
+  if (!cfg) return arr
+  if (cfg.filterEnabled) {
+    denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
+  }
+  if (cfg.optimizeEnabled) {
+    zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+  }
+  return arr
+}
+
 function parseSerialTypeMap(raw) {
   if (!raw) return {}
   if (typeof raw === 'object' && !Array.isArray(raw)) return raw
@@ -458,6 +583,28 @@ let linkIngPort = [], currentDb, macInfo = {}, selectArr = []
 let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
+
+// ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开） ───
+let footFilterConfig = {
+  // 静态评估 (mode=4, foot1)
+  standing: {
+    filterEnabled: true,     // 去噪滤波开关
+    filterThreshold: 12,     // 低压力阈值
+    filterMinArea: 15,       // 最小连通域面积
+    optimizeEnabled: true,   // 坏线补值开关
+    optimizeBad: 40,         // 坏线总和阈值
+    optimizeGood: 100,       // 正常行/列总和阈值
+  },
+  // 步道评估 (mode=5, foot1-4)
+  gait: {
+    filterEnabled: true,
+    filterThreshold: 15,
+    filterMinArea: 20,
+    optimizeEnabled: true,
+    optimizeBad: 40,
+    optimizeGood: 100,
+  },
+}
 
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
 const glovePacket1Cache = {}
@@ -1728,6 +1875,28 @@ app.post('/setActiveMode', (req, res) => {
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setActiveMode failed'))
   }
+})
+
+// ─── 脚垫滤波/优化参数 API ───
+app.post('/setFootFilter', (req, res) => {
+  try {
+    const { mode, config } = req.body || {}
+    if (!mode || !config || !footFilterConfig[mode]) {
+      res.json(new HttpResult(1, {}, 'invalid mode, must be "standing" or "gait"'))
+      return
+    }
+    // 合并更新（只更新传入的字段）
+    Object.assign(footFilterConfig[mode], config)
+    console.log(`[setFootFilter] ${mode} 参数已更新:`, JSON.stringify(footFilterConfig[mode]))
+    res.json(new HttpResult(0, footFilterConfig[mode], 'success'))
+  } catch (e) {
+    console.error('[setFootFilter] error:', e)
+    res.json(new HttpResult(1, {}, 'setFootFilter failed'))
+  }
+})
+
+app.get('/getFootFilter', (req, res) => {
+  res.json(new HttpResult(0, footFilterConfig, 'success'))
 })
 
 
@@ -3568,6 +3737,11 @@ async function connectPort() {
           removeSmallIslands64x64(pointArr, 12)
           // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
           const flippedArr = flipFoot64x64Vertical(pointArr)
+          // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
+          const filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
+          if (filterMode) {
+            applyFootFilter(flippedArr, filterMode)
+          }
           dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
             dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })

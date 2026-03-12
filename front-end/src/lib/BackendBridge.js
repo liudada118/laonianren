@@ -174,6 +174,25 @@ class BackendBridge {
     return res.json();
   }
 
+  /**
+   * 设置脚垫滤波/优化参数
+   * @param {string} mode - 'standing' 或 'gait'
+   * @param {object} config - { filterEnabled, filterThreshold, filterMinArea, optimizeEnabled, optimizeBad, optimizeGood }
+   */
+  async setFootFilter(mode, config) {
+    const res = await fetch(`${this.httpUrl}/setFootFilter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, config }),
+    });
+    return res.json();
+  }
+
+  async getFootFilter() {
+    const res = await fetch(`${this.httpUrl}/getFootFilter`);
+    return res.json();
+  }
+
   async tareGrip() {
     const res = await fetch(`${this.httpUrl}/tareGrip`, {
       method: 'POST',
