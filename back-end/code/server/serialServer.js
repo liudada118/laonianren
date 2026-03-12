@@ -3183,44 +3183,56 @@ async function connectPort() {
     ports = getPort(ports)
   }
   console.log(ports, 'ports')
-  // 鍒涘缓骞惰繛鎺ユ暟鎹€氶亾骞朵笖璁剧疆鍥炶皟
+
+  // ============================================================
+  // 阶段一：通过分隔符 + 帧长度双重验证，通过波特率探测确定每个端口的设备类型
+  // 关键：每次只打开一个端口，探测完关闭后再探测下一个，避免 CH340 驱动端口锁冲突
+  // ============================================================
+  const baudDetectResults = {}  // path -> detectedBaud
+  console.log('[phase1] Starting baud rate detection for', ports.length, 'ports')
+  for (let i = 0; i < ports.length; i++) {
+    const { path } = ports[i]
+    let detectedBaud = null
+    if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+      try {
+        const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
+        detectedBaud = baudMap[path] || null
+      } catch (e) {}
+      console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || baudRate)
+    } else {
+      detectedBaud = await detectBaudRate(path)
+    }
+    baudDetectResults[path] = detectedBaud
+    console.log('[phase1]', path, '=>', detectedBaud || 'null (will use default ' + baudRate + ')')
+    // 探测完后等待端口完全释放，再探测下一个
+    await new Promise(r => setTimeout(r, 500))
+  }
+  console.log('[phase1] Detection complete:', JSON.stringify(baudDetectResults))
+
+  // 探测全部完成后，等待一段时间确保所有端口锁彻底释放
+  await new Promise(r => setTimeout(r, 1000))
+
+  // ============================================================
+  // 阶段二：根据探测结果逐个打开端口并建立连接
+  // ============================================================
+  console.log('[phase2] Starting port connections')
   for (let i = 0; i < ports.length; i++) {
 
       const portInfo = ports[i]
 
-
-
-
       const { path } = portInfo
-      let portBaudRate = baudRate
-    // parserArr[path]
+      const detectedBaud = baudDetectResults[path]
+      let portBaudRate = detectedBaud || baudRate
+
       const parserItem = parserArr[path] = parserArr[path] ? parserArr[path] : {}
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
       parserItem.baudRate = portBaudRate
-      // parserItem 
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
 
     const { parser } = parserItem
 
-    // if()
-
       if (!(parserItem.port && parserItem.port.isOpen)) {
-        let detectedBaud = null
-        if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
-          // 测试模式：从环境变量获取预设波特率
-          try {
-            const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
-            detectedBaud = baudMap[path] || null
-          } catch (e) {}
-          console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || portBaudRate)
-        } else {
-          detectedBaud = await detectBaudRate(path)
-        }
-        if (detectedBaud) {
-          portBaudRate = detectedBaud
-        }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
-        parserItem.baudRate = portBaudRate
         // 根据探测到的波特率自动设置设备大类
         const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
         if (deviceCategory) {
@@ -3228,13 +3240,11 @@ async function connectPort() {
             dataItem.type = 'sit'
             dataItem.premission = true
           } else if (deviceCategory === 'foot') {
-            // 脚垫类型需要通过 AT 指令获取 MAC 地址后再细分 foot1-4
             dataItem.type = 'foot'
           }
-          // hand 类型由帧内类型位（130字节帧）动态设置为 HL/HR
           console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
         }
-        // 使用带重试的端口连接，解决 macOS Cannot lock port 问题
+        // 使用带重试的端口连接
         const port = await newSerialPortLinkWithRetry({ path, parser: parserItem.parser, baudRate: portBaudRate })
         if (!port) {
           console.log('[port] ' + path + ' skipped: unable to open port')
