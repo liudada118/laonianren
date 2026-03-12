@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
-import InsoleScene from '../../components/three/InsoleScene';
+import StandingCanvas from '../../components/three/standing/StandingCanvas';
 import { serialService } from '../../lib/SerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import {
@@ -705,13 +705,11 @@ export default function StandingAssessment() {
           />
         </div>
 
-        {/* 右侧3D区域 - huisheng-sdk InsoleScene */}
+        {/* 右侧3D区域 - Three.js 粒子系统可视化 */}
         <div className="flex-1 min-w-0 flex flex-col items-center justify-center relative overflow-hidden">
           <div className="relative w-full h-full model-container m-3 rounded-xl overflow-hidden">
-            <InsoleScene
+            <StandingCanvas
               showHeatmap={showHeatmap}
-              enableClipping={false}
-              clipLevel={0.5}
               depthScale={depthScale}
               smoothness={smoothness}
               externalDataRef={insoleDataRef}
