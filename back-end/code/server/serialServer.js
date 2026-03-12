@@ -3880,6 +3880,8 @@ async function connectPort() {
           }
           if (filterMode) {
             applyFootFilter(flippedArr, filterMode, dataItem.type)
+          } else {
+            console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
           }
           dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
