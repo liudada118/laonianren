@@ -57,10 +57,12 @@ function createBuffers() {
 const StandingCanvas = React.forwardRef((props, refs) => {
   const containerRef = useRef(null);
   const stateRef = useRef(null);   // 所有内部可变状态
+  const propsRef = useRef(props);
+  propsRef.current = props;        // 每次渲染更新，避免闭包过期
 
   /* ─── 读取外部矩阵 → flat Float32Array ─── */
   function readExternalData(target) {
-    const ref = props.externalDataRef;
+    const ref = propsRef.current.externalDataRef;
     if (!ref?.current) return false;
     const m = ref.current;
     if (!Array.isArray(m) || m.length === 0) return false;
@@ -73,9 +75,9 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     return true;
   }
 
-  /* ─── 获取参数（实时从 props 读取） ─── */
+  /* ─── 获取参数（实时从 propsRef 读取） ─── */
   function getParams() {
-    const p = props.particleParams || {};
+    const p = propsRef.current.particleParams || {};
     return {
       gaussSigma:      p.gaussSigma ?? 2,
       filterThreshold: p.filterThreshold ?? 2,
@@ -86,7 +88,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
   }
 
   function getTransform() {
-    const t = props.transformParams || {};
+    const t = propsRef.current.transformParams || {};
     return {
       posX:         t.posX ?? 0,
       posY:         t.posY ?? 0,
@@ -263,17 +265,17 @@ const StandingCanvas = React.forwardRef((props, refs) => {
         const press = dataArr.reduce((a, b) => a + b, 0);
         const mean = press / (point || 1);
 
-        if (props.data?.current?.changeData) {
-          props.data.current.changeData({ meanPres: mean.toFixed(2), maxPres: max, point, totalPres: press });
+        if (propsRef.current.data?.current?.changeData) {
+          propsRef.current.data.current.changeData({ meanPres: mean.toFixed(2), maxPres: max, point, totalPres: press });
         }
 
         if (totalArr.length < 20) totalArr.push(press); else { totalArr.shift(); totalArr.push(press); }
         const maxTotal = findMax(totalArr);
-        if (!props.local && props.data?.current?.handleCharts) props.data.current.handleCharts(totalArr, maxTotal + 1000);
+        if (!propsRef.current.local && propsRef.current.data?.current?.handleCharts) propsRef.current.data.current.handleCharts(totalArr, maxTotal + 1000);
 
         if (totalPointArr.length < 20) totalPointArr.push(point); else { totalPointArr.shift(); totalPointArr.push(point); }
         const max1 = findMax(totalPointArr);
-        if (!props.local && props.data?.current?.handleChartsArea) props.data.current.handleChartsArea(totalPointArr, max1 + 100);
+        if (!propsRef.current.local && propsRef.current.data?.current?.handleChartsArea) propsRef.current.data.current.handleChartsArea(totalPointArr, max1 + 100);
 
         timeS = 0;
       }
@@ -311,9 +313,9 @@ const StandingCanvas = React.forwardRef((props, refs) => {
           const sm = [rect.left, rect.top, rect.right, rect.bottom];
           const inter = checkRectangleIntersection(sm, sitMatrix);
           if (inter) sitIndexArr = checkRectIndex(sitMatrix, inter, AX, AY);
-          if (props.changeSelect) {
+          if (propsRef.current.changeSelect) {
             clearTimeout(stateRef.current?._debounce);
-            stateRef.current._debounce = setTimeout(() => props.changeSelect({ sit: sitIndexArr, back: [] }), 500);
+            stateRef.current._debounce = setTimeout(() => propsRef.current.changeSelect({ sit: sitIndexArr, back: [] }), 500);
           }
         }
       }
@@ -343,15 +345,15 @@ const StandingCanvas = React.forwardRef((props, refs) => {
         if (!controlsFlag) {
           const inter = checkRectangleIntersection(sm, sitMatrix);
           if (inter) { sitIndexArr = checkRectIndex(sitMatrix, inter, AX, AY); sitIndexEndArr = [...sitIndexArr]; }
-          if (props.changeStateData) {
-            props.changeStateData({ width: Math.abs(selectEndArr[0] - selectStartArr[0]), height: Math.abs(selectEndArr[1] - selectStartArr[1]) });
+          if (propsRef.current.changeStateData) {
+            propsRef.current.changeStateData({ width: Math.abs(selectEndArr[0] - selectStartArr[0]), height: Math.abs(selectEndArr[1] - selectStartArr[1]) });
           }
         }
       }
     }
     function onPointerUp() {
       if (selectHelper.isShiftPressed) {
-        if (props.changeSelect) props.changeSelect({ sit: sitIndexEndArr, back: [] });
+        if (propsRef.current.changeSelect) propsRef.current.changeSelect({ sit: sitIndexEndArr, back: [] });
         selectStartArr = []; selectEndArr = []; colSelectFlag = false;
       }
     }
@@ -404,7 +406,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
       stateRef.current.selectHelper.isShiftPressed = !value;
       if (value) {
         stateRef.current.selectHelper.onSelectOver();
-        if (flag && props.changeSelect) props.changeSelect({ sit: [0, 72, 0, 72] });
+        if (flag && propsRef.current.changeSelect) propsRef.current.changeSelect({ sit: [0, 72, 0, 72] });
       }
     },
     sitRenew() {},
