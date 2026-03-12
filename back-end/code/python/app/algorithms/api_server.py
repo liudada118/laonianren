@@ -351,7 +351,7 @@ async def analyze_standing(
 
             # ── 额外提取 COP 轨迹 & 椭圆参数（cal_cop_fromData 未返回这些） ──
             df = modules["preprocess_data_array"](
-                processed_data, rotate_90_ccw=False, mirrored_horizon=True
+                processed_data, rotate_90_ccw=False, mirrored_horizon=False
             )
             left_curve, right_curve = modules["extract_pressure_curves"](processed_data)
             left_cop, right_cop = modules["calculate_cop_trajectories"](
