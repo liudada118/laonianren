@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 import EChart from '../../components/ui/EChart';
-import FootpadSceneReact from '../../lib/footpad-sdk/components/FootpadSceneReact';
+import GaitCanvas from '../../components/three/gait/GaitCanvas';
+import ParticleControlPanel from '../../components/three/shared/ParticleControlPanel';
+import { loadParams, saveParams, resetParams } from '../../components/three/shared/particleConfig';
 import { backendBridge } from '../../lib/BackendBridge';
 import GaitRegionChart from '../../components/report/GaitRegionChart';
 import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
@@ -645,6 +647,20 @@ export default function GaitAssessment() {
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
+  // 粒子系统共用参数
+  const [particleParams, setParticleParams] = useState(() => loadParams());
+  const handleParamChange = useCallback((key, value) => {
+    setParticleParams(prev => {
+      const next = { ...prev, [key]: value };
+      saveParams(next);
+      return next;
+    });
+  }, []);
+  const handleParamReset = useCallback(() => {
+    const defaults = resetParams();
+    setParticleParams(defaults);
+  }, []);
+
   /* 实时统计 */
   const [sensorStats, setSensorStats] = useState({
     totals: [0, 0, 0, 0],
@@ -1002,31 +1018,27 @@ export default function GaitAssessment() {
         {/* 右侧3D区域 */}
         <div className="flex-1 flex flex-col items-center justify-center relative min-w-0 overflow-hidden">
           <div className="relative w-full h-full m-3 rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #d4d0cc 0%, #e0dcd8 50%, #d8d4d0 100%)' }}>
-            <FootpadSceneReact
-              sensorCount={4}
-              showHeatmap={showHeatmap}
-              depthScale={depthScale}
-              smoothness={smoothness}
+            <GaitCanvas
               sensorData={sensorData}
+              showHeatmap={showHeatmap}
+              particleParams={particleParams}
               onSceneReady={(scene) => { sceneRef.current = scene; }}
-              style={{ width: '100%', height: '100%' }}
             />
 
-            {/* 浮动控件 */}
-            <div className="absolute top-3 right-3 z-10 flex flex-col gap-2 p-3 rounded-xl"
-              style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-              <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-                <input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} className="rounded" /> 热力图
-              </label>
-              <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-                <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="rounded" /> 滤波
-              </label>
-              <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <span>平滑</span>
-                <input type="range" min={0} max={100} value={smoothness * 100} onChange={e => setSmoothness(e.target.value / 100)} className="w-16 h-1" />
-                <span>{smoothness.toFixed(1)}</span>
-              </div>
-            </div>
+            {/* 粒子参数调节面板 */}
+            <ParticleControlPanel
+              params={particleParams}
+              onChange={handleParamChange}
+              onReset={handleParamReset}
+              showHeatmap={showHeatmap}
+              onHeatmapChange={setShowHeatmap}
+              extra={
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
+                  <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>滤波</span>
+                </label>
+              }
+            />
 
             {/* 处理中遮罩 */}
             {phase === 'processing' && (

@@ -1,515 +1,412 @@
 /**
- * StandingCanvas - 基于 Three.js 粒子系统的静态站立压力可视化
- * 
- * 适配自用户提供的 Canvas 样例组件，接入项目的 64×64 矩阵数据流。
- * 兼容 three.js 0.177+（使用 outputColorSpace / SRGBColorSpace）
- * 
+ * StandingCanvas - 基于 Three.js 粒子系统的静态站立压力可视化（性能优化版）
+ *
+ * 性能优化：
+ *   1. 使用 useRef 管理所有内部状态，避免模块级变量污染
+ *   2. 帧率控制：通过 clock.getDelta 限制数据处理频率
+ *   3. 减少 GC：预分配 TypedArray，避免每帧创建新数组
+ *   4. setAttribute 仅在初始化时调用，后续只设 needsUpdate
+ *   5. 纹理缓存：全局共享一份 circle.png 纹理
+ *
  * Props:
  *   - externalDataRef: React ref，ref.current 为 64×64 的二维数组
+ *   - particleParams: { gaussSigma, filterThreshold, initValue, colorRange, heightScale }
  *   - showHeatmap: boolean
- *   - depthScale: number
- *   - smoothness: number
- *   - data: ref 对象
- *   - changeSelect: 选区变化回调
- *   - changeStateData: 选区尺寸回调
- *   - local: boolean
+ *   - data: ref 对象（向外暴露 changeData / handleCharts）
+ *   - changeSelect / changeStateData / local: 选区相关
  */
 import * as THREE from "three";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 import { SelectionHelper } from "./SelectionHelper";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate } from "./threeUtil1";
-import {
-  addSide,
-  findMax,
-  gaussBlur_1,
-  interp,
-  jet,
-  jetgGrey,
-} from "./util";
-import { obj } from "./config";
-import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { addSide, findMax, gaussBlur_1, interp, jet, jetgGrey } from "./util";
+import React, { useEffect, useImperativeHandle, useRef } from "react";
 
-let group = new THREE.Group();
-const sitnum1 = 64;
-const sitnum2 = 64;
-const sitInterp = 2;
-const sitOrder = 4;
-let controlsFlag = true;
-var ndata1 = new Array(sitnum1 * sitnum2).fill(0);
+/* ─── 常量 ─── */
+const N = 64;                         // 传感器尺寸
+const INTERP = 2;                     // 插值倍数
+const PAD = 4;                        // 边界填充
+const AX = N * INTERP + PAD * 2;      // 136
+const AY = N * INTERP + PAD * 2;      // 136
+const SEP = 100;                      // 粒子间距
+const TOTAL = AX * AY;                // 18496 粒子
+const GX = 5, GY = 150, GZ = 230;    // group 位置
 
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
-
-let timer;
-function debounce(fn, time) {
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => { fn(); }, time);
+/* ─── 全局纹理缓存 ─── */
+let _sharedTexture = null;
+function getCircleTexture() {
+  if (!_sharedTexture) {
+    _sharedTexture = new THREE.TextureLoader().load("/circle.png");
+  }
+  return _sharedTexture;
 }
 
-var FPS = 10;
-var timeS = 0;
-var renderT = 1 / FPS;
-let totalArr = [], totalPointArr = [];
-let local;
-let camera;
-let particles, material, sitGeometry;
-let controls;
+/* ─── 预分配缓冲区工厂 ─── */
+function createBuffers() {
+  return {
+    ndata:     new Float32Array(N * N),
+    bigArr:    new Float32Array(N * INTERP * N * INTERP),
+    bigArrg:   new Float32Array((N * INTERP + PAD * 2) * (N * INTERP + PAD * 2)),
+    smoothBig: new Float32Array((N * INTERP + PAD * 2) * (N * INTERP + PAD * 2)),
+    positions: new Float32Array(TOTAL * 3),
+    colors:    new Float32Array(TOTAL * 3),
+    scales:    new Float32Array(TOTAL),
+  };
+}
 
 const StandingCanvas = React.forwardRef((props, refs) => {
-  local = props.local;
   const containerRef = useRef(null);
-  var selectStartArr = [], selectEndArr = [], sitArr, sitMatrix = [], selectMatrix = [], selectHelper = {};
-  let sitIndexArr = [], sitIndexEndArr = [];
-  var animationRequestId, colSelectFlag = false;
-  let dataFlag = false;
+  const stateRef = useRef(null);   // 所有内部可变状态
 
-  const changeDataFlag = () => { dataFlag = true; };
-
-  let bigArr = new Array(sitnum1 * sitInterp * sitnum2 * sitInterp).fill(1);
-  let bigArrg = new Array(
-    (sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)
-  ).fill(1),
-    smoothBig = new Array(
-      (sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)
-    ).fill(1);
-
-  let container;
-  let scene, renderer;
-  const clock = new THREE.Clock();
-  const ALT_KEY = 18;
-  const CTRL_KEY = 17;
-  const CMD_KEY = 91;
-  const AMOUNTX = sitnum1 * sitInterp + sitOrder * 2;  // 136
-  const AMOUNTY = sitnum2 * sitInterp + sitOrder * 2;  // 136
-  const SEPARATION = 100;
-  const groupX = 5, groupY = 150, groupZ = 230;
-  let positions;
-  let colors, scales;
-
-  // 从 externalDataRef 读取 64×64 矩阵并转为 flat 数组
-  function readExternalData() {
-    if (props.externalDataRef && props.externalDataRef.current) {
-      const matrix = props.externalDataRef.current;
-      if (Array.isArray(matrix) && matrix.length > 0) {
-        const flat = [];
-        for (let i = 0; i < matrix.length; i++) {
-          for (let j = 0; j < matrix[i].length; j++) {
-            flat.push(matrix[i][j]);
-          }
-        }
-        return flat;
+  /* ─── 读取外部矩阵 → flat Float32Array ─── */
+  function readExternalData(target) {
+    const ref = props.externalDataRef;
+    if (!ref?.current) return false;
+    const m = ref.current;
+    if (!Array.isArray(m) || m.length === 0) return false;
+    let idx = 0;
+    for (let i = 0; i < m.length; i++) {
+      for (let j = 0; j < m[i].length; j++) {
+        target[idx++] = m[i][j];
       }
     }
-    return null;
+    return true;
   }
 
-  function init() {
-    container = containerRef.current;
+  /* ─── 获取参数（实时从 props 读取） ─── */
+  function getParams() {
+    const p = props.particleParams || {};
+    return {
+      gaussSigma:      p.gaussSigma ?? 2,
+      filterThreshold: p.filterThreshold ?? 2,
+      initValue:       p.initValue ?? 2,
+      colorRange:      p.colorRange ?? 200,
+      heightScale:     p.heightScale ?? 2,
+    };
+  }
+
+  /* ─── 初始化 ─── */
+  useEffect(() => {
+    const container = containerRef.current;
     if (!container) return;
 
-    // 获取容器实际尺寸
-    let w = container.clientWidth;
-    let h = container.clientHeight;
-    if (w < 10) w = window.innerWidth * 0.7;
-    if (h < 10) h = window.innerHeight * 0.8;
+    const buf = createBuffers();
+    let { positions, colors, scales, ndata, bigArr, bigArrg, smoothBig } = buf;
 
-    camera = new THREE.PerspectiveCamera(40, w / h, 1, 150000);
-    camera.position.z = 300;
-    camera.position.y = 200;
-
-    scene = new THREE.Scene();
-
-    initSet();
-    group.position.x = groupX;
-    group.position.y = groupY;
-    group.position.z = groupZ;
-    scene.add(group);
-
-    const helper = new THREE.GridHelper(2000, 100);
-    helper.position.y = -199;
-    helper.material.opacity = 0.25;
-    helper.material.transparent = true;
-    scene.add(helper);
-
-    // lights
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
-    hemiLight.position.set(0, 200, 0);
-    scene.add(hemiLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff);
-    dirLight.position.set(0, 200, 10);
-    scene.add(dirLight);
-    const dirLight1 = new THREE.DirectionalLight(0xffffff);
-    dirLight1.position.set(0, 10, 200);
-    scene.add(dirLight1);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(w, h);
-
-    // three.js 0.177+ 使用 outputColorSpace 替代 outputEncoding
-    if (renderer.outputColorSpace !== undefined) {
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-    }
-
-    // 清空旧子节点后挂载
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
-    container.appendChild(renderer.domElement);
-
-    renderer.setClearColor(0x000000);
-
-    controls = new TrackballControls(camera, renderer.domElement);
-    controls.dynamicDampingFactor = 0.2;
-    controls.domElement = container;
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.PAN,
-      MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,
-    };
-    controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
-
-    window.addEventListener("resize", onWindowResize);
-
-    selectHelper = new SelectionHelper(renderer, controls, 'selectBox');
-
-    renderer.domElement.addEventListener('pointerdown', pointDown);
-    renderer.domElement.addEventListener('pointermove', pointMove);
-    renderer.domElement.addEventListener('pointerup', pointUp);
-
-    document.addEventListener('keydown', handleKeyDown);
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      if (!selectHelper.element) return;
-      const delta = 1;
-      if (e.key === 'ArrowUp') selectHelper.element.style.top = parseInt(selectHelper.element.style.top || 0) - delta + 'px';
-      if (e.key === 'ArrowDown') selectHelper.element.style.top = parseInt(selectHelper.element.style.top || 0) + delta + 'px';
-      if (e.key === 'ArrowLeft') selectHelper.element.style.left = parseInt(selectHelper.element.style.left || 0) - delta + 'px';
-      if (e.key === 'ArrowRight') selectHelper.element.style.left = parseInt(selectHelper.element.style.left || 0) + delta + 'px';
-
-      if (!controlsFlag && selectHelper.element) {
-        const elementLocal = selectHelper.element.getBoundingClientRect();
-        const sm = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom];
-        const sitInterArr = checkRectangleIntersection(sm, sitMatrix);
-        if (sitInterArr) {
-          sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
-        }
-        if (props.changeSelect) {
-          debounce(() => props.changeSelect({ sit: sitIndexArr, back: [] }), 500);
-        }
-      }
-    }
-  }
-
-  function pointDown(event) {
-    if (selectHelper.isShiftPressed) {
-      sitIndexArr = [];
-      selectStartArr = [event.clientX, event.clientY];
-      sitArr = getPointCoordinate({ particles, camera, position: { x: groupX, y: groupY, z: groupZ } });
-      sitMatrix = [sitArr[0].x, sitArr[0].y, sitArr[1].x, sitArr[1].y];
-      colSelectFlag = true;
-    }
-  }
-
-  function pointMove(event) {
-    if (selectHelper.isShiftPressed && colSelectFlag) {
-      selectEndArr = [event.clientX, event.clientY];
-      selectMatrix = [...selectStartArr, ...selectEndArr];
-      if (selectStartArr[0] > selectEndArr[0]) { selectMatrix[0] = selectEndArr[0]; selectMatrix[2] = selectStartArr[0]; }
-      else { selectMatrix[0] = selectStartArr[0]; selectMatrix[2] = selectEndArr[0]; }
-      if (selectStartArr[1] > selectEndArr[1]) { selectMatrix[1] = selectEndArr[1]; selectMatrix[3] = selectStartArr[1]; }
-      else { selectMatrix[1] = selectStartArr[1]; selectMatrix[3] = selectEndArr[1]; }
-
-      if (!controlsFlag) {
-        const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix);
-        if (sitInterArr) { sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY); sitIndexEndArr = [...sitIndexArr]; }
-        const width = Math.abs(Math.round(selectEndArr[0] - selectStartArr[0]));
-        const height = Math.abs(Math.round(selectEndArr[1] - selectStartArr[1]));
-        if (props.changeStateData) { props.changeStateData({ width, height }); }
-      }
-    }
-  }
-
-  function pointUp(event) {
-    if (selectHelper.isShiftPressed) {
-      if (props.changeSelect) { props.changeSelect({ sit: sitIndexEndArr, back: [] }); }
-      selectStartArr = []; selectEndArr = []; colSelectFlag = false;
-    }
-  }
-
-  // 初始化粒子系统
-  function initSet() {
-    const numParticles = AMOUNTX * AMOUNTY;
-    positions = new Float32Array(numParticles * 3);
-    scales = new Float32Array(numParticles);
-    colors = new Float32Array(numParticles * 3);
-    let i = 0, j = 0;
-
-    for (let ix = 0; ix < AMOUNTX; ix++) {
-      for (let iy = 0; iy < AMOUNTY; iy++) {
-        positions[i] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2 + ix * 20;
-        positions[i + 1] = 0;
-        positions[i + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
-        scales[j] = 1;
-        colors[i] = 0;
-        colors[i + 1] = 0;
-        colors[i + 2] = 1;  // 蓝色
-        i += 3;
-        j++;
+    // 初始化位置
+    let idx3 = 0, idx1 = 0;
+    for (let ix = 0; ix < AX; ix++) {
+      for (let iy = 0; iy < AY; iy++) {
+        positions[idx3]     = ix * SEP - (AX * SEP) / 2 + ix * 20;
+        positions[idx3 + 1] = 0;
+        positions[idx3 + 2] = iy * SEP - (AY * SEP) / 2;
+        scales[idx1] = 1;
+        colors[idx3] = 0; colors[idx3 + 1] = 0; colors[idx3 + 2] = 1;
+        idx3 += 3; idx1++;
       }
     }
 
-    sitGeometry = new THREE.BufferGeometry();
-    sitGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    // 几何体 & 材质
+    const geometry = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(positions, 3);
+    const colAttr = new THREE.BufferAttribute(colors, 3);
+    geometry.setAttribute("position", posAttr);
+    geometry.setAttribute("color", colAttr);
+    geometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
 
-    // 使用绝对路径加载纹理（Electron/Vite 中 ./circle.png 可能无法解析）
-    const sprite = new THREE.TextureLoader().load("/circle.png");
-
-    material = new THREE.PointsMaterial({
-      vertexColors: true,
-      transparent: true,
-      map: sprite,
-      size: 1,
-      // 确保深度测试和写入正确
-      depthWrite: false,
-      sizeAttenuation: true,
+    const material = new THREE.PointsMaterial({
+      vertexColors: true, transparent: true,
+      map: getCircleTexture(), size: 1,
+      depthWrite: false, sizeAttenuation: true,
     });
 
-    sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
-    sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    particles = new THREE.Points(sitGeometry, material);
-
-    particles.scale.x = 0.0062;
-    particles.scale.y = 0.0062;
-    particles.scale.z = 0.0062;
+    const particles = new THREE.Points(geometry, material);
+    particles.scale.set(0.0062, 0.0062, 0.0062);
     particles.rotation.x = Math.PI / 3;
 
+    const group = new THREE.Group();
     group.add(particles);
-  }
+    group.position.set(GX, GY, GZ);
 
-  function onWindowResize() {
-    const c = containerRef.current;
-    if (!c || !renderer || !camera) return;
-    let w = c.clientWidth;
-    let h = c.clientHeight;
+    // 场景
+    let w = container.clientWidth || window.innerWidth * 0.7;
+    let h = container.clientHeight || window.innerHeight * 0.8;
     if (w < 10) w = window.innerWidth * 0.7;
     if (h < 10) h = window.innerHeight * 0.8;
+
+    const camera = new THREE.PerspectiveCamera(40, w / h, 1, 150000);
+    camera.position.set(0, 200, 300);
+
+    const scene = new THREE.Scene();
+    scene.add(group);
+
+    const grid = new THREE.GridHelper(2000, 100);
+    grid.position.y = -199; grid.material.opacity = 0.25; grid.material.transparent = true;
+    scene.add(grid);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444));
+    const dl1 = new THREE.DirectionalLight(0xffffff); dl1.position.set(0, 200, 10); scene.add(dl1);
+    const dl2 = new THREE.DirectionalLight(0xffffff); dl2.position.set(0, 10, 200); scene.add(dl2);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
+    if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.SRGBColorSpace;
+    while (container.firstChild) container.removeChild(container.firstChild);
+    container.appendChild(renderer.domElement);
+    renderer.setClearColor(0x000000);
 
-  function animate() {
-    animationRequestId = requestAnimationFrame(animate);
-    render();
-  }
+    const controls = new TrackballControls(camera, renderer.domElement);
+    controls.dynamicDampingFactor = 0.2;
+    controls.domElement = container;
+    controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
+    controls.keys = [18, 17, 91];
 
-  function changeSelectFlag(value, flag) {
-    controlsFlag = value;
-    selectHelper.isShiftPressed = !value;
-    if (value) {
-      selectHelper.onSelectOver();
-      if (flag && props.changeSelect) { props.changeSelect({ sit: [0, 72, 0, 72] }); }
-    }
-  }
+    let controlsFlag = true;
+    const selectHelper = new SelectionHelper(renderer, controls, 'selectBox');
+    let sitIndexArr = [], sitIndexEndArr = [];
+    let selectStartArr = [], selectEndArr = [], sitMatrix = [];
+    let colSelectFlag = false;
 
-  // 更新座椅数据
-  function sitRenew() {
-    // 从 externalDataRef 读取最新数据
-    const externalFlat = readExternalData();
-    if (externalFlat) {
-      ndata1 = externalFlat;
-    }
+    // 统计数据（预分配）
+    let totalArr = [], totalPointArr = [];
+    const clock = new THREE.Clock();
+    let timeS = 0;
+    const renderT = 1 / 10; // 10 FPS 数据处理
 
-    interp(ndata1, bigArr, sitnum1, sitInterp);
+    // 临时数组（避免每帧 GC）
+    const tempBigArrs = new Float32Array((N * INTERP + PAD * 2) * (N * INTERP + PAD * 2));
 
-    let bigArrs = addSide(
-      bigArr,
-      sitnum2 * sitInterp,
-      sitnum1 * sitInterp,
-      sitOrder,
-      sitOrder
-    );
+    /* ─── 数据更新（每帧调用） ─── */
+    function renewData() {
+      const params = getParams();
+      readExternalData(ndata);
 
-    gaussBlur_1(
-      bigArrs,
-      bigArrg,
-      sitnum2 * sitInterp + sitOrder * 2,
-      sitnum1 * sitInterp + sitOrder * 2,
-      valueg1
-    );
+      // 过滤
+      for (let i = 0; i < ndata.length; i++) {
+        if (ndata[i] < params.filterThreshold) ndata[i] = 0;
+      }
 
-    let k = 0, l = 0;
-    let dataArr = [];
-    for (let ix = 0; ix < AMOUNTX; ix++) {
-      for (let iy = 0; iy < AMOUNTY; iy++) {
-        const value = bigArrg[l] * 10;
-        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+      interp(ndata, bigArr, N, INTERP);
 
-        positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2;
-        positions[k + 1] = smoothBig[l] * value1;
-        positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
+      const bigArrs = addSide(bigArr, N * INTERP, N * INTERP, PAD, PAD);
 
-        let rgb;
-        if (sitIndexArr && sitIndexArr.length > 0 && !sitIndexArr.every((a) => a === 0)) {
-          if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
-            rgb = jet(0, valuej1, smoothBig[l]);
-            dataArr.push(bigArrg[l]);
+      gaussBlur_1(bigArrs, bigArrg, N * INTERP + PAD * 2, N * INTERP + PAD * 2, params.gaussSigma);
+
+      let k = 0, l = 0;
+      let dataArr = [];
+      const hasSelection = sitIndexArr.length > 0 && !sitIndexArr.every(a => a === 0);
+
+      for (let ix = 0; ix < AX; ix++) {
+        for (let iy = 0; iy < AY; iy++) {
+          const val = bigArrg[l] * 10;
+          smoothBig[l] += (val - smoothBig[l] + 0.5) / params.initValue;
+
+          positions[k]     = ix * SEP - (AX * SEP) / 2;
+          positions[k + 1] = smoothBig[l] * params.heightScale;
+          positions[k + 2] = iy * SEP - (AY * SEP) / 2;
+
+          let rgb;
+          if (hasSelection) {
+            if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
+              rgb = jet(0, params.colorRange, smoothBig[l]);
+              dataArr.push(bigArrg[l]);
+            } else {
+              rgb = jetgGrey(0, params.colorRange, smoothBig[l]);
+            }
           } else {
-            rgb = jetgGrey(0, valuej1, smoothBig[l]);
+            rgb = jet(0, params.colorRange, smoothBig[l]);
           }
-        } else {
-          rgb = jet(0, valuej1, smoothBig[l]);
+
+          colors[k]     = rgb[0] / 255;
+          colors[k + 1] = rgb[1] / 255;
+          colors[k + 2] = rgb[2] / 255;
+
+          k += 3; l++;
+        }
+      }
+
+      if (!hasSelection) dataArr = Array.from(bigArrg);
+
+      // 标记需要更新（不重新 setAttribute）
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+
+      // 统计（限频）
+      const T = clock.getDelta();
+      timeS += T;
+      if (timeS > renderT) {
+        dataArr = dataArr.filter(a => a > params.colorRange * 0.025);
+        const max = findMax(dataArr);
+        const point = dataArr.filter(a => a > 0).length;
+        const press = dataArr.reduce((a, b) => a + b, 0);
+        const mean = press / (point || 1);
+
+        if (props.data?.current?.changeData) {
+          props.data.current.changeData({ meanPres: mean.toFixed(2), maxPres: max, point, totalPres: press });
         }
 
-        colors[k] = rgb[0] / 255;
-        colors[k + 1] = rgb[1] / 255;
-        colors[k + 2] = rgb[2] / 255;
+        if (totalArr.length < 20) totalArr.push(press); else { totalArr.shift(); totalArr.push(press); }
+        const maxTotal = findMax(totalArr);
+        if (!props.local && props.data?.current?.handleCharts) props.data.current.handleCharts(totalArr, maxTotal + 1000);
 
-        k += 3;
-        l++;
+        if (totalPointArr.length < 20) totalPointArr.push(point); else { totalPointArr.shift(); totalPointArr.push(point); }
+        const max1 = findMax(totalPointArr);
+        if (!props.local && props.data?.current?.handleChartsArea) props.data.current.handleChartsArea(totalPointArr, max1 + 100);
+
+        timeS = 0;
       }
     }
 
-    if (!sitIndexArr.length || sitIndexArr.every((a) => a === 0)) {
-      dataArr = [...bigArrg];
+    /* ─── 渲染循环 ─── */
+    let animId;
+    function animate() {
+      animId = requestAnimationFrame(animate);
+      renewData();
+      if (controlsFlag) controls.update();
+      renderer.render(scene, camera);
     }
 
-    var T = clock.getDelta();
-    timeS = timeS + T;
-    if (timeS > renderT) {
-      dataArr = dataArr.filter((a) => a > valuej1 * 0.025);
-      const max = findMax(dataArr);
-      const point = dataArr.filter((a) => a > 0).length;
-      const press = dataArr.reduce((a, b) => a + b, 0);
-      const mean = press / (point === 0 ? 1 : point);
+    /* ─── 事件处理 ─── */
+    function onResize() {
+      let w = container.clientWidth || window.innerWidth * 0.7;
+      let h = container.clientHeight || window.innerHeight * 0.8;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
 
-      if (props.data && props.data.current && props.data.current.changeData) {
-        props.data.current.changeData({ meanPres: mean.toFixed(2), maxPres: max, point: point, totalPres: press });
+    function onKeyDown(e) {
+      if (e.key === 'Shift') { controls.mouseButtons = null; controls.keys = null; }
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key) && selectHelper.element) {
+        const d = 1;
+        const el = selectHelper.element;
+        if (e.key === 'ArrowUp') el.style.top = parseInt(el.style.top || 0) - d + 'px';
+        if (e.key === 'ArrowDown') el.style.top = parseInt(el.style.top || 0) + d + 'px';
+        if (e.key === 'ArrowLeft') el.style.left = parseInt(el.style.left || 0) - d + 'px';
+        if (e.key === 'ArrowRight') el.style.left = parseInt(el.style.left || 0) + d + 'px';
+        if (!controlsFlag) {
+          const rect = el.getBoundingClientRect();
+          const sm = [rect.left, rect.top, rect.right, rect.bottom];
+          const inter = checkRectangleIntersection(sm, sitMatrix);
+          if (inter) sitIndexArr = checkRectIndex(sitMatrix, inter, AX, AY);
+          if (props.changeSelect) {
+            clearTimeout(stateRef.current?._debounce);
+            stateRef.current._debounce = setTimeout(() => props.changeSelect({ sit: sitIndexArr, back: [] }), 500);
+          }
+        }
       }
-
-      if (totalArr.length < 20) { totalArr.push(press); }
-      else { totalArr.shift(); totalArr.push(press); }
-
-      const maxTotal = findMax(totalArr);
-      if (!local && props.data && props.data.current && props.data.current.handleCharts) {
-        props.data.current.handleCharts(totalArr, maxTotal + 1000);
+    }
+    function onKeyUp(e) {
+      if (e.key === 'Shift') {
+        controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
+        controls.keys = [18, 17, 91];
       }
-
-      if (totalPointArr.length < 20) { totalPointArr.push(point); }
-      else { totalPointArr.shift(); totalPointArr.push(point); }
-
-      const max1 = findMax(totalPointArr);
-      if (!local && props.data && props.data.current && props.data.current.handleChartsArea) {
-        props.data.current.handleChartsArea(totalPointArr, max1 + 100);
+    }
+    function onPointerDown(e) {
+      if (selectHelper.isShiftPressed) {
+        sitIndexArr = [];
+        selectStartArr = [e.clientX, e.clientY];
+        const arr = getPointCoordinate({ particles, camera, position: { x: GX, y: GY, z: GZ } });
+        sitMatrix = [arr[0].x, arr[0].y, arr[1].x, arr[1].y];
+        colSelectFlag = true;
       }
-      timeS = 0;
+    }
+    function onPointerMove(e) {
+      if (selectHelper.isShiftPressed && colSelectFlag) {
+        selectEndArr = [e.clientX, e.clientY];
+        const sm = [
+          Math.min(selectStartArr[0], selectEndArr[0]), Math.min(selectStartArr[1], selectEndArr[1]),
+          Math.max(selectStartArr[0], selectEndArr[0]), Math.max(selectStartArr[1], selectEndArr[1]),
+        ];
+        if (!controlsFlag) {
+          const inter = checkRectangleIntersection(sm, sitMatrix);
+          if (inter) { sitIndexArr = checkRectIndex(sitMatrix, inter, AX, AY); sitIndexEndArr = [...sitIndexArr]; }
+          if (props.changeStateData) {
+            props.changeStateData({ width: Math.abs(selectEndArr[0] - selectStartArr[0]), height: Math.abs(selectEndArr[1] - selectStartArr[1]) });
+          }
+        }
+      }
+    }
+    function onPointerUp() {
+      if (selectHelper.isShiftPressed) {
+        if (props.changeSelect) props.changeSelect({ sit: sitIndexEndArr, back: [] });
+        selectStartArr = []; selectEndArr = []; colSelectFlag = false;
+      }
     }
 
-    particles.geometry.attributes.position.needsUpdate = true;
-    particles.geometry.attributes.color.needsUpdate = true;
-
-    sitGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  }
-
-  function render() {
-    if (!renderer || !scene || !camera || !controls || !particles) return;
-    sitRenew();
-    if (controlsFlag) {
-      controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
-      controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
-      controls.update();
-    } else {
-      controls.keys = [];
-      controls.mouseButtons = [];
-    }
-    renderer.render(scene, camera);
-  }
-
-  function sitData(prop, localFlag) {
-    local = localFlag;
-    const { wsPointData, valuef, valuelInit } = prop;
-    ndata1 = wsPointData;
-    ndata1 = ndata1.map((a) => (a - valuef1 < 0 ? 0 : a));
-    const ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-    if (ndata1Num < valuelInit) { ndata1 = new Array(sitnum1 * sitnum2).fill(0); }
-  }
-
-  function sitValue(prop) {
-    const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
-    if (valuej) valuej1 = valuej;
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
-    if (valuelInit) valuelInit1 = valuelInit;
-    ndata1 = ndata1.map((a) => (a - valuef1 < 0 ? 0 : a));
-  }
-
-  function changeGroupRotate(obj) {
-    if (typeof obj.x === 'number') { group.rotation.x = -((obj.x) * 6) / 12; }
-    if (typeof obj.z === 'number') { particles.rotation.z = (obj.z) * 6 / 12; }
-  }
-
-  function reset() {
-    if (controls) controls.reset();
-    group.rotation.x = -(Math.PI * 2) / 12;
-    group.rotation.y = 0;
-    if (particles) particles.rotation.z = 0;
-    group.position.x = groupX;
-    group.position.y = groupY;
-    group.position.z = groupZ;
-  }
-
-  useImperativeHandle(refs, () => ({
-    sitData, changeDataFlag, sitValue, changeSelectFlag, sitRenew, changeGroupRotate, reset,
-  }));
-
-  function onKeyDown(event) {
-    if (event.key === 'Shift' && controls) { controls.mouseButtons = null; controls.keys = null; }
-  }
-
-  function onKeyUp(event) {
-    if (event.key === 'Shift' && controls) {
-      controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ZOOM, RIGHT: THREE.MOUSE.ROTATE };
-      controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
-    }
-  }
-
-  useEffect(() => {
-    init();
-    animate();
+    window.addEventListener('resize', onResize);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+
+    // 暴露方法
+    stateRef.current = {
+      particles, group, controls, renderer, scene, camera,
+      controlsFlag, selectHelper, sitIndexArr,
+      ndata, bigArr, bigArrg, smoothBig,
+      _debounce: null,
+    };
+
+    animate();
 
     return () => {
-      cancelAnimationFrame(animationRequestId);
-      // 清理 group 中的对象
-      while (group.children.length > 0) {
-        group.remove(group.children[0]);
-      }
-      group = new THREE.Group();
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('resize', onWindowResize);
-      document.removeEventListener('keydown', handleKeyDown);
-      // 清理 renderer
-      if (renderer) {
-        renderer.dispose();
-      }
+      geometry.dispose(); material.dispose();
+      if (renderer) renderer.dispose();
     };
   }, []);
 
+  /* ─── imperative handle ─── */
+  useImperativeHandle(refs, () => ({
+    sitData(prop, localFlag) {
+      if (!stateRef.current) return;
+      const { ndata } = stateRef.current;
+      const { wsPointData, valuef, valuelInit } = prop;
+      const params = getParams();
+      for (let i = 0; i < wsPointData.length; i++) {
+        ndata[i] = wsPointData[i] - params.filterThreshold < 0 ? 0 : wsPointData[i];
+      }
+      const sum = ndata.reduce((a, b) => a + b, 0);
+      if (sum < valuelInit) ndata.fill(0);
+    },
+    changeDataFlag() {},
+    sitValue() {},
+    changeSelectFlag(value, flag) {
+      if (!stateRef.current) return;
+      stateRef.current.controlsFlag = value;
+      stateRef.current.selectHelper.isShiftPressed = !value;
+      if (value) {
+        stateRef.current.selectHelper.onSelectOver();
+        if (flag && props.changeSelect) props.changeSelect({ sit: [0, 72, 0, 72] });
+      }
+    },
+    sitRenew() {},
+    changeGroupRotate(obj) {
+      if (!stateRef.current) return;
+      const { group, particles } = stateRef.current;
+      if (typeof obj.x === 'number') group.rotation.x = -((obj.x) * 6) / 12;
+      if (typeof obj.z === 'number') particles.rotation.z = (obj.z) * 6 / 12;
+    },
+    reset() {
+      if (!stateRef.current) return;
+      const { controls, group, particles } = stateRef.current;
+      if (controls) controls.reset();
+      group.rotation.x = -(Math.PI * 2) / 12;
+      group.rotation.y = 0;
+      if (particles) particles.rotation.z = 0;
+      group.position.set(GX, GY, GZ);
+    },
+  }));
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     </div>
   );
 });
