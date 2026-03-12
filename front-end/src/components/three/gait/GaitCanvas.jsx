@@ -40,12 +40,13 @@ export default function GaitCanvas({
   sensorData = {},
   particleParams = {},
   transformParams = {},
+  optimizeEnabled = true,
   showHeatmap = true,
   onSceneReady = null,
 }) {
   const containerRef = useRef(null);
-  const propsRef = useRef({ sensorData, particleParams, transformParams });
-  propsRef.current = { sensorData, particleParams, transformParams };
+  const propsRef = useRef({ sensorData, particleParams, transformParams, optimizeEnabled });
+  propsRef.current = { sensorData, particleParams, transformParams, optimizeEnabled };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -217,11 +218,10 @@ export default function GaitCanvas({
 
       mergeSensorData();
 
-      // 坏线补值：检测并修复异常低值的行/列（用相邻行/列均值填充）
-      // 行方向：64 行，每行 256 个值；列方向：256 列，每列 64 个值
-      // 行阈值：low=300, high=800（行总和范围较大，因为每行有 256 个像素）
-      // 列阈值：low=80, high=200（列总和较小，因为每列只有 64 个像素）
-      zeroLine64x256(ndata, NX, NY, 300, 800);
+      // 坏线补值（由“优化”开关控制）
+      if (propsRef.current.optimizeEnabled) {
+        zeroLine64x256(ndata, NX, NY, 300, 800);
+      }
 
       // 过滤
       for (let i = 0; i < ndata.length; i++) {

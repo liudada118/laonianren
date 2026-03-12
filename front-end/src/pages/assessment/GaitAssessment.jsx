@@ -675,6 +675,7 @@ export default function GaitAssessment() {
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.5);
   const [filterEnabled, setFilterEnabled] = useState(true);
+  const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
@@ -1068,6 +1069,7 @@ export default function GaitAssessment() {
               showHeatmap={showHeatmap}
               particleParams={particleParams}
               transformParams={transformParams}
+              optimizeEnabled={optimizeEnabled}
               onSceneReady={(scene) => { sceneRef.current = scene; }}
             />
 
@@ -1082,10 +1084,16 @@ export default function GaitAssessment() {
               showHeatmap={showHeatmap}
               onHeatmapChange={setShowHeatmap}
               extra={
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
-                  <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>滤波</span>
-                </label>
+                <>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
+                    <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>滤波</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={optimizeEnabled} onChange={e => setOptimizeEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
+                    <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>优化</span>
+                  </label>
+                </>
               }
             />
 
