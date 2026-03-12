@@ -4,6 +4,8 @@ import { useAssessment } from '../../contexts/AssessmentContext';
 import StandingReport from '../../components/report/StandingReport';
 import EChart from '../../components/ui/EChart';
 import StandingCanvas from '../../components/three/standing/StandingCanvas';
+import ParticleControlPanel from '../../components/three/shared/ParticleControlPanel';
+import { loadParams, saveParams, resetParams } from '../../components/three/shared/particleConfig';
 import { serialService } from '../../lib/SerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import {
@@ -166,6 +168,20 @@ export default function StandingAssessment() {
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.8);
   const [filterThreshold, setFilterThreshold] = useState(0);
+
+  // 粒子系统共用参数
+  const [particleParams, setParticleParams] = useState(() => loadParams());
+  const handleParamChange = useCallback((key, value) => {
+    setParticleParams(prev => {
+      const next = { ...prev, [key]: value };
+      saveParams(next);
+      return next;
+    });
+  }, []);
+  const handleParamReset = useCallback(() => {
+    const defaults = resetParams();
+    setParticleParams(defaults);
+  }, []);
 
   // 实时数据
   const insoleDataRef = useRef(null); // 直接通过 ref 传递给 InsoleScene，避免 memo 阻止更新
@@ -710,36 +726,18 @@ export default function StandingAssessment() {
           <div className="relative w-full h-full model-container m-3 rounded-xl overflow-hidden">
             <StandingCanvas
               showHeatmap={showHeatmap}
-              depthScale={depthScale}
-              smoothness={smoothness}
               externalDataRef={insoleDataRef}
+              particleParams={particleParams}
             />
 
-            {/* 浮动控件 - 右上角 */}
-            <div className="absolute top-3 right-3 z-10 flex flex-col gap-2" style={{ minWidth: '140px' }}>
-              <div className="rounded-lg p-3 space-y-2" style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-light)' }}>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} className="w-3.5 h-3.5 rounded" />
-                  <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>热力图</span>
-                </label>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>深度</span>
-                    <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>{depthScale.toFixed(1)}</span>
-                  </div>
-                  <input type="range" min={0} max={1} step={0.05} value={depthScale} onChange={e => setDepthScale(Number(e.target.value))}
-                    className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light)' }} />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>平滑度</span>
-                    <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>{smoothness.toFixed(1)}</span>
-                  </div>
-                  <input type="range" min={0} max={1} step={0.05} value={smoothness} onChange={e => setSmoothness(Number(e.target.value))}
-                    className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light)' }} />
-                </div>
-              </div>
-            </div>
+            {/* 粒子参数调节面板 */}
+            <ParticleControlPanel
+              params={particleParams}
+              onChange={handleParamChange}
+              onReset={handleParamReset}
+              showHeatmap={showHeatmap}
+              onHeatmapChange={setShowHeatmap}
+            />
 
             {/* 处理中遮罩 */}
             {phase === 'processing' && (
