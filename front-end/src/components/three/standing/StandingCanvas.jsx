@@ -123,6 +123,7 @@ const StandingCanvas = React.forwardRef((props, refs) => {
     const particles = new THREE.Points(geometry, material);
     particles.scale.set(0.0062, 0.0062, 0.0062);
     particles.rotation.x = Math.PI / 3;
+    particles.rotation.z = -Math.PI / 2;  // 顺时针旋转 90 度
 
     const group = new THREE.Group();
     group.add(particles);
