@@ -675,15 +675,19 @@ export default function GaitAssessment() {
   const [depthScale, setDepthScale] = useState(0);
   const [smoothness, setSmoothness] = useState(0.5);
   const [filterEnabled, setFilterEnabled] = useState(true);
+  const [filterThreshold, setFilterThreshold] = useState(15);
+  const [filterMinArea, setFilterMinArea] = useState(20);
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
+  const [optimizeBad, setOptimizeBad] = useState(40);
+  const [optimizeGood, setOptimizeGood] = useState(100);
 
-  // 同步滤波/优化开关到后端（数据源头处理）
+  // 同步滤波/优化参数到后端（数据源头处理）
   useEffect(() => {
-    backendBridge.setFootFilter('gait', { filterEnabled }).catch(e => console.warn('设置步道滤波失败:', e));
-  }, [filterEnabled]);
+    backendBridge.setFootFilter('gait', { filterEnabled, filterThreshold, filterMinArea }).catch(e => console.warn('设置步道滤波失败:', e));
+  }, [filterEnabled, filterThreshold, filterMinArea]);
   useEffect(() => {
-    backendBridge.setFootFilter('gait', { optimizeEnabled }).catch(e => console.warn('设置步道优化失败:', e));
-  }, [optimizeEnabled]);
+    backendBridge.setFootFilter('gait', { optimizeEnabled, optimizeBad, optimizeGood }).catch(e => console.warn('设置步道优化失败:', e));
+  }, [optimizeEnabled, optimizeBad, optimizeGood]);
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
@@ -1097,10 +1101,46 @@ export default function GaitAssessment() {
                     <input type="checkbox" checked={filterEnabled} onChange={e => setFilterEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
                     <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>滤波</span>
                   </label>
+                  {filterEnabled && (
+                    <div className="pl-5 space-y-1">
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px]" style={{ color: 'var(--text-muted, #9ca3af)' }}>压力阈值</span>
+                          <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>{filterThreshold}</span>
+                        </div>
+                        <input type="range" min={0} max={100} step={1} value={filterThreshold} onChange={e => setFilterThreshold(Number(e.target.value))} className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light, #e5e7eb)' }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px]" style={{ color: 'var(--text-muted, #9ca3af)' }}>最小连通域</span>
+                          <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>{filterMinArea}</span>
+                        </div>
+                        <input type="range" min={0} max={100} step={1} value={filterMinArea} onChange={e => setFilterMinArea(Number(e.target.value))} className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light, #e5e7eb)' }} />
+                      </div>
+                    </div>
+                  )}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={optimizeEnabled} onChange={e => setOptimizeEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-500" />
                     <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary, #4a5568)' }}>优化</span>
                   </label>
+                  {optimizeEnabled && (
+                    <div className="pl-5 space-y-1">
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px]" style={{ color: 'var(--text-muted, #9ca3af)' }}>坏线阈值</span>
+                          <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>{optimizeBad}</span>
+                        </div>
+                        <input type="range" min={0} max={200} step={1} value={optimizeBad} onChange={e => setOptimizeBad(Number(e.target.value))} className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light, #e5e7eb)' }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px]" style={{ color: 'var(--text-muted, #9ca3af)' }}>正常阈值</span>
+                          <span className="text-[10px] tabular-nums font-mono" style={{ color: 'var(--text-muted, #9ca3af)' }}>{optimizeGood}</span>
+                        </div>
+                        <input type="range" min={0} max={500} step={1} value={optimizeGood} onChange={e => setOptimizeGood(Number(e.target.value))} className="w-full h-1 rounded-full appearance-none cursor-pointer" style={{ background: 'var(--border-light, #e5e7eb)' }} />
+                      </div>
+                    </div>
+                  )}
                 </>
               }
             />
