@@ -3862,6 +3862,16 @@ async function connectPort() {
             }
           }
           oldTimeObj[dataItem.type] = stamp
+          // 手套 HZ 打印（每秒最多打印一次）
+          if (dataItem.HZ) {
+            if (!global._gloveHzLogTs) global._gloveHzLogTs = {}
+            const now = Date.now()
+            if (!global._gloveHzLogTs[dataItem.type] || now - global._gloveHzLogTs[dataItem.type] > 1000) {
+              global._gloveHzLogTs[dataItem.type] = now
+              console.log('[glove-HZ] %s: %dms (%d Hz), fullFrame=%s, arrLen=%d',
+                dataItem.type, dataItem.HZ, Math.round(1000 / dataItem.HZ), fullFrame, dataItem.arr ? dataItem.arr.length : 0)
+            }
+          }
           maybeLockSensorHz()
           if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
             updateSendTimerForActiveTypes()
