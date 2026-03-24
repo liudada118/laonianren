@@ -11,6 +11,7 @@ import AssessmentHistory from './pages/AssessmentHistory';
 import HistoryReportView from './pages/HistoryReportView';
 import HistoryComprehensiveView from './pages/HistoryComprehensiveView';
 import NotFound from './pages/NotFound';
+import UpdateNotification from './components/ui/UpdateNotification';
 
 // Assessment Pages
 import GripAssessment from './pages/assessment/GripAssessment';
@@ -23,6 +24,7 @@ function App() {
     <ThemeProvider defaultTheme="light">
       <AssessmentProvider>
         <ToastProvider>
+          <UpdateNotification />
           <Routes>
             <Route path="/" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />

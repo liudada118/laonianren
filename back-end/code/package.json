@@ -19,6 +19,7 @@
     "crypto-js": "^4.2.0",
     "csv-parser": "^3.2.0",
     "csv-writer": "^1.6.0",
+    "electron-updater": "^6.3.9",
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "serialport": "^13.0.0",
@@ -27,7 +28,16 @@
     "ws": "^8.18.2"
   },
   "build": {
+    "appId": "com.bodyta.sarcopenia",
+    "productName": "肌少症评估系统",
     "asar": true,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/evaluate",
+        "channel": "latest"
+      }
+    ],
     "win": {
       "icon": "./logo",
       "target": [

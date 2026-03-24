@@ -6,6 +6,7 @@ const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
+const { initAutoUpdater, cleanupUpdater } = require('./updater')
 // const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
@@ -516,6 +517,16 @@ app.whenReady().then(async () => {
 
   Menu.setApplicationMenu(null);
 
+  // 初始化自动更新（仅在打包后的生产环境启用）
+  if (isPackaged) {
+    const allWindows = BrowserWindow.getAllWindows()
+    if (allWindows.length > 0) {
+      initAutoUpdater(allWindows[0])
+    }
+  } else {
+    console.log('[updater] 开发模式，跳过自动更新初始化')
+  }
+
   // const data1 = await getCsvData('D:/jqtoolsWin - 副本/python/app/静态数据集1.csv')
 
   // const matrix = data1.map((a) => JSON.parse(a.data))
@@ -568,6 +579,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // 清理自动更新定时器
+  cleanupUpdater()
   // 清理 Vite 开发服务器子进程
   if (viteProcess) {
     viteProcess.kill()
