@@ -242,3 +242,260 @@ origin -> https://github.com/liudada118/laonianren.git
 ```
 
 如果后续需要推送，请先确认本地未误带测试文件、临时输出目录和无关缓存文件。
+
+
+## 11. 环境准备与复现步骤
+
+这一节是给新开发工程师直接照着复现系统用的。
+
+### 11.1 推荐环境
+
+- Node.js：建议 18 或以上
+- npm：随 Node 一起安装即可
+- Python：建议 3.10 到 3.12
+- 系统：
+  - Windows 可直接使用当前项目结构
+  - macOS 也可以使用，但 Python 虚拟环境路径不同
+
+### 11.2 仓库拉取
+
+```bash
+git clone https://github.com/liudada118/laonianren.git
+cd laonianren-github
+git checkout python3
+```
+
+### 11.3 需要安装什么包
+
+这个项目有三类依赖：
+
+1. Electron / Node 主进程依赖
+2. React 前端依赖
+3. Python 算法与 AI 服务依赖
+
+#### A. back-end/code 的 npm 依赖
+
+在 `back-end/code` 下执行：
+
+```bash
+npm install
+```
+
+它会安装 `back-end/code/package.json` 里定义的依赖。
+
+这一层的核心依赖包括：
+
+- `electron`
+- `express`
+- `serialport`
+- `sqlite3`
+- `axios`
+- `ws`
+
+#### B. front-end 的 npm 依赖
+
+在 `front-end` 下执行：
+
+```bash
+npm install
+```
+
+它会安装 `front-end/package.json` 里的前端依赖。
+
+核心依赖包括：
+
+- `react`
+- `vite`
+- `echarts`
+- `three`
+- `concurrently`
+- `express`
+
+说明：
+
+- 你现在从 `back-end/code` 执行 `npm start` 时，`start-electron.js` 会检查 `front-end/node_modules`
+- 如果前端依赖还没装，它会尝试自动执行一次 `front-end` 下的 `npm install`
+- 但为了稳定复现，仍然建议第一次手动执行一次 `front-end/npm install`
+
+#### C. Python 依赖
+
+Python 依赖文件在：
+
+- `back-end/code/python/app/algorithms/requirements.txt`
+
+当前核心 Python 包包括：
+
+- `fastapi`
+- `uvicorn`
+- `numpy`
+- `matplotlib`
+- `scipy`
+- `openai`
+
+### 11.4 Python 虚拟环境安装方式
+
+#### Windows
+
+在仓库根目录执行：
+
+```bash
+cd back-end/code/python
+python -m venv venv
+venv\Scripts\pip install -r app/algorithms/requirements.txt
+```
+
+#### macOS
+
+在仓库根目录执行：
+
+```bash
+cd back-end/code/python
+python3 -m venv venv
+venv/bin/pip install -r app/algorithms/requirements.txt
+```
+
+说明：
+
+- 当前 `front-end/scripts/run-pyserver.cjs` 会优先寻找 `back-end/code/python/venv`
+- Windows 优先找 `venv/Scripts/python.exe`
+- macOS 优先找 `venv/bin/python` 或 `venv/bin/python3`
+- 所以推荐把虚拟环境就建在这个固定位置，项目会自动识别
+
+### 11.5 大模型配置
+
+AI 服务配置文件读取逻辑在：
+
+- `back-end/code/python/app/algorithms/llm_config.py`
+
+默认优先级是：
+
+1. 环境变量
+2. `llm_settings.json`
+3. 代码默认值
+
+推荐做法：
+
+1. 复制示例文件
+2. 改成自己的 API Key
+
+示例文件：
+
+- `back-end/code/python/app/algorithms/llm_settings.example.json`
+
+建议复制为：
+
+- `back-end/code/python/app/algorithms/llm_settings.json`
+
+然后填写：
+
+- `api_key`
+- `base_url`
+- `model`
+
+也可以直接用环境变量：
+
+- `MOONSHOT_API_KEY`
+- `MOONSHOT_BASE_URL`
+- `MOONSHOT_MODEL`
+
+### 11.6 标准启动方式
+
+这是目前用户自己在用、也是当前最推荐的启动方式：
+
+在 `back-end/code` 目录执行：
+
+```bash
+cd back-end/code
+npm start
+```
+
+这条命令会启动 Electron 桌面端入口。
+
+当前链路是：
+
+1. `back-end/code/package.json` 的 `start`
+2. 执行 `node scripts/start-electron.js`
+3. `start-electron.js` 会检查前端依赖
+4. 然后拉起 Electron
+5. Electron 再使用前端与本地服务链路
+
+所以对当前项目来说，你要告诉别人：
+
+- 这个系统平时就是从 `back-end/code` 启动
+- 常用命令就是 `npm start`
+
+### 11.7 如果只想单独调前端和 Python
+
+如果只是做前端联调，也可以单独启动前端：
+
+```bash
+cd front-end
+npm start
+```
+
+这个命令会同时拉起：
+
+- Vite 前端开发服务
+- Node 本地服务
+- Python AI 服务
+
+其中 Python AI 服务的启动脚本是：
+
+- `front-end/scripts/run-pyserver.cjs`
+
+### 11.8 复现建议顺序
+
+从零复现时，建议按下面顺序操作：
+
+1. `git clone` 仓库并切到 `python3`
+2. 在 `back-end/code` 执行 `npm install`
+3. 在 `front-end` 执行 `npm install`
+4. 在 `back-end/code/python` 创建 `venv`
+5. 安装 `requirements.txt`
+6. 配置 `llm_settings.json`
+7. 回到 `back-end/code` 执行 `npm start`
+
+### 11.9 常见问题
+
+#### 1. AI 报 Python service not running
+
+通常说明：
+
+- Python 虚拟环境没建好
+- Python 依赖没装
+- `api_server.py` 没被成功拉起
+
+优先检查：
+
+- `back-end/code/python/venv` 是否存在
+- `requirements.txt` 是否已安装
+- `llm_settings.json` 是否已配置
+
+#### 2. AI 报 HTTP 500
+
+通常说明：
+
+- Python AI 服务启动了，但模型调用失败
+- API Key、Base URL、模型名配置有问题
+- 大模型接口可用，但返回内容不符合预期
+
+优先检查：
+
+- `llm_settings.json`
+- 网络能否访问模型服务
+- Python 控制台报错
+
+#### 3. front-end 能开，但 Electron 启不来
+
+优先检查：
+
+- `back-end/code/node_modules` 是否已安装
+- `front-end/node_modules` 是否已安装
+- 本机是否支持 Electron 运行
+
+### 11.10 对外说明时可以直接这样说
+
+如果你要把这套系统发给另一个开发工程师，最简洁的说法可以是：
+
+> 这个项目当前标准启动方式是：进入 `back-end/code` 后执行 `npm start`。  
+> 首次运行前，需要先安装 `back-end/code` 和 `front-end` 的 npm 依赖，再在 `back-end/code/python` 下创建 `venv` 并安装 `requirements.txt`，最后配置 `llm_settings.json`。
