@@ -19,7 +19,9 @@ const {
 
 const GRID_SIZE = 64;
 const HALF_SIZE = 32;
-const SPACING_MM = 7;       // 每格 7mm (0.7cm)
+const SPACING_MM = 14;      // 每格 14mm (1.4cm)
+const SPACING_CM = SPACING_MM / 10;
+const CELL_AREA_MM2 = SPACING_MM ** 2;
 const NOISE_THRESHOLD = 2;  // 去噪阈值 (>2 保留)
 
 // ============================================================
@@ -1039,7 +1041,7 @@ function calculateCOPTimeSeries(leftCop, rightCop, additionalData, dt = 0.024) {
   // 接触面积 (凸包面积)
   let contactArea = 0;
   if (n >= 3) {
-    contactArea = convexHullArea(copTrajectory) * (SPACING_MM ** 2);
+    contactArea = convexHullArea(copTrajectory) * CELL_AREA_MM2;
   }
 
   const deltaX = (Math.max(...x) - Math.min(...x)) * SPACING_MM;
@@ -1058,12 +1060,12 @@ function calculateCOPTimeSeries(leftCop, rightCop, additionalData, dt = 0.024) {
     const disc = Math.sqrt(Math.max(0, trace * trace / 4 - det));
     const lambda1 = Math.max(0, trace / 2 + disc);
     const lambda2 = Math.max(0, trace / 2 - disc);
-    majorAxis = Math.round(2 * Math.sqrt(lambda1) * 0.7 * 100) / 100;
-    minorAxis = Math.round(2 * Math.sqrt(lambda2) * 0.7 * 100) / 100;
+    majorAxis = Math.round(2 * Math.sqrt(lambda1) * SPACING_CM * 100) / 100;
+    minorAxis = Math.round(2 * Math.sqrt(lambda2) * SPACING_CM * 100) / 100;
   }
 
   const displacement = x.map((v, i) =>
-    Math.sqrt((v - centerX) ** 2 + (y[i] - centerY) ** 2) * 0.7
+    Math.sqrt((v - centerX) ** 2 + (y[i] - centerY) ** 2) * SPACING_CM
   );
 
   return {
@@ -1157,7 +1159,7 @@ function convexHullArea(points) {
 /**
  * 计算合并区域面积
  */
-function calculateMergedRegionAreas(sectionCoords, spacingMm = 7) {
+function calculateMergedRegionAreas(sectionCoords, spacingMm = SPACING_MM) {
   const qianzu = sectionCoords[0].length + sectionCoords[1].length;
   const zhongzu = sectionCoords[2].length;
   const houzu = sectionCoords[3].length;
@@ -1225,9 +1227,9 @@ function calculateFeetCentersAndDistances(processedData, leftCurve, rightCurve) 
     left_cop: leftCop,
     right_cop: rightCop,
     both_cop: bothCop,
-    left_forward: leftForward !== null ? leftForward * 0.7 : null,
-    dist_left_to_both: distLeft !== null ? distLeft * 0.7 : null,
-    dist_right_to_both: distRight !== null ? distRight * 0.7 : null,
+    left_forward: leftForward !== null ? leftForward * SPACING_CM : null,
+    dist_left_to_both: distLeft !== null ? distLeft * SPACING_CM : null,
+    dist_right_to_both: distRight !== null ? distRight * SPACING_CM : null,
   };
 }
 

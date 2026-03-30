@@ -834,7 +834,12 @@ export default function GripAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 z-10">
-          <GripReport patientName={patientInfo?.name || '未知'} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} reportData={gripReportData} />
+          <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} reportData={gripReportData}
+            onAiReportReady={(aiData) => {
+              const nextReportData = { ...gripReportData, aiReport: aiData };
+              setGripReportData(nextReportData);
+              completeAssessment('grip', { completed: true, reportData: nextReportData }, null, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
+            }} />
         </main>
       </div>
     );

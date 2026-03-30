@@ -20,6 +20,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/backend/, ''),
       },
+      // Python FastAPI 代理
+      '/pyapi': {
+        target: 'http://127.0.0.1:8765',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pyapi/, ''),
+      },
       // 后端 WebSocket 代理
       '/ws/backend': {
         target: 'ws://localhost:19999',

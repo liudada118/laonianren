@@ -3,6 +3,11 @@ import * as echarts from 'echarts';
 import InteractiveArchChart from './InteractiveArchChart';
 import InteractiveCOPChart from './InteractiveCOPChart';
 import { exportToPdf } from '../../lib/pdfExport';
+import AssessmentAiPanel from './AssessmentAiPanel';
+import {
+  ASSESSMENT_AI_SECTION_CONFIG,
+  buildStandingAiPayload,
+} from '../../lib/assessmentAi';
 
 /* ─── 蔡司风格 EChart 封装（增量更新，避免闪烁） ─── */
 function EChart({ option, height = 280 }) {
@@ -26,18 +31,24 @@ function EChart({ option, height = 280 }) {
 
 /* ─── 报告目录 ─── */
 const SECTIONS = [
-  { id: 'summary', label: '综合评估' },
-  { id: 'overview', label: '基本信息与足弓指标' },
-  { id: 'arch-zones', label: '足弓区域分布图' },
-  { id: 'pressure', label: '区域压力分布' },
-  { id: 'cop-heatmap', label: 'COP 压力中心轨迹' },
-  { id: 'cop-velocity', label: 'COP 速度时间序列' },
-  { id: 'cop-params', label: 'COP 参数表' },
-  { id: 'annotation', label: '参数说明' },
+  { id: 'overview', label: '?????????' },
+  { id: 'arch-zones', label: '???????' },
+  { id: 'pressure', label: '??????' },
+  { id: 'cop-heatmap', label: 'COP ??????' },
+  { id: 'cop-velocity', label: 'COP ??????' },
+  { id: 'cop-params', label: 'COP ???' },
+  { id: 'annotation', label: '????' },
+  { id: 'summary', label: 'AI ????' },
 ];
 
-export default function StandingReport({ reportData, patientInfo, onClose }) {
+const STANDING_SPACING_MM = 14;
+const STANDING_SPACING_CM = STANDING_SPACING_MM / 10;
+
+export default function StandingReport({ reportData, patientInfo, onClose, onAiReportReady }) {
   const [activeSection, setActiveSection] = useState('summary');
+  const [aiReport, setAiReport] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
   const contentRef = useRef(null);
   // 缓存报告生成时间，避免每次渲染时重新生成
   const reportTime = useMemo(() => new Date().toLocaleString('zh-CN'), []);
@@ -102,8 +113,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         if (!pts || pts.length < 3) return { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: areaCm2 };
         const cx = pts.reduce((s,p) => s+p[0], 0) / pts.length;
         const cy = pts.reduce((s,p) => s+p[1], 0) / pts.length;
-        const dx = pts.map(p => (p[0]-cx)*7.0);
-        const dy = pts.map(p => (p[1]-cy)*7.0);
+        const dx = pts.map((p) => (p[0] - cx) * STANDING_SPACING_MM);
+        const dy = pts.map((p) => (p[1] - cy) * STANDING_SPACING_MM);
         const n = pts.length;
         const covXX = dx.reduce((s,x) => s+x*x, 0)/n;
         const covYY = dy.reduce((s,y) => s+y*y, 0)/n;
@@ -116,7 +127,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         const w = 2*Math.sqrt(chi*Math.max(l1,l2));
         const h = 2*Math.sqrt(chi*Math.min(l1,l2));
         const angle = covXY !== 0 ? Math.atan2(2*covXY, covXX-covYY)*90/Math.PI : 0;
-        return { center: [cx, cy], width: w/7, height: h/7, angle, area_cm2: areaCm2 || (Math.PI*w*h/4/100) };
+        return { center: [cx, cy], width: w / STANDING_SPACING_MM, height: h / STANDING_SPACING_MM, angle, area_cm2: areaCm2 || (Math.PI * w * h / 4 / 100) };
       };
 
       return {
@@ -241,9 +252,9 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
         },
         additionalData: {
           copResults: {
-            distLeftToBoth: copRes.dist_left_to_both ? (copRes.dist_left_to_both * 7 / 10) : 0,
-            distRightToBoth: copRes.dist_right_to_both ? (copRes.dist_right_to_both * 7 / 10) : 0,
-            leftForward: copRes.left_forward ? (copRes.left_forward * 7 / 10) : 0,
+            distLeftToBoth: copRes.dist_left_to_both ?? 0,
+            distRightToBoth: copRes.dist_right_to_both ?? 0,
+            leftForward: copRes.left_forward ?? 0,
           }
         },
         // 后端 COP 指标（供 COP 参数表直接使用）
@@ -288,8 +299,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     const velocitySeries = [];
     const timePoints = [];
     for (let i = 1; i < copTraj.length; i++) {
-      const dx = (copTraj[i].x - copTraj[i-1].x) * 7.0;
-      const dy = (copTraj[i].y - copTraj[i-1].y) * 7.0;
+      const dx = (copTraj[i].x - copTraj[i - 1].x) * STANDING_SPACING_MM;
+      const dy = (copTraj[i].y - copTraj[i - 1].y) * STANDING_SPACING_MM;
       const dist = Math.sqrt(dx*dx + dy*dy);
       const dt = 0.05;
       velocitySeries.push(dist / dt);
@@ -301,8 +312,8 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       if (pts.length < 3) return { center: [0,0], width: 0, height: 0, angle: 0, area_cm2: 0 };
       const cx = pts.reduce((s,p) => s+p[0], 0) / pts.length;
       const cy = pts.reduce((s,p) => s+p[1], 0) / pts.length;
-      const dx = pts.map(p => (p[0]-cx)*7.0);
-      const dy = pts.map(p => (p[1]-cy)*7.0);
+      const dx = pts.map((p) => (p[0] - cx) * STANDING_SPACING_MM);
+      const dy = pts.map((p) => (p[1] - cy) * STANDING_SPACING_MM);
       const n = pts.length;
       const covXX = dx.reduce((s,x) => s+x*x, 0)/n;
       const covYY = dy.reduce((s,y) => s+y*y, 0)/n;
@@ -315,7 +326,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       const w = 2*Math.sqrt(chi*Math.max(l1,l2));
       const h = 2*Math.sqrt(chi*Math.min(l1,l2));
       const angle = covXY !== 0 ? Math.atan2(2*covXY, covXX-covYY)*90/Math.PI : 0;
-      return { center: [cx, cy], width: w/7, height: h/7, angle, area_cm2: Math.PI*w*h/4/100 };
+      return { center: [cx, cy], width: w / STANDING_SPACING_MM, height: h / STANDING_SPACING_MM, angle, area_cm2: Math.PI * w * h / 4 / 100 };
     };
 
     return {
@@ -391,13 +402,78 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
       },
       additionalData: {
         copResults: {
-          distLeftToBoth: leftFoot.cop && rightFoot.cop ? Math.sqrt(Math.pow((leftFoot.cop.x - (leftFoot.cop.x + rightFoot.cop.x)/2)*7/10, 2) + Math.pow((leftFoot.cop.y - (leftFoot.cop.y + rightFoot.cop.y)/2)*7/10, 2)) : 0,
-          distRightToBoth: leftFoot.cop && rightFoot.cop ? Math.sqrt(Math.pow((rightFoot.cop.x - (leftFoot.cop.x + rightFoot.cop.x)/2)*7/10, 2) + Math.pow((rightFoot.cop.y - (leftFoot.cop.y + rightFoot.cop.y)/2)*7/10, 2)) : 0,
-          leftForward: leftFoot.cop && rightFoot.cop ? (leftFoot.cop.x - rightFoot.cop.x)*7/10 : 0,
+          distLeftToBoth: leftFoot.cop && rightFoot.cop ? Math.sqrt(Math.pow((leftFoot.cop.x - (leftFoot.cop.x + rightFoot.cop.x) / 2) * STANDING_SPACING_CM, 2) + Math.pow((leftFoot.cop.y - (leftFoot.cop.y + rightFoot.cop.y) / 2) * STANDING_SPACING_CM, 2)) : 0,
+          distRightToBoth: leftFoot.cop && rightFoot.cop ? Math.sqrt(Math.pow((rightFoot.cop.x - (leftFoot.cop.x + rightFoot.cop.x) / 2) * STANDING_SPACING_CM, 2) + Math.pow((rightFoot.cop.y - (leftFoot.cop.y + rightFoot.cop.y) / 2) * STANDING_SPACING_CM, 2)) : 0,
+          leftForward: leftFoot.cop && rightFoot.cop ? (leftFoot.cop.x - rightFoot.cop.x) * STANDING_SPACING_CM : 0,
         }
       }
     };
   }, [reportData]);
+
+  useEffect(() => {
+    if (reportData?.aiReport && !aiReport) {
+      setAiReport(reportData.aiReport);
+    }
+  }, [reportData, aiReport]);
+
+  useEffect(() => {
+    if (!data || aiReport || reportData?.aiReport) return;
+
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(null);
+
+    const runAiAnalysis = async () => {
+      try {
+        const payload = buildStandingAiPayload(data);
+        if (!payload) return;
+
+        const { generateStandingAIReport } = await import('../../lib/gripPythonApi');
+        const res = await generateStandingAIReport(
+          patientInfo || { name: '鏈煡' },
+          payload,
+        );
+
+        if (cancelled) return;
+        if (res.success) {
+          setAiReport(res.data);
+          if (onAiReportReady) onAiReportReady(res.data);
+        } else {
+          setAiError(res.error || 'AI 鍒嗘瀽澶辫触');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAiError(err?.message || 'AI 鍒嗘瀽澶辫触');
+        }
+      } finally {
+        if (!cancelled) setAiLoading(false);
+      }
+    };
+
+    runAiAnalysis();
+
+    if (false) requestAssessmentAIReport(
+      'standing',
+      patientInfo || { name: '未知' },
+      payload,
+    ).then(res => {
+      if (cancelled) return;
+      if (res.success) {
+        setAiReport(res.data);
+        if (onAiReportReady) onAiReportReady(res.data);
+      } else {
+        setAiError(res.error || 'AI 分析失败');
+      }
+    }).catch(err => {
+      if (!cancelled) setAiError(err.message);
+    }).finally(() => {
+      if (!cancelled) setAiLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data, patientInfo, aiReport, onAiReportReady, reportData?.aiReport]);
 
   const scrollToSection = (id) => {
     const el = document.getElementById(`standing-${id}`);
@@ -619,10 +695,6 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
           <div className="max-w-[1100px] mx-auto space-y-8">
 
             {/* ═══════════ 综合评估（置顶） ═══════════ */}
-            <section id="standing-summary">
-              <SectionHeader title="综合评估" subtitle="Comprehensive Assessment" />
-              <AssessmentSummary data={data} diff={diff} />
-            </section>
 
             {/* ═══════════ 第1页：基本信息与足弓指标 ═══════════ */}
             <section id="standing-overview">
@@ -765,6 +837,18 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
                     </div>
                   ))}
                 </div>
+              </div>
+            </section>
+
+            <section id="standing-summary">
+              <SectionHeader title="AI综合评估" subtitle="AI Comprehensive Assessment" />
+              <div className="zeiss-card p-5">
+                <AssessmentAiPanel
+                  aiLoading={aiLoading}
+                  aiError={aiError}
+                  aiReport={aiReport}
+                  sections={ASSESSMENT_AI_SECTION_CONFIG.standing}
+                />
               </div>
             </section>
 

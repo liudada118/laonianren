@@ -447,6 +447,99 @@ async def analyze_gait(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== AI 报告生成（Moonshot/Kimi） ====================
+
+class GripAIReportRequest(BaseModel):
+    """握力 AI 报告请求"""
+    patient_info: dict  # {name, gender, age, weight}
+    grip_data: dict     # 握力评估的关键指标
+
+
+class AssessmentAIReportRequest(BaseModel):
+    patient_info: dict
+    assessment_data: dict
+
+
+def _ai_json_response(success: bool, data=None, error=None):
+    body = json.dumps(
+        {"success": success, "data": data, "error": error},
+        ensure_ascii=False,
+    )
+    return Response(content=body, media_type="application/json")
+
+
+async def _generate_assessment_ai_report(assessment_type: str, patient_info: dict, assessment_data: dict):
+    from llm_service import call_assessment_ai_report
+
+    try:
+        result = await call_assessment_ai_report(
+            assessment_type=assessment_type,
+            patient_info=patient_info,
+            assessment_data=assessment_data,
+        )
+        return _ai_json_response(True, data=result)
+    except Exception as e:
+        traceback.print_exc()
+        return _ai_json_response(False, error=str(e))
+
+
+@app.post("/generate-grip-ai-report")
+async def generate_grip_ai_report(request: GripAIReportRequest):
+    """调用 LLM 生成握力评估 AI 分析报告"""
+    return await _generate_assessment_ai_report("grip", request.patient_info, request.grip_data)
+
+        # 返回 200 + success=false，让前端做 fallback
+
+
+@app.post("/generate-sitstand-ai-report")
+async def generate_sitstand_ai_report(request: AssessmentAIReportRequest):
+    return await _generate_assessment_ai_report("sitstand", request.patient_info, request.assessment_data)
+
+
+@app.post("/generate-standing-ai-report")
+async def generate_standing_ai_report(request: AssessmentAIReportRequest):
+    return await _generate_assessment_ai_report("standing", request.patient_info, request.assessment_data)
+
+
+@app.post("/generate-gait-ai-report")
+async def generate_gait_ai_report(request: AssessmentAIReportRequest):
+    return await _generate_assessment_ai_report("gait", request.patient_info, request.assessment_data)
+
+
+@app.post("/stream-grip-ai-report")
+async def stream_grip_ai_report_endpoint(request: GripAIReportRequest):
+    """流式调用 LLM，SSE 推送每个 chunk 到前端"""
+    from fastapi.responses import StreamingResponse
+
+    def event_stream():
+        try:
+            from llm_service import stream_grip_ai_report
+
+            for chunk in stream_grip_ai_report(
+                patient_info=request.patient_info,
+                grip_data=request.grip_data,
+            ):
+                # SSE 格式: data: xxx\n\n
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+            # 结束标记
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            traceback.print_exc()
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 

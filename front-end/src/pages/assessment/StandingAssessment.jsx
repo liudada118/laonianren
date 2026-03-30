@@ -653,7 +653,13 @@ export default function StandingAssessment() {
               </div>
             </div>
           ) : (
-            <StandingReport reportData={reportData} patientInfo={patientInfo} />
+            <StandingReport
+              reportData={reportData}
+              patientInfo={patientInfo}
+              onAiReportReady={(aiData) => {
+                completeAssessment('standing', { completed: true, reportData: { ...reportData, aiReport: aiData } }, null, assessmentIdRef.current);
+              }}
+            />
           )}
         </main>
       </div>

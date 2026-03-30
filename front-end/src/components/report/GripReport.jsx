@@ -29,6 +29,7 @@ const SECTIONS = [
   { id: 'angular', label: '抖动检测' },
   { id: 'time-analysis', label: '时间分析' },
   { id: 'peak-data', label: '峰值帧数据' },
+  { id: 'ai-assessment', label: 'AI综合评估' },
 ];
 
 /* ─── 默认空 fingers 数据（防止 undefined 崩溃）─── */
@@ -65,12 +66,135 @@ function formatDuration(timeRange) {
   return timeRange;
 }
 
+function roundMetric(value, digits = 2, fallback = null) {
+  if (typeof value !== 'number' || Number.isNaN(value) || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Number(value.toFixed(digits));
+}
+
+function buildRangeSummary(values) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const numericValues = values.filter(value => typeof value === 'number' && Number.isFinite(value));
+  if (!numericValues.length) return null;
+  return {
+    min: roundMetric(Math.min(...numericValues), 1, null),
+    max: roundMetric(Math.max(...numericValues), 1, null),
+  };
+}
+
+function buildGripHandAiPayload(handData, fallbackLabel) {
+  if (!handData) return null;
+
+  const peakForce = roundMetric(handData.peakInfo?.peak_force ?? 0, 2, 0);
+  const peakTime = roundMetric(handData.peakInfo?.peak_time ?? 0, 3, null);
+  const gripStartTime = roundMetric(handData.gripStartTime ?? 0, 3, null);
+
+  return {
+    hand_type: handData.handType || handData.hand || fallbackLabel,
+    peak_force: peakForce,
+    peak_force_kg: roundMetric(peakForce / 9.8, 2, 0),
+    total_force: roundMetric(handData.totalForce ?? 0, 2, 0),
+    total_area: roundMetric(handData.totalArea ?? 0, 2, 0),
+    total_frames: handData.totalFrames ?? 0,
+    time_range: handData.timeRange ?? '-',
+    fingers: (handData.fingers || []).map(finger => ({
+      name: finger.name || '-',
+      force: roundMetric(finger.force ?? 0, 2, 0),
+      area: roundMetric(finger.area ?? 0, 2, 0),
+      adc: roundMetric(finger.adc ?? 0, 0, 0),
+      points: finger.points ?? '-',
+    })),
+    grip_start_time: gripStartTime,
+    time_to_peak: roundMetric((peakTime ?? 0) - (gripStartTime ?? 0), 3, null),
+    peak_time: peakTime,
+    peak_duration: roundMetric(handData.peakInfo?.duration ?? 0, 3, null),
+    shake_count: handData.shakeCount ?? 0,
+    avg_angular_velocity: roundMetric(handData.avgAngularVelocity ?? 0, 2, 0),
+    max_angular_velocity: roundMetric(handData.maxAngularVelocity ?? 0, 2, 0),
+    euler_range: {
+      roll: buildRangeSummary(handData.eulerData?.roll),
+      pitch: buildRangeSummary(handData.eulerData?.pitch),
+      yaw: buildRangeSummary(handData.eulerData?.yaw),
+    },
+  };
+}
+
+function buildGripAiPayload(rawReport) {
+  if (!rawReport) return null;
+
+  const hasSplitHands = rawReport.left || rawReport.right;
+  const leftHand = hasSplitHands ? buildGripHandAiPayload(rawReport.left, '左手') : null;
+  const rightHand = hasSplitHands ? buildGripHandAiPayload(rawReport.right, '右手') : null;
+
+  if (!hasSplitHands) {
+    const handTypeText = String(rawReport.handType || rawReport.hand || '');
+    const singleHandLabel = handTypeText.includes('右') ? '右手' : '左手';
+    const singleHandPayload = buildGripHandAiPayload(rawReport, singleHandLabel);
+    return {
+      left_hand: singleHandLabel === '左手' ? singleHandPayload : null,
+      right_hand: singleHandLabel === '右手' ? singleHandPayload : null,
+      bilateral_comparison: {
+        available_hands: [singleHandLabel],
+        stronger_hand: singleHandLabel,
+        peak_force_diff: null,
+        total_force_diff: null,
+      },
+    };
+  }
+
+  if (!leftHand && !rightHand) return null;
+
+  const leftPeak = leftHand?.peak_force ?? null;
+  const rightPeak = rightHand?.peak_force ?? null;
+  const leftTotal = leftHand?.total_force ?? null;
+  const rightTotal = rightHand?.total_force ?? null;
+
+  let strongerHand = null;
+  if (leftPeak != null && rightPeak != null) {
+    strongerHand = Math.abs(leftPeak - rightPeak) < 0.01
+      ? '双手接近'
+      : leftPeak > rightPeak
+        ? '左手'
+        : '右手';
+  } else if (leftHand) {
+    strongerHand = '左手';
+  } else if (rightHand) {
+    strongerHand = '右手';
+  }
+
+  return {
+    left_hand: leftHand,
+    right_hand: rightHand,
+    bilateral_comparison: {
+      available_hands: [leftHand ? '左手' : null, rightHand ? '右手' : null].filter(Boolean),
+      stronger_hand: strongerHand,
+      peak_force_diff: (leftPeak != null && rightPeak != null)
+        ? roundMetric(Math.abs(leftPeak - rightPeak), 2, null)
+        : null,
+      total_force_diff: (leftTotal != null && rightTotal != null)
+        ? roundMetric(Math.abs(leftTotal - rightTotal), 2, null)
+        : null,
+      peak_force_ratio: (leftPeak && rightPeak)
+        ? roundMetric(Math.max(leftPeak, rightPeak) / Math.min(leftPeak, rightPeak), 2, null)
+        : null,
+      total_force_ratio: (leftTotal && rightTotal)
+        ? roundMetric(Math.max(leftTotal, rightTotal) / Math.min(leftTotal, rightTotal), 2, null)
+        : null,
+    },
+  };
+}
+
 /* ─── 主报告组件 ─── */
-export default function GripReport({ patientName, onClose, onSwitchDynamic, reportData: propsReportData }) {
+export default function GripReport({ patientName, patientInfo, onClose, onSwitchDynamic, reportData: propsReportData, onAiReportReady }) {
   const [activeHand, setActiveHand] = useState('left');
   const [activeSection, setActiveSection] = useState('overview');
   const [rawReport, setRawReport] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
+  const [aiReport, setAiReport] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+  const [aiStreamText, setAiStreamText] = useState('');
   const contentRef = useRef(null);
 
   // 加载数据
@@ -124,6 +248,43 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
   const hasLeft = rawReport?.left != null;
   const hasRight = rawReport?.right != null;
   const hasBothHands = hasLeft && hasRight;
+  const gripAiPayload = useMemo(() => buildGripAiPayload(rawReport), [rawReport]);
+
+  // 如果历史记录里已有 AI 报告，直接用
+  useEffect(() => {
+    if (propsReportData?.aiReport && !aiReport) {
+      setAiReport(propsReportData.aiReport);
+    }
+  }, [propsReportData, aiReport]);
+
+  // AI 综合评估：data 就绪后自动调用
+  useEffect(() => {
+    if (!gripAiPayload || aiReport || propsReportData?.aiReport) return;
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(null);
+
+    import('../../lib/gripPythonApi').then(({ generateGripAIReport }) => {
+      return generateGripAIReport(
+        patientInfo || { name: patientName, gender: '未知' },
+        gripAiPayload,
+      );
+    }).then(res => {
+      if (cancelled) return;
+      if (res.success) {
+        setAiReport(res.data);
+        if (onAiReportReady) onAiReportReady(res.data);
+      } else {
+        setAiError(res.error || 'AI 分析失败');
+      }
+    }).catch(err => {
+      if (!cancelled) setAiError(err.message);
+    }).finally(() => {
+      if (!cancelled) setAiLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [gripAiPayload, patientInfo, patientName, aiReport, onAiReportReady, propsReportData?.aiReport]);
 
   const colors = ['#0066CC', '#0891B2', '#059669', '#D97706', '#9333EA', '#DC2626'];
   const fingerNames = ['拇指', '食指', '中指', '无名指', '小指', '手掌'];
@@ -507,6 +668,160 @@ export default function GripReport({ patientName, onClose, onSwitchDynamic, repo
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+
+            {/* ═══════════ 综合评估（AI 生成） ═══════════ */}
+            <section id="grip-ai-assessment">
+              <SectionHeader title="AI综合评估" />
+              <div className="zeiss-card p-5">
+                {aiLoading ? (
+                  <div className="py-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <svg className="w-4 h-4 animate-spin" style={{ color: 'var(--zeiss-blue)' }} fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span className="text-sm" style={{ color: 'var(--text-muted)' }}>AI 正在分别分析左手和右手评估数据...</span>
+                    </div>
+                    {aiStreamText && (
+                      <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words p-4 rounded-lg"
+                        style={{ background: 'var(--bg-hover, #f8f9fa)', color: 'var(--text-secondary)', maxHeight: '300px', overflow: 'auto' }}>
+                        {aiStreamText}
+                      </pre>
+                    )}
+                  </div>
+                ) : aiError ? (
+                  <div className="text-center py-6">
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>AI 分析暂不可用</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{aiError}</p>
+                  </div>
+                ) : aiReport ? (
+                  <>
+                    {/* 评估等级标签 */}
+                    {aiReport.eval_level && (
+                      <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: '1px solid var(--border-light)' }}>
+                        <div className="px-4 py-2 rounded-lg text-sm font-bold"
+                          style={{
+                            background: aiReport.eval_level.text === '正常' ? '#ECFDF5' : aiReport.eval_level.text === '偏低' ? '#FFFBEB' : '#FEF2F2',
+                            color: aiReport.eval_level.text === '正常' ? '#059669' : aiReport.eval_level.text === '偏低' ? '#D97706' : '#DC2626',
+                          }}>
+                          评估等级: {aiReport.eval_level.text}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {aiReport.eval_level.standard}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {/* 数据质量提醒 */}
+                      {aiReport.data_quality && !aiReport.data_quality.is_valid && (
+                        <div className="p-4 rounded-lg" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                          <h5 className="text-xs font-bold mb-2 flex items-center gap-1.5" style={{ color: '#DC2626' }}>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                            </svg>
+                            数据质量提醒
+                          </h5>
+                          {aiReport.data_quality.issues?.length > 0 && (
+                            <ul className="text-sm leading-relaxed mb-2 space-y-1" style={{ color: '#991B1B' }}>
+                              {aiReport.data_quality.issues.map((issue, i) => (
+                                <li key={i} className="flex items-start gap-1.5">
+                                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#DC2626' }} />
+                                  {issue}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {aiReport.data_quality.suggestion && (
+                            <p className="text-sm font-medium" style={{ color: '#B91C1C' }}>{aiReport.data_quality.suggestion}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 测试概况 */}
+                      {aiReport.overview && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>测试概况</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.overview}</p>
+                        </div>
+                      )}
+
+                      {aiReport.left_hand_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>左手AI综合评估</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.left_hand_analysis}</p>
+                        </div>
+                      )}
+
+                      {aiReport.right_hand_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>右手AI综合评估</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.right_hand_analysis}</p>
+                        </div>
+                      )}
+
+                      {aiReport.bilateral_comparison && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>双手对比</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.bilateral_comparison}</p>
+                        </div>
+                      )}
+
+                      {/* 握力水平分析 */}
+                      {aiReport.strength_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力水平分析</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.strength_analysis}</p>
+                        </div>
+                      )}
+
+                      {/* 手指力分布分析 */}
+                      {aiReport.distribution_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>手指力分布分析</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.distribution_analysis}</p>
+                        </div>
+                      )}
+
+                      {/* 稳定性分析 */}
+                      {aiReport.stability_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>手部稳定性分析</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.stability_analysis}</p>
+                        </div>
+                      )}
+
+                      {/* 姿态分析 */}
+                      {aiReport.posture_analysis && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握持姿态分析</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.posture_analysis}</p>
+                        </div>
+                      )}
+
+                      {/* 临床建议 */}
+                      {aiReport.clinical_suggestion && (
+                        <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
+                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>临床建议</h5>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.clinical_suggestion}</p>
+                        </div>
+                      )}
+
+                      {/* 免责声明 */}
+                      {aiReport.disclaimer && (
+                        <div className="text-center pt-3">
+                          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{aiReport.disclaimer}</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-6">
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无 AI 分析数据</p>
+                  </div>
+                )}
               </div>
             </section>
 

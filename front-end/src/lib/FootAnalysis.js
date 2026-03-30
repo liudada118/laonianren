@@ -4,7 +4,7 @@
  * 包含：足弓分析、压力分布、COP分析等核心功能
  */
 
-const PITCH_MM = 7.0;
+const PITCH_MM = 14.0;
 const GRID_SIZE = 64;
 const NOISE_THRESHOLD = 3;
 

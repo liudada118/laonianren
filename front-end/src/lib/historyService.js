@@ -134,6 +134,37 @@ export function saveAssessmentSession(patientInfo, institution, assessments, ses
   }
 }
 
+export function updateAssessmentAiReport(recordId, assessmentType, aiReport) {
+  try {
+    const history = getHistory();
+    const recordIndex = history.findIndex(r => r.id === recordId);
+    if (recordIndex < 0) return false;
+
+    const record = history[recordIndex];
+    if (!record.assessments?.[assessmentType]) return false;
+
+    const assessment = { ...record.assessments[assessmentType] };
+    const report = { ...(assessment.report || {}) };
+    const reportData = { ...(report.reportData || {}) };
+    reportData.aiReport = aiReport;
+    report.reportData = reportData;
+    assessment.report = report;
+
+    record.assessments = {
+      ...record.assessments,
+      [assessmentType]: assessment,
+    };
+    record.updatedAt = new Date().toISOString();
+    history[recordIndex] = record;
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    return true;
+  } catch (e) {
+    console.error('更新 AI 报告失败:', e);
+    return false;
+  }
+}
+
 /**
  * 删除一条记录
  */
@@ -198,6 +229,7 @@ export default {
   getHistory,
   saveRecord,
   saveAssessmentSession,
+  updateAssessmentAiReport,
   deleteRecord,
   searchHistory,
   clearHistory,

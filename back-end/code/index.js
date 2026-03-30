@@ -16,6 +16,8 @@ const defaultDevPort = process.env.VITE_DEV_PORT || '5173'
 let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaultDevPort}`
 let viteProcess = null
 let apiChild = null  // serialServer 子进程引用
+let pythonAiChild = null
+const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
@@ -61,6 +63,32 @@ async function waitForDevServer(url, timeoutMs = 20000) {
     }
   }
   console.log('[vite] dev server not found on any port')
+  return false
+}
+
+async function checkPythonAiOnce(timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${pythonAiPort}/health`, (res) => {
+      res.resume()
+      resolve(res.statusCode === 200)
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+async function waitForPythonAi(timeoutMs = 15000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await checkPythonAiOnce(1000)
+    if (ok) return true
+    // eslint-disable-next-line no-await-in-loop
+    await wait(500)
+  }
   return false
 }
 
@@ -425,6 +453,108 @@ function apiPy() {
     : path.join(process.resourcesPath, 'python', 'app', 'api.py')
 }
 
+function pyAiBin() {
+  const isDev = !app.isPackaged
+  const candidates = process.platform === 'win32'
+    ? [
+        isDev
+          ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
+          : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe'),
+        'python',
+        'py'
+      ]
+    : [
+        isDev
+          ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
+          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python'),
+        isDev
+          ? path.join(__dirname, 'python', 'venv', 'bin', 'python3')
+          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python3'),
+        'python3',
+        'python'
+      ]
+
+  return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
+}
+
+function aiApiPy() {
+  const isDev = !app.isPackaged
+  return isDev
+    ? path.join(__dirname, 'python', 'app', 'algorithms', 'api_server.py')
+    : path.join(process.resourcesPath, 'python', 'app', 'algorithms', 'api_server.py')
+}
+
+async function startPythonAiChild() {
+  if (await checkPythonAiOnce(1000)) {
+    console.log(`[pyai] Python AI service already running on port ${pythonAiPort}`)
+    return
+  }
+
+  if (pythonAiChild && !pythonAiChild.killed) {
+    const ok = await waitForPythonAi(5000)
+    if (ok) return
+  }
+
+  const pythonBin = pyAiBin()
+  const scriptPath = aiApiPy()
+
+  if (!pythonBin) {
+    throw new Error('Python runtime not found for AI service')
+  }
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error(`AI api server not found: ${scriptPath}`)
+  }
+
+  console.log(`[pyai] starting AI service with ${pythonBin}`)
+  console.log(`[pyai] script path: ${scriptPath}`)
+
+  const child = spawn(pythonBin, [scriptPath], {
+    cwd: path.dirname(scriptPath),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PYTHON_API_PORT: String(pythonAiPort)
+    },
+    shell: false,
+    windowsHide: true
+  })
+
+  pythonAiChild = child
+
+  child.stdout?.on('data', (chunk) => {
+    const text = chunk.toString()
+    if (text && text.trim()) {
+      process.stdout.write(`[pyai] ${text}`)
+    }
+  })
+
+  child.stderr?.on('data', (chunk) => {
+    const text = chunk.toString()
+    if (text && text.trim()) {
+      process.stderr.write(`[pyai] ${text}`)
+    }
+  })
+
+  child.on('error', (err) => {
+    console.error('[pyai] start error:', err.message)
+  })
+
+  child.on('exit', (code, signal) => {
+    console.log(`[pyai] exited: code=${code} signal=${signal}`)
+    if (pythonAiChild === child) {
+      pythonAiChild = null
+    }
+  })
+
+  const ok = await waitForPythonAi(15000)
+  if (!ok) {
+    throw new Error(`Python AI service did not become ready on port ${pythonAiPort}`)
+  }
+
+  console.log(`[pyai] ready on http://127.0.0.1:${pythonAiPort}`)
+}
+
 /** 主进程里直接像调用函数一样用 */
 // function callPy(fn, args) {
 //   return new Promise((resolve, reject) => {
@@ -510,6 +640,11 @@ app.whenReady().then(async () => {
 
   // 开始本地api线程
   await startApiChild()
+  try {
+    await startPythonAiChild()
+  } catch (err) {
+    console.error('[pyai] failed to start:', err.message)
+  }
   // 开启python线程
   // startWorker(); // [已迁移到JS算法] Python子进程不再需要
   await createWindow()
@@ -578,6 +713,10 @@ app.on('before-quit', () => {
     apiChild.kill()
     apiChild = null
   }
+  if (pythonAiChild) {
+    pythonAiChild.kill()
+    pythonAiChild = null
+  }
 })
 
 // 兜底：确保进程退出时强制清理所有子进程
@@ -590,7 +729,8 @@ app.on('will-quit', () => {
     viteProcess.kill('SIGKILL')
     viteProcess = null
   }
+  if (pythonAiChild && !pythonAiChild.killed) {
+    pythonAiChild.kill('SIGKILL')
+    pythonAiChild = null
+  }
 })
-
-
-

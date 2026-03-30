@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 
 const CANVAS_H = 420;
+const SPACING_MM = 14;
 
 /** COP 轨迹专用颜色：亮红 → 白色 */
 function copLineColor(t) {
@@ -296,8 +297,8 @@ export default function InteractiveCOPChart({ leftCopRaw, rightCopRaw, peakFrame
     setTooltip({
       x: e.clientX - rect.left, y: e.clientY - rect.top, side,
       frameIndex: bestIdx, totalFrames: pts.length,
-      copX: Math.round(pts[bestIdx][0] * 7 * 10) / 10,
-      copY: Math.round(pts[bestIdx][1] * 7 * 10) / 10,
+      copX: Math.round(pts[bestIdx][0] * SPACING_MM * 10) / 10,
+      copY: Math.round(pts[bestIdx][1] * SPACING_MM * 10) / 10,
     });
   }, [leftPanelCop, rightPanelCop, peakFrameData, leftSC, rightSC]);
 
