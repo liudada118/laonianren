@@ -521,6 +521,7 @@ function writeSerialCache(payload) {
   const data = {
     key: payload.key || '',
     orgName: payload.orgName || '',
+    llmApiKey: payload.llmApiKey || '',
     updatedAt: new Date().toISOString(),
   }
   fs.writeFileSync(serialPath, JSON.stringify(data, null, 2), 'utf-8')
@@ -1203,7 +1204,7 @@ app.post('/bindKey', (req, res) => {
 // serial.txt cache APIs
 app.get('/serialCache', (req, res) => {
   const data = readSerialCache()
-  if (data && data.key && data.orgName) {
+  if (data && data.key) {
     res.json(new HttpResult(0, { hasCache: true, ...data }, 'success'))
     return
   }
@@ -1212,12 +1213,12 @@ app.get('/serialCache', (req, res) => {
 
 app.post('/serialCache', (req, res) => {
   try {
-    const { key, orgName } = req.body || {}
-    if (!key || !orgName) {
-      res.json(new HttpResult(1, {}, 'missing key or orgName'))
+    const { key, orgName, llmApiKey } = req.body || {}
+    if (!key) {
+      res.json(new HttpResult(1, {}, 'missing key'))
       return
     }
-    const saved = writeSerialCache({ key, orgName })
+    const saved = writeSerialCache({ key, orgName, llmApiKey })
     res.json(new HttpResult(0, saved, 'success'))
   } catch (err) {
     res.json(new HttpResult(1, {}, 'save failed'))

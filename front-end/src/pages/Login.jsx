@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { fetchLlmConfig } from '../lib/gripPythonApi';
+import { backendBridge } from '../lib/BackendBridge';
 
 export default function Login() {
   const [secretKey, setSecretKey] = useState('');
@@ -10,7 +11,12 @@ export default function Login() {
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
   const { login } = useAssessment();
   const navigate = useNavigate();
+  const location = useLocation();
+  const editMode = location.state?.editMode === true;
   const [currentVersion, setCurrentVersion] = useState('2.0.0');
+  // loading: 正在检查缓存, ready: 显示表单, auto: 自动登录中
+  const [pageState, setPageState] = useState(editMode ? 'loading-edit' : 'loading');
+  const autoLoginDone = useRef(false);
 
   useEffect(() => {
     // 从 Electron 获取实际版本号
@@ -27,34 +33,109 @@ export default function Login() {
     }
   };
 
+  // 启动时从后端读取 serial.txt 缓存
   useEffect(() => {
+    if (autoLoginDone.current) return;
     let cancelled = false;
 
     (async () => {
-      const configRes = await fetchLlmConfig();
-      if (cancelled || !configRes?.success || !configRes?.data) {
-        return;
-      }
+      try {
+        // 同时获取 serial.txt 缓存和 LLM 配置
+        const [cacheRes, configRes] = await Promise.all([
+          fetch(`${backendBridge.httpUrl}/serialCache`).then(r => r.json()).catch(() => null),
+          fetchLlmConfig().catch(() => null),
+        ]);
 
-      const serverApiKey = (configRes.data.api_key || '').trim();
-      if (serverApiKey) {
-        setLlmApiKey(serverApiKey);
+        if (cancelled) return;
+
+        // 从服务器获取 LLM API key 作为默认值
+        const serverApiKey = configRes?.success && configRes?.data?.api_key
+          ? configRes.data.api_key.trim()
+          : '';
+
+        if (cacheRes && cacheRes.code === 0 && cacheRes.data && cacheRes.data.hasCache) {
+          const cached = cacheRes.data;
+          const cachedKey = cached.key || '';
+          const cachedOrg = cached.orgName || '';
+          const cachedLlm = cached.llmApiKey || serverApiKey || '';
+
+          setSecretKey(cachedKey);
+          setInstitution(cachedOrg);
+          setLlmApiKey(cachedLlm);
+
+          if (editMode) {
+            // 编辑模式：预填数据，显示表单让用户修改
+            setPageState('ready');
+          } else {
+            // 有缓存，自动登录
+            autoLoginDone.current = true;
+            setPageState('auto');
+            setTimeout(() => {
+              if (!cancelled) {
+                login(cachedKey, cachedOrg, cachedLlm);
+                navigate('/dashboard');
+              }
+            }, 600);
+          }
+        } else {
+          // 无缓存，显示表单
+          if (serverApiKey) setLlmApiKey(serverApiKey);
+          setPageState('ready');
+        }
+      } catch {
+        setPageState('ready');
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [login, navigate, editMode]);
 
   const isValid = secretKey.trim().length > 0;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isValid) return;
-    login(secretKey.trim(), institution.trim(), llmApiKey.trim());
+
+    const trimmedKey = secretKey.trim();
+    const trimmedOrg = institution.trim();
+    const trimmedLlm = llmApiKey.trim();
+
+    // 保存到 serial.txt
+    try {
+      await fetch(`${backendBridge.httpUrl}/serialCache`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: trimmedKey, orgName: trimmedOrg, llmApiKey: trimmedLlm }),
+      });
+    } catch {
+      // 保存失败不阻塞登录
+    }
+
+    login(trimmedKey, trimmedOrg, trimmedLlm);
     navigate('/dashboard');
   };
+
+  // 加载中 / 自动登录中
+  if (pageState === 'loading' || pageState === 'loading-edit' || pageState === 'auto') {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'linear-gradient(135deg, #F5F6F8 0%, #E8ECF0 50%, #F0F4F8 100%)' }}
+      >
+        <div className="text-center animate-slideUp">
+          <img
+            src="/logo1.png"
+            alt="系统Logo"
+            className="mx-auto mb-5"
+            style={{ width: 64, height: 64, borderRadius: 14, objectFit: 'contain' }}
+          />
+          <p className="text-sm font-medium" style={{ color: 'var(--text-tertiary)' }}>
+            {pageState === 'auto' ? '正在自动登录...' : pageState === 'loading-edit' ? '正在加载配置...' : '正在检查登录信息...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -80,7 +161,7 @@ export default function Login() {
               style={{ width: 64, height: 64, borderRadius: 14, objectFit: 'contain' }}
             />
             <p className="text-sm font-medium mb-1.5 tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
-              欢迎使用
+              {editMode ? '修改系统配置' : '欢迎使用'}
             </p>
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
               肌少症评估与监测系统
@@ -168,7 +249,7 @@ export default function Login() {
                 border: 'none',
               }}
             >
-              进入系统
+              {editMode ? '保存并返回' : '进入系统'}
             </button>
           </form>
         </div>
