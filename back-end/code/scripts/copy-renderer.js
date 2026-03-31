@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const srcDir = path.join(root, 'client', 'dist');
-const destDir = path.join(root, 'build');
+const srcDir = path.join(root, '..', '..', 'front-end', 'dist');
+const destDir = path.join(root, 'renderer-build');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {

@@ -33,12 +33,16 @@ const initDb = (fileStr, filePath) => {
  */
 function genDb(file, filePath) {
   let db
+  fs.mkdirSync(filePath, { recursive: true })
   if (fs.existsSync(file)) {
     db = new sqlite3.Database(file);
   } else {
+    const templatePath = `${filePath}/init.db`
     console.log(file, filePath, 'err')
-    let data = fs.readFileSync(`${filePath}/init.db`);
-    fs.writeFileSync(file, data);
+    if (fs.existsSync(templatePath)) {
+      let data = fs.readFileSync(templatePath);
+      fs.writeFileSync(file, data);
+    }
     db = new sqlite3.Database(file);
   }
   // 启用 WAL 模式：提升并发写入性能，减少采集时卡顿

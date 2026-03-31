@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { fetchLlmConfig } from '../lib/gripPythonApi';
@@ -10,6 +10,22 @@ export default function Login() {
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
   const { login } = useAssessment();
   const navigate = useNavigate();
+  const [currentVersion, setCurrentVersion] = useState('2.0.0');
+
+  useEffect(() => {
+    // 从 Electron 获取实际版本号
+    if (window.electronAPI && window.electronAPI.getAppVersion) {
+      window.electronAPI.getAppVersion().then(info => {
+        if (info && info.version) setCurrentVersion(info.version);
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handleCheckUpdate = () => {
+    if (window.electronAPI && window.electronAPI.checkForUpdate) {
+      window.electronAPI.checkForUpdate();
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -158,12 +174,21 @@ export default function Login() {
         </div>
 
         <div className="flex justify-between items-center mt-5 px-1">
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            powered by 老年人系统
-          </span>
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            v2.0.0
-          </span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
+          <div className="flex items-center gap-2">
+            {window.electronAPI && window.electronAPI.checkForUpdate && (
+              <button
+                onClick={handleCheckUpdate}
+                className="text-xs px-2 py-0.5 rounded-md transition-colors duration-150"
+                style={{ color: 'var(--zeiss-blue)', background: 'transparent' }}
+                onMouseEnter={e => e.target.style.background = 'var(--zeiss-blue-light)'}
+                onMouseLeave={e => e.target.style.background = 'transparent'}
+              >
+                检查更新
+              </button>
+            )}
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>v{currentVersion}</span>
+          </div>
         </div>
       </div>
     </div>
