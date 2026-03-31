@@ -3,31 +3,60 @@ const path = require('path');
 const fs = require('fs');
 const electron = require('electron');
 
+const backendDir = path.join(__dirname, '..');
 const frontendDir = path.join(__dirname, '..', '..', '..', 'front-end');
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-// 检查前端依赖是否已安装
-function ensureFrontendDeps() {
-  const nodeModules = path.join(frontendDir, 'node_modules');
+function getMissingDirectDeps(projectDir) {
+  const packageJsonPath = path.join(projectDir, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    return [];
+  }
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const declaredDeps = {
+    ...(packageJson.dependencies || {}),
+    ...(packageJson.devDependencies || {}),
+  };
+
+  return Object.keys(declaredDeps).filter((depName) => {
+    const depPath = path.join(projectDir, 'node_modules', ...depName.split('/'));
+    return !fs.existsSync(depPath);
+  });
+}
+
+function ensureProjectDeps(projectDir, label) {
+  const nodeModules = path.join(projectDir, 'node_modules');
+  const missingDeps = getMissingDirectDeps(projectDir);
+  const shouldInstall = !fs.existsSync(nodeModules) || missingDeps.length > 0;
+
+  if (!shouldInstall) {
+    console.log(`[start] ${label}依赖已就绪`);
+    return;
+  }
+
   if (!fs.existsSync(nodeModules)) {
-    console.log('[start] 前端依赖未安装，正在执行 npm install...');
-    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    try {
-      execSync(`${npmCmd} install`, {
-        cwd: frontendDir,
-        stdio: 'inherit',
-      });
-      console.log('[start] 前端依赖安装完成');
-    } catch (e) {
-      console.error('[start] 前端依赖安装失败:', e.message);
-      console.error('[start] 请手动在 front-end 目录执行 npm install');
-    }
+    console.log(`[start] ${label}依赖未安装，正在执行 npm install...`);
   } else {
-    console.log('[start] 前端依赖已就绪');
+    console.log(`[start] ${label}存在缺失依赖: ${missingDeps.join(', ')}`);
+    console.log(`[start] 正在为${label}执行 npm install...`);
+  }
+
+  try {
+    execSync(`${npmCmd} install`, {
+      cwd: projectDir,
+      stdio: 'inherit',
+    });
+    console.log(`[start] ${label}依赖安装完成`);
+  } catch (e) {
+    console.error(`[start] ${label}依赖安装失败:`, e.message);
+    console.error(`[start] 请手动在 ${projectDir} 执行 npm install`);
   }
 }
 
-// 确保前端依赖
-ensureFrontendDeps();
+// 启动前确保前后端依赖都可用，避免主进程加载时缺模块
+ensureProjectDeps(backendDir, '后端');
+ensureProjectDeps(frontendDir, '前端');
 
 // 启动 Electron（Electron 主进程会自动启动 Vite dev server）
 const env = { ...process.env };
