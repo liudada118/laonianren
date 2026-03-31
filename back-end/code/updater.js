@@ -15,12 +15,65 @@ const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluate'
 const CHECK_INTERVAL = 30 * 60 * 1000
 
 let checkTimer = null
+let updaterEnabled = false
+let updaterIpcRegistered = false
+
+function registerUpdaterIpcHandlers() {
+  if (updaterIpcRegistered) return
+  updaterIpcRegistered = true
+
+  ipcMain.handle('check-for-update', async () => {
+    if (!updaterEnabled) {
+      return { success: false, error: 'auto updater is disabled in development mode' }
+    }
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, data: result }
+    } catch (err) {
+      console.error('[updater] 检查更新失败:', err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('download-update', async () => {
+    if (!updaterEnabled) {
+      return { success: false, error: 'auto updater is disabled in development mode' }
+    }
+    try {
+      await autoUpdater.downloadUpdate()
+      return { success: true }
+    } catch (err) {
+      console.error('[updater] 下载更新失败:', err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('install-update', () => {
+    if (!updaterEnabled) {
+      return { success: false, error: 'auto updater is disabled in development mode' }
+    }
+    autoUpdater.quitAndInstall(false, true)
+    return { success: true }
+  })
+
+  ipcMain.handle('get-app-version', () => {
+    const { app } = require('electron')
+    return {
+      version: app.getVersion(),
+      updateServerUrl: UPDATE_SERVER_URL,
+      updaterEnabled
+    }
+  })
+}
 
 /**
  * 初始化自动更新
  * @param {BrowserWindow} mainWindow - 主窗口实例
  */
 function initAutoUpdater(mainWindow) {
+  registerUpdaterIpcHandlers()
+  updaterEnabled = true
+
   // 配置更新源
   autoUpdater.setFeedURL({
     provider: 'generic',
@@ -111,45 +164,6 @@ function initAutoUpdater(mainWindow) {
     })
   })
 
-  // ====== IPC 通信 ======
-
-  // 手动检查更新
-  ipcMain.handle('check-for-update', async () => {
-    try {
-      const result = await autoUpdater.checkForUpdates()
-      return { success: true, data: result }
-    } catch (err) {
-      console.error('[updater] 检查更新失败:', err.message)
-      return { success: false, error: err.message }
-    }
-  })
-
-  // 开始下载更新
-  ipcMain.handle('download-update', async () => {
-    try {
-      await autoUpdater.downloadUpdate()
-      return { success: true }
-    } catch (err) {
-      console.error('[updater] 下载更新失败:', err.message)
-      return { success: false, error: err.message }
-    }
-  })
-
-  // 安装更新并重启
-  ipcMain.handle('install-update', () => {
-    autoUpdater.quitAndInstall(false, true)
-    return { success: true }
-  })
-
-  // 获取当前版本
-  ipcMain.handle('get-app-version', () => {
-    const { app } = require('electron')
-    return {
-      version: app.getVersion(),
-      updateServerUrl: UPDATE_SERVER_URL
-    }
-  })
-
   // 启动后延迟检查更新（给应用5秒启动时间）
   setTimeout(() => {
     console.log('[updater] 启动后首次检查更新')
@@ -188,5 +202,6 @@ function cleanupUpdater() {
 
 module.exports = {
   initAutoUpdater,
+  registerUpdaterIpcHandlers,
   cleanupUpdater
 }

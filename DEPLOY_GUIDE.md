@@ -97,21 +97,29 @@ deactivate
 
 ### 3.4. 构建与打包应用程序
 
-项目使用 `electron-builder` 工具将整个应用打包成一个 `.dmg` 文件。`package.json` 中已配置好构建脚本。
+项目使用 `electron-builder` 工具将整个应用打包成 macOS 分发包。`package.json` 中已配置好本地打包和发布打包脚本。
 
-在 `back-end/code` 目录下执行打包命令：
+在 `back-end/code` 目录下执行本地打包命令：
 
 ```bash
 cd back-end/code
-npm run build:mac
+pnpm run build:mac
 ```
 
 此命令会执行以下操作：
-1.  `npm run build:renderer`: 使用Vite构建前端React应用，生成静态文件。
-2.  `npm run copy:renderer`: 将构建好的前端文件复制到后端目录中，以便Electron加载。
-3.  `electron-builder -m`: 将Electron主进程、后端服务、前端界面以及Python虚拟环境一起打包成一个名为 `jqtools2-1.0.0.dmg` (或类似名称) 的文件。
+1.  `pnpm run build:renderer`: 使用 Vite 构建 `front-end` React 应用，生成静态文件。
+2.  `pnpm run copy:renderer`: 将构建好的前端文件复制到后端目录中，以便 Electron 加载。
+3.  `pnpm exec electron-builder -m`: 生成 `.app`、`.dmg` 和用于 mac 自动更新的 `.zip` 产物。
 
-打包完成后，您可以在 `back-end/code/dist/` 目录下找到生成的 `.dmg` 文件。
+如需生成“可直接发布”的已签名并提交公证版本，请先准备 Apple notarization 凭据，再执行：
+
+```bash
+pnpm run build:mac:release
+```
+
+该脚本会先检查 notarization 相关环境变量，再执行正式打包。
+
+打包完成后，您可以在 `back-end/code/dist/` 目录下找到 `.dmg`、`.zip`、`latest-mac.yml` 等文件。
 
 ## 4. 生产环境配置
 
@@ -137,53 +145,35 @@ const child = fork(path.join(__dirname, './server/serialServer.js'), {
 })
 ```
 
-### 4.2. 串口设备权限
+### 4.2. 签名、公证与运行时权限
 
-在macOS上，应用程序访问USB串口设备通常不需要像Linux那样将用户添加到 `dialout` 组，但可能会受到**应用沙箱 (App Sandbox)** 和 **隐私设置** 的限制。
+当前项目分发方式是标准 `darwin` 应用加 `dmg`，不是 Mac App Store 包。因此发布配置应采用：
 
-由于我们的应用是通过 `electron-builder` 打包的，它默认会进行代码签名和沙箱配置。为了确保应用有权访问USB串口，需要配置正确的 **Entitlements**。
+1.  **Developer ID Application 签名**
 
-1.  **创建Entitlements文件**
+    在当前 Mac 的钥匙串中安装 `Developer ID Application` 证书，或通过 `CSC_LINK` / `CSC_NAME` 提供证书。
 
-    在 `back-end/code/` 目录下创建一个名为 `parent.plist` 的文件，内容如下：
+2.  **Hardened Runtime 与 Electron Entitlements**
 
-    ```xml
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-      <dict>
-        <key>com.apple.security.app-sandbox</key>
-        <true/>
-        <key>com.apple.security.device.serial</key>
-        <true/>
-      </dict>
-    </plist>
-    ```
+    项目已在 `back-end/code/package.json` 中启用：
 
-    这里的 `com.apple.security.device.serial` 键是关键，它授予了应用访问串口设备的权限 [1]。
+    - `hardenedRuntime: true`
+    - `entitlements: signing/entitlements.mac.plist`
+    - `entitlementsInherit: signing/entitlements.mac.inherit.plist`
 
-2.  **配置 `electron-builder`**
+    这两个 entitlement 文件当前只保留 Electron 在 Apple Silicon 下常用的 `com.apple.security.cs.allow-jit`，避免将普通 `darwin` 构建错误地放进 App Sandbox。
 
-    修改 `back-end/code/package.json` 文件，在 `build.mac` 配置中指定此entitlements文件。
+3.  **Apple notarization 凭据**
 
-    ```json
-    // back-end/code/package.json
-    "build": {
-      // ... 其他配置
-      "mac": {
-        "target": [
-          {
-            "target": "dmg",
-            "arch": ["universal"]
-          }
-        ],
-        "entitlements": "./parent.plist",
-        "entitlementsInherit": "./parent.plist"
-      }
-    }
-    ```
+    `pnpm run build:mac:release` 会检查以下任意一组环境变量：
 
-    完成此配置后，重新执行 `npm run build:mac` 打包。这样生成的新应用就包含了访问串口的权限。
+    - `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`
+    - `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`
+    - `APPLE_KEYCHAIN` + `APPLE_KEYCHAIN_PROFILE`
+
+4.  **串口访问说明**
+
+    对当前这种站外分发的 `Developer ID + notarization` 应用，通常不需要启用 `App Sandbox`。如果未来要做 Mac App Store 版本，需要单独维护一套 MAS target 和 MAS entitlements；不要直接把 `com.apple.security.app-sandbox` 套到当前 `dmg` 构建上。
 
 ### 4.3. MAC地址映射文件
 

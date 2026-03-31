@@ -17,7 +17,6 @@ const { hand } = require('../util/line');
 // const { callPy } = require('../pyWorker');  // [已迁移到JS算法] Python子进程不再需要
 const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
-const { default: axios } = require('axios');
 const module2 = require('../util/aes_ecb')
 const multer = require('multer')
 
@@ -3682,9 +3681,13 @@ async function connectPort() {
               } else {
                 // MAC 未在本地缓存中，尝试从服务器查询
                 try {
-                  const response = await axios.get(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
-                  if (response.data.data) {
-                    dataItem.type = JSON.parse(response.data.data.typeInfo)[0]
+                  const response = await fetch(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
+                  if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`)
+                  }
+                  const result = await response.json()
+                  if (result.data) {
+                    dataItem.type = JSON.parse(result.data.typeInfo)[0]
                     dataItem.premission = true
                   } else {
                     dataItem.premission = false
@@ -4134,41 +4137,60 @@ function sendData() {
 }
 
 function ensureMatrixNameColumn(db) {
-  db.all("PRAGMA table_info(matrix)", (err, rows) => {
-    if (err) {
-      console.error('PRAGMA table_info failed:', err)
-      return
-    }
-    const hasName = rows.some((r) => r.name === 'name')
-    if (!hasName) {
-      db.run('ALTER TABLE matrix ADD COLUMN name TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add name failed:', e)
-      })
-    }
-    const hasAssessmentId = rows.some((r) => r.name === 'assessment_id')
-    if (!hasAssessmentId) {
-      db.run('ALTER TABLE matrix ADD COLUMN assessment_id TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add assessment_id failed:', e)
-      })
-    }
-    const hasSampleType = rows.some((r) => r.name === 'sample_type')
-    if (!hasSampleType) {
-      db.run('ALTER TABLE matrix ADD COLUMN sample_type TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add sample_type failed:', e)
-      })
-    }
-    const hasTimestamp = rows.some((r) => r.name === 'timestamp')
-    if (!hasTimestamp) {
-      db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
-        if (e) console.error('ALTER TABLE add timestamp failed:', e)
-      })
-    }
-    const hasSelect = rows.some((r) => r.name === 'select')
-    if (!hasSelect) {
-      db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add select failed:', e)
-      })
-    }
+  db.serialize(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS matrix (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        timestamp INTEGER,
+        date TEXT,
+        "select" TEXT,
+        name TEXT,
+        assessment_id TEXT,
+        sample_type TEXT
+      )
+    `, (createErr) => {
+      if (createErr) {
+        console.error('CREATE TABLE matrix failed:', createErr)
+      }
+    })
+
+    db.all("PRAGMA table_info(matrix)", (err, rows) => {
+      if (err) {
+        console.error('PRAGMA table_info failed:', err)
+        return
+      }
+      const hasName = rows.some((r) => r.name === 'name')
+      if (!hasName) {
+        db.run('ALTER TABLE matrix ADD COLUMN name TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add name failed:', e)
+        })
+      }
+      const hasAssessmentId = rows.some((r) => r.name === 'assessment_id')
+      if (!hasAssessmentId) {
+        db.run('ALTER TABLE matrix ADD COLUMN assessment_id TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add assessment_id failed:', e)
+        })
+      }
+      const hasSampleType = rows.some((r) => r.name === 'sample_type')
+      if (!hasSampleType) {
+        db.run('ALTER TABLE matrix ADD COLUMN sample_type TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add sample_type failed:', e)
+        })
+      }
+      const hasTimestamp = rows.some((r) => r.name === 'timestamp')
+      if (!hasTimestamp) {
+        db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
+          if (e) console.error('ALTER TABLE add timestamp failed:', e)
+        })
+      }
+      const hasSelect = rows.some((r) => r.name === 'select')
+      if (!hasSelect) {
+        db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add select failed:', e)
+        })
+      }
+    })
   })
 }
 
@@ -4343,4 +4365,3 @@ setInterval(() => {
 //   algorData = await callPy('server', { sensor_data: pointArr })
 //   // console.log('frame_count:' , algorData?.frame_count)
 // }, 2)
-

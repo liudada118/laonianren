@@ -1,20 +1,20 @@
 {
-  "name": "jqtools2",
+  "name": "evaluate",
   "version": "1.0.0",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:renderer": "npm --prefix client run build",
+    "build:renderer": "pnpm --dir ../../front-end build",
     "copy:renderer": "node scripts/copy-renderer.js",
-    "build": "npm run build:renderer && npm run copy:renderer && electron-builder -w",
-    "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder -m"
+    "build": "pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -w",
+    "build:mac": "pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -m",
+    "build:mac:release": "node scripts/check-mac-release-env.js && pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -m -c.mac.notarize.teamId=$APPLE_TEAM_ID"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.9.0",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "csv-parser": "^3.2.0",
@@ -31,6 +31,9 @@
     "appId": "com.bodyta.sarcopenia",
     "productName": "肌少症评估系统",
     "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "publish": [
       {
         "provider": "generic",
@@ -50,9 +53,19 @@
       ]
     },
     "mac": {
+      "icon": "renderer-build/logo.png",
+      "hardenedRuntime": true,
+      "entitlements": "signing/entitlements.mac.plist",
+      "entitlementsInherit": "signing/entitlements.mac.inherit.plist",
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "universal"
           ]
