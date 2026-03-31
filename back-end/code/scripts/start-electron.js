@@ -44,8 +44,8 @@ function ensureLlmSettingsFile() {
     const fallback = {
       api_key: '',
       base_url: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2-turbo-preview',
-      extra_body: { enable_thinking: false },
+      model: 'kimi-k2.5',
+      thinking: { type: 'disabled' },
     };
     fs.writeFileSync(llmSettingsPath, JSON.stringify(fallback, null, 2), 'utf8');
     console.log('[start] Created llm_settings.json with fallback defaults.');
