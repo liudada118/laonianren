@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { saveAssessmentSession } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
+import { setRuntimeLlmApiKey } from '../lib/gripPythonApi';
 
 const AssessmentContext = createContext(null);
 
@@ -12,6 +13,7 @@ const INITIAL_STATE = {
   // 登录信息
   secretKey: '',
   institution: '',
+  llmApiKey: '',
   isLoggedIn: false,
   
   // 当前评估对象（全局共享，只输入一次）
@@ -131,17 +133,22 @@ export function AssessmentProvider({ children }) {
     setWsConnected(false);
   }, []);
 
-  const login = useCallback((secretKey, institution) => {
+  const login = useCallback((secretKey, institution, llmApiKey = '') => {
+    const normalizedApiKey = (llmApiKey || '').trim();
+    setRuntimeLlmApiKey(normalizedApiKey);
+
     setState(prev => ({
       ...prev,
       secretKey,
       institution,
+      llmApiKey: normalizedApiKey,
       isLoggedIn: true
     }));
   }, []);
 
   const logout = useCallback(() => {
     disconnectAllDevices();
+    setRuntimeLlmApiKey('');
     setState(INITIAL_STATE);
   }, [disconnectAllDevices]);
 

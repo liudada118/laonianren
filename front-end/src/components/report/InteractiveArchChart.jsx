@@ -14,7 +14,7 @@ const REGION_COLORS_HOVER = [
   'rgba(220, 20, 60, 0.95)',
 ];
 const REGION_NAMES = ['趾部', '前足', '中足', '后足'];
-const SPACING_MM = 7;
+const SPACING_MM = 14;
 
 /** 将 section_coords（可能是数组或对象）统一转为 number[][][] */
 function normalizeSectionCoords(raw) {

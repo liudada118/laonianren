@@ -1,19 +1,158 @@
 /**
- * Python 后端 API 调用模块
- * 开发模式：通过 Vite proxy /pyapi -> http://127.0.0.1:8765
+ * Python backend API helpers.
+ * Prefer the Vite proxy in dev, but fall back to direct local URLs when the
+ * proxy cannot reach the Python service.
  */
 
-const PYTHON_API_BASE = '/pyapi';
+const PYTHON_API_BASE_CANDIDATES = [
+  '/pyapi',
+  'http://127.0.0.1:8765',
+];
 
-/**
- * 检查 Python 后端是否可用
- */
+let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
+const inFlightAiRequests = new Map();
+let runtimeLlmApiKey = '';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPythonApiBases() {
+  return [...new Set([preferredPythonApiBase, ...PYTHON_API_BASE_CANDIDATES])];
+}
+
+async function fetchPythonApi(path, buildInit, options = {}) {
+  const {
+    maxAttempts = 2,
+    retryDelayMs = 500,
+  } = options;
+
+  let lastError = null;
+  let lastResponse = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let sawRetryableFailure = false;
+
+    for (const base of getPythonApiBases()) {
+      try {
+        const res = await fetch(`${base}${path}`, buildInit());
+
+        if (res.ok) {
+          preferredPythonApiBase = base;
+          return res;
+        }
+
+        // Retry when the Vite proxy returns 5xx because 8765 is unreachable.
+        if (base === '/pyapi' && res.status >= 500) {
+          lastResponse = res;
+          sawRetryableFailure = true;
+          continue;
+        }
+
+        preferredPythonApiBase = base;
+        return res;
+      } catch (err) {
+        lastError = err;
+        sawRetryableFailure = true;
+      }
+    }
+
+    if (!sawRetryableFailure || attempt === maxAttempts) {
+      break;
+    }
+
+    await sleep(retryDelayMs);
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+
+  throw lastError || new Error('Python backend is unavailable');
+}
+
+async function parseErrorResponse(res) {
+  let detail = `HTTP ${res.status}`;
+
+  try {
+    const body = await res.json();
+    detail = body.error || body.detail || body.message || detail;
+  } catch {
+    try {
+      detail = await res.text();
+    } catch {}
+  }
+
+  if (
+    res.status >= 500 &&
+    (
+      !detail ||
+      detail === `HTTP ${res.status}` ||
+      /ECONNREFUSED|proxy error|cannot connect/i.test(detail)
+    )
+  ) {
+    return 'Python AI service is not running on 127.0.0.1:8765';
+  }
+
+  return detail;
+}
+
+export function setRuntimeLlmApiKey(apiKey) {
+  runtimeLlmApiKey = (apiKey || '').trim();
+}
+
+function withOptionalLlmApiKey(body) {
+  if (!runtimeLlmApiKey) {
+    return body;
+  }
+  return {
+    ...body,
+    llm_api_key: runtimeLlmApiKey,
+  };
+}
+
+async function postAiReport(path, body) {
+  const payload = JSON.stringify(body);
+  const requestKey = `${path}::${payload}`;
+
+  if (inFlightAiRequests.has(requestKey)) {
+    return inFlightAiRequests.get(requestKey);
+  }
+
+  const requestPromise = (async () => {
+    try {
+      const res = await fetchPythonApi(path, () => ({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        signal: AbortSignal.timeout(120000),
+      }), {
+        maxAttempts: 2,
+        retryDelayMs: 500,
+      });
+
+      if (!res.ok) {
+        return { success: false, error: await parseErrorResponse(res) };
+      }
+
+      return res.json();
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      inFlightAiRequests.delete(requestKey);
+    }
+  })();
+
+  inFlightAiRequests.set(requestKey, requestPromise);
+  return requestPromise;
+}
+
 export async function checkPythonBackend() {
   try {
-    const res = await fetch(`${PYTHON_API_BASE}/health`, {
+    const res = await fetchPythonApi('/health', () => ({
       method: 'GET',
       signal: AbortSignal.timeout(2000),
-    });
+    }));
     const data = await res.json();
     return data.status === 'ok';
   } catch {
@@ -21,18 +160,39 @@ export async function checkPythonBackend() {
   }
 }
 
-/**
- * 调用 Python 后端分析握力 CSV 数据
- */
+export async function fetchLlmConfig() {
+  try {
+    const res = await fetchPythonApi('/llm-config', () => ({
+      method: 'GET',
+      signal: AbortSignal.timeout(3000),
+    }));
+
+    if (!res.ok) {
+      return { success: false, error: await parseErrorResponse(res) };
+    }
+
+    const data = await res.json();
+    if (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'success')) {
+      return data;
+    }
+
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function analyzeGripCSV(csvContent, handType) {
-  const res = await fetch(`${PYTHON_API_BASE}/analyze-grip`, {
+  const payload = JSON.stringify({
+    csv_content: csvContent,
+    hand_type: handType,
+  });
+
+  const res = await fetchPythonApi('/analyze-grip', () => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      csv_content: csvContent,
-      hand_type: handType,
-    }),
-  });
+    body: payload,
+  }));
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -42,20 +202,16 @@ export async function analyzeGripCSV(csvContent, handType) {
   return res.json();
 }
 
-/**
- * 调用 Python 后端分析起坐 CSV 数据（文件上传方式，支持大文件）
- * @param {string} standCsv - 脚垫 CSV 文本
- * @param {string} sitCsv - 坐垫 CSV 文本
- */
 export async function analyzeSitStandCSV(standCsv, sitCsv, username) {
-  const form = new FormData();
-  form.append('stand_file', new Blob([standCsv], { type: 'text/csv' }), 'stand.csv');
-  form.append('sit_file', new Blob([sitCsv], { type: 'text/csv' }), 'sit.csv');
-  form.append('username', username || '用户');
-
-  const res = await fetch(`${PYTHON_API_BASE}/analyze-sitstand`, {
-    method: 'POST',
-    body: form,
+  const res = await fetchPythonApi('/analyze-sitstand', () => {
+    const form = new FormData();
+    form.append('stand_file', new Blob([standCsv], { type: 'text/csv' }), 'stand.csv');
+    form.append('sit_file', new Blob([sitCsv], { type: 'text/csv' }), 'sit.csv');
+    form.append('username', username || 'User');
+    return {
+      method: 'POST',
+      body: form,
+    };
   });
 
   if (!res.ok) {
@@ -66,26 +222,16 @@ export async function analyzeSitStandCSV(standCsv, sitCsv, username) {
   return res.json();
 }
 
-/**
- * 调用 Python 后端生成起坐动态视频（文件上传方式）
- * @param {string} standCsv - 脚垫 CSV 文本
- * @param {string} sitCsv - 坐垫 CSV 文本
- */
-/**
- * 调用 Python 后端分析静态站立 CSV 数据（文件上传方式，支持大文件）
- * @param {string} csvContent - CSV 文件文本内容
- * @param {number} fps - 采样率，默认 42
- * @param {number} thresholdRatio - 阈值比例，默认 0.8
- */
 export async function analyzeStandingCSV(csvContent, fps = 42, thresholdRatio = 0.8) {
-  const form = new FormData();
-  form.append('csv_file', new Blob([csvContent], { type: 'text/csv' }), 'standing.csv');
-  form.append('fps', String(fps));
-  form.append('threshold_ratio', String(thresholdRatio));
-
-  const res = await fetch(`${PYTHON_API_BASE}/analyze-standing`, {
-    method: 'POST',
-    body: form,
+  const res = await fetchPythonApi('/analyze-standing', () => {
+    const form = new FormData();
+    form.append('csv_file', new Blob([csvContent], { type: 'text/csv' }), 'standing.csv');
+    form.append('fps', String(fps));
+    form.append('threshold_ratio', String(thresholdRatio));
+    return {
+      method: 'POST',
+      body: form,
+    };
   });
 
   if (!res.ok) {
@@ -97,13 +243,14 @@ export async function analyzeStandingCSV(csvContent, fps = 42, thresholdRatio = 
 }
 
 export async function generateSitStandVideo(standCsv, sitCsv) {
-  const form = new FormData();
-  form.append('stand_file', new Blob([standCsv], { type: 'text/csv' }), 'stand.csv');
-  form.append('sit_file', new Blob([sitCsv], { type: 'text/csv' }), 'sit.csv');
-
-  const res = await fetch(`${PYTHON_API_BASE}/generate-sitstand-video`, {
-    method: 'POST',
-    body: form,
+  const res = await fetchPythonApi('/generate-sitstand-video', () => {
+    const form = new FormData();
+    form.append('stand_file', new Blob([standCsv], { type: 'text/csv' }), 'stand.csv');
+    form.append('sit_file', new Blob([sitCsv], { type: 'text/csv' }), 'sit.csv');
+    return {
+      method: 'POST',
+      body: form,
+    };
   });
 
   if (!res.ok) {
@@ -114,19 +261,93 @@ export async function generateSitStandVideo(standCsv, sitCsv) {
   return res.json();
 }
 
-/**
- * 调用 Python 后端分析步态 CSV 数据（4个传感器文件上传）
- * @param {string[]} csvContents - 4 个 CSV 文件文本内容数组 (对应 1.csv ~ 4.csv)
- */
-export async function analyzeGaitCSV(csvContents) {
-  const form = new FormData();
-  csvContents.forEach((csv, i) => {
-    form.append(`file${i + 1}`, new Blob([csv], { type: 'text/csv' }), `${i + 1}.csv`);
-  });
+export async function generateGripAIReport(patientInfo, gripData) {
+  return postAiReport('/generate-grip-ai-report', withOptionalLlmApiKey({
+    patient_info: patientInfo,
+    grip_data: gripData,
+  }));
+}
 
-  const res = await fetch(`${PYTHON_API_BASE}/analyze-gait`, {
-    method: 'POST',
-    body: form,
+export async function generateSitStandAIReport(patientInfo, assessmentData) {
+  return postAiReport('/generate-sitstand-ai-report', withOptionalLlmApiKey({
+    patient_info: patientInfo,
+    assessment_data: assessmentData,
+  }));
+}
+
+export async function generateStandingAIReport(patientInfo, assessmentData) {
+  return postAiReport('/generate-standing-ai-report', withOptionalLlmApiKey({
+    patient_info: patientInfo,
+    assessment_data: assessmentData,
+  }));
+}
+
+export async function generateGaitAIReport(patientInfo, assessmentData) {
+  return postAiReport('/generate-gait-ai-report', withOptionalLlmApiKey({
+    patient_info: patientInfo,
+    assessment_data: assessmentData,
+  }));
+}
+
+export async function streamGripAIReport(patientInfo, gripData, onChunk) {
+  try {
+    const payload = JSON.stringify(withOptionalLlmApiKey({
+      patient_info: patientInfo,
+      grip_data: gripData,
+    }));
+    const res = await fetchPythonApi('/stream-grip-ai-report', () => ({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      signal: AbortSignal.timeout(120000),
+    }));
+
+    if (!res.ok) {
+      return { success: false, error: await parseErrorResponse(res) };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = decoder.decode(value, { stream: true });
+      const lines = text.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const payloadChunk = JSON.parse(line.slice(6));
+          if (payloadChunk.error) {
+            return { success: false, error: payloadChunk.error };
+          }
+          if (payloadChunk.chunk) {
+            fullText += payloadChunk.chunk;
+            onChunk(fullText);
+          }
+        } catch {}
+      }
+    }
+
+    const data = JSON.parse(fullText);
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function analyzeGaitCSV(csvContents) {
+  const res = await fetchPythonApi('/analyze-gait', () => {
+    const form = new FormData();
+    csvContents.forEach((csv, i) => {
+      form.append(`file${i + 1}`, new Blob([csv], { type: 'text/csv' }), `${i + 1}.csv`);
+    });
+    return {
+      method: 'POST',
+      body: form,
+    };
   });
 
   if (!res.ok) {

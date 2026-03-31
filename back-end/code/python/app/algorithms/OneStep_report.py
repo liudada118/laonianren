@@ -37,10 +37,15 @@ plt.rcParams['axes.unicode_minus'] = False
 # - 每帧数据为长度4096的一维列表，可重构为64×64矩阵（行=前后x，列=左右y）
 # - y方向（列）：0~31为左脚，32~63为右脚（因此右脚坐标需+32做全局对齐）
 # - 压力单位：相对值，阈值≤4视为噪声置0
-# - 空间单位：网格索引（格）；部分指标换算为毫米，使用 1 格 ≈ 1.4 mm
+# - 空间单位：网格索引（格）；部分指标换算时使用 1 格 ≈ 14 mm（1.4 cm）
 # - 时间采样：默认 12.5 Hz（dt = 0.08 s）
 # 提示：面向报告请优先看 calculate_cop_time_series（单位统一）；研究/调参对比可看 calculate_cop_metrics
 # =========================
+
+STANDING_SPACING_MM = 14.0
+STANDING_SPACING_CM = STANDING_SPACING_MM / 10.0
+STANDING_CELL_AREA_MM2 = STANDING_SPACING_MM ** 2
+STANDING_CELL_AREA_CM2 = STANDING_CELL_AREA_MM2 / 100.0
 
 
 def load_csv_data(file_path, progress_every=100):
@@ -1182,7 +1187,7 @@ def visualize_foot_regions(ax, section_coords, max_area, colors, section_names, 
     ax.set_yticks(np.arange(int(y_min), int(y_max) + 1, 5))
 
 
-def calculate_merged_region_areas(section_coords, spacing_mm=7):
+def calculate_merged_region_areas(section_coords, spacing_mm=STANDING_SPACING_MM):
     qianzu_count = len(section_coords[0]) + len(section_coords[1])
     zhongzu_count = len(section_coords[2])
     houzu_count = len(section_coords[3])
@@ -1240,9 +1245,9 @@ def calculate_feet_centers_and_distances(df, left, right):
         "left_cop": left_cop,
         "right_cop": right_cop,
         "both_cop": both_cop,
-        "left_forward": left_forward * 0.7 if left_forward is not None else None,
-        "dist_left_to_both": dist_left * 0.7 if dist_left is not None else None,
-        "dist_right_to_both": dist_right * 0.7 if dist_right is not None else None
+        "left_forward": left_forward * STANDING_SPACING_CM if left_forward is not None else None,
+        "dist_left_to_both": dist_left * STANDING_SPACING_CM if dist_left is not None else None,
+        "dist_right_to_both": dist_right * STANDING_SPACING_CM if dist_right is not None else None
     }
 
 
@@ -1298,7 +1303,7 @@ def calculate_cop_time_series(left_cop, right_cop, additional_data, dt=0.024):
     if n > 1:
         vx = np.diff(x) / dt
         vy = np.diff(y) / dt
-        velocity_series = np.sqrt(vx ** 2 + vy ** 2) * 7
+        velocity_series = np.sqrt(vx ** 2 + vy ** 2) * STANDING_SPACING_MM
         velocity_series = np.concatenate([[0], velocity_series])
     else:
         velocity_series = np.array([0])
@@ -1308,36 +1313,36 @@ def calculate_cop_time_series(left_cop, right_cop, additional_data, dt=0.024):
         for i in range(1, n):
             distance = np.sqrt((x[i] - x[i - 1]) ** 2 + (y[i] - y[i - 1]) ** 2)
             path_length += distance
-    path_length *= 7
+    path_length *= STANDING_SPACING_MM
     try:
         from scipy.spatial import ConvexHull
         if n >= 3:
             hull = ConvexHull(cop_array)
-            contact_area = hull.volume * (7 ** 2)
+            contact_area = hull.volume * STANDING_CELL_AREA_MM2
         else:
             contact_area = 0
     except:
-        contact_area = np.ptp(x) * np.ptp(y) * (7 ** 2)
-    delta_x = np.ptp(x) * 7
-    delta_y = np.ptp(y) * 7
+        contact_area = np.ptp(x) * np.ptp(y) * STANDING_CELL_AREA_MM2
+    delta_x = np.ptp(x) * STANDING_SPACING_MM
+    delta_y = np.ptp(y) * STANDING_SPACING_MM
     try:
         centered_data = cop_array - center
         cov_matrix = np.cov(centered_data.T)
         eigenvalues = np.linalg.eigvals(cov_matrix)
         eigenvalues = np.sort(eigenvalues)[::-1]
-        major_axis = np.round(2 * np.sqrt(eigenvalues[0]) * 0.7, 2)
-        minor_axis = np.round(2 * np.sqrt(eigenvalues[1]) * 0.7, 2)
+        major_axis = np.round(2 * np.sqrt(eigenvalues[0]) * STANDING_SPACING_CM, 2)
+        minor_axis = np.round(2 * np.sqrt(eigenvalues[1]) * STANDING_SPACING_CM, 2)
         print(major_axis ,minor_axis )
     except:
         major_axis = delta_x
         minor_axis = delta_y
-    displacement = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2) * 0.7
+    displacement = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2) * STANDING_SPACING_CM
     max_displacement = np.max(displacement)
     min_displacement = np.min(displacement)
     avg_velocity = np.mean(velocity_series)
     rms_displacement = np.sqrt(np.mean(displacement ** 2))
-    std_x = np.std(x) * 7
-    std_y = np.std(y) * 7
+    std_x = np.std(x) * STANDING_SPACING_MM
+    std_y = np.std(y) * STANDING_SPACING_MM
     ls_ratio = major_axis / minor_axis if minor_axis > 0 else 0
     center_bias = np.arctan2(center[1], center[0]) * 180 / np.pi
     eccentricity = np.sqrt(1 - (minor_axis / major_axis) ** 2) if major_axis > 0 else 0
@@ -1388,7 +1393,7 @@ def draw_confidence_ellipse(ax, cop_trajectory, confidence=0.95, color='red', al
     angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
 
     area_grid = np.pi * width * height / 4
-    area_cm2 = area_grid * 0.7 * 0.7
+    area_cm2 = area_grid * STANDING_CELL_AREA_CM2
 
     if use_risk_color:
         ellipse_color = get_ellipse_color_by_area(area_cm2)
@@ -2308,8 +2313,8 @@ def cal_cop_fromData(data_array, threshold_ratio=0.8, fps=42, r_radius=0.1, time
     right_max_area = arch_results['right_foot']['max_area']
 
     # 面积与压力分配（基于峰值帧）
-    left_area_info = calculate_merged_region_areas(left_section_coords, spacing_mm=7)
-    right_area_info = calculate_merged_region_areas(right_section_coords, spacing_mm=7)
+    left_area_info = calculate_merged_region_areas(left_section_coords, spacing_mm=STANDING_SPACING_MM)
+    right_area_info = calculate_merged_region_areas(right_section_coords, spacing_mm=STANDING_SPACING_MM)
 
     # ✅ 使用峰值帧计算COP中心
     cop_results = calculate_feet_centers_and_distances(df, left_curve, right_curve)

@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as echarts from 'echarts';
 import { exportToPdf } from '../../lib/pdfExport';
+import AssessmentAiPanel from './AssessmentAiPanel';
+import {
+  ASSESSMENT_AI_SECTION_CONFIG,
+  buildSitStandAiPayload,
+  requestAssessmentAIReport,
+} from '../../lib/assessmentAi';
 
 /* ═══════════════════════════════════════════════════════════
    样式常量 & 工具
@@ -16,6 +22,8 @@ const ttStyle = {
   textStyle: { color: '#1A2332', fontSize: 11 },
   extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;',
 };
+
+const FORCE_CHART_TARGET_POINTS = 320;
 
 /* ─── Jet Colormap (0~1 → [r,g,b]) ─── */
 function jetColor(t) {
@@ -74,11 +82,19 @@ function DataRow({ label, value, color, sub }) {
 
 /* ─── 指标卡片 ─── */
 function MetricCard({ label, value, sub, color, icon }) {
+  const displayLabel = label === '完成周期数'
+    ? '完成次数'
+    : label === '周期数'
+      ? '完成次数'
+      : label === '检测峰值数'
+        ? '坐垫峰值数'
+        : label;
+
   return (
     <div className="zeiss-card-inner p-3 md:p-4 text-center transition-all hover:shadow-sm">
       {icon && <div className="text-lg mb-1 opacity-60">{icon}</div>}
       <div className="text-xl md:text-2xl font-bold tabular-nums" style={{ color: color || 'var(--text-primary)' }}>{value}</div>
-      <div className="text-[10px] md:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="text-[10px] md:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{displayLabel}</div>
       {sub && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{sub}</div>}
     </div>
   );
@@ -355,13 +371,17 @@ function lttbDownsample(times, values, targetCount) {
 }
 
 /* ─── 力-时间曲线 ─── */
-function ForceTimeChart({ times, forces, peaksIdx = [], title, color = C.green, height = 260 }) {
+function ForceTimeChart({ times, forces, peaksIdx = [], peakTimes = [], title, color = C.green, height = 260 }) {
   const option = useMemo(() => {
     if (!times?.length || !forces?.length) return {};
-    const data = lttbDownsample(times, forces, 800);
-    const markLines = peaksIdx
-      .filter(idx => idx < times.length)
-      .map(idx => ({ xAxis: times[idx], lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
+    const data = lttbDownsample(times, forces, FORCE_CHART_TARGET_POINTS);
+    const markLineTimes = peakTimes?.length
+      ? peakTimes
+      : peaksIdx
+        .filter(idx => idx < times.length)
+        .map(idx => times[idx]);
+    const markLines = markLineTimes
+      .map(time => ({ xAxis: time, lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
     return {
       tooltip: { trigger: 'axis', ...ttStyle, formatter: (p) => `<b>${p[0]?.value?.[0]?.toFixed(2)}s</b><br/>力: ${p[0]?.value?.[1]?.toFixed(1)} N` },
       grid: { top: 35, bottom: 35, left: 55, right: 20 },
@@ -375,24 +395,23 @@ function ForceTimeChart({ times, forces, peaksIdx = [], title, color = C.green, 
         markLine: markLines.length > 0 ? { data: markLines, symbol: 'none', animation: false } : undefined,
       }],
     };
-  }, [times, forces, peaksIdx, title, color]);
+  }, [times, forces, peaksIdx, peakTimes, title, color]);
   return <EChart option={option} height={height} />;
 }
 
 /* ─── 足底+坐垫合并力-时间曲线 ─── */
-function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], sitTimes, sitForce, height = 320 }) {
+function CombinedForceTimeChart({ standTimes, standForce, peakTimes = [], sitTimes, sitForce, height = 320 }) {
   const hasStand = standTimes?.length > 0 && standForce?.length > 0;
   const hasSit = sitTimes?.length > 0 && sitForce?.length > 0;
 
   const option = useMemo(() => {
     if (!hasStand && !hasSit) return {};
     const series = [];
-    const markLines = standPeaksIdx
-      .filter(idx => idx < (standTimes?.length || 0))
-      .map(idx => ({ xAxis: standTimes[idx], lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
+    const markLines = (peakTimes || [])
+      .map(time => ({ xAxis: time, lineStyle: { color: C.red + '60', width: 1, type: 'dashed' }, label: { show: false } }));
 
     if (hasStand) {
-      const data = lttbDownsample(standTimes, standForce, 800);
+      const data = lttbDownsample(standTimes, standForce, FORCE_CHART_TARGET_POINTS);
       series.push({
         name: '\u8db3\u5e95\u538b\u529b',
         type: 'line', data, showSymbol: false, smooth: true,
@@ -402,7 +421,7 @@ function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], si
       });
     }
     if (hasSit) {
-      const data = lttbDownsample(sitTimes, sitForce, 800);
+      const data = lttbDownsample(sitTimes, sitForce, FORCE_CHART_TARGET_POINTS);
       series.push({
         name: '\u5750\u57ab\u538b\u529b',
         type: 'line', data, showSymbol: false, smooth: true,
@@ -435,7 +454,7 @@ function CombinedForceTimeChart({ standTimes, standForce, standPeaksIdx = [], si
       yAxis: { type: 'value', name: '\u529b (N)', nameTextStyle: { color: C.text, fontSize: 11 }, axisLabel: { color: C.text, fontSize: 10 }, splitLine: { lineStyle: { color: C.grid } } },
       series,
     };
-  }, [standTimes, standForce, standPeaksIdx, sitTimes, sitForce, hasStand, hasSit]);
+  }, [standTimes, standForce, peakTimes, sitTimes, sitForce, hasStand, hasSit]);
 
   if (!hasStand && !hasSit) {
     return (
@@ -591,10 +610,13 @@ const SECTIONS = [
 /* ═══════════════════════════════════════════════════════════
    主报告组件
    ═══════════════════════════════════════════════════════════ */
-export default function SitStandReport({ patientInfo, reportData: propsReportData, onClose }) {
+export default function SitStandReport({ patientInfo, reportData: propsReportData, onClose, onAiReportReady }) {
   const [activeSection, setActiveSection] = useState('overview');
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(!propsReportData);
+  const [aiReport, setAiReport] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
   const contentRef = useRef(null);
   // 缓存报告生成时间，避免每次渲染时重新生成时间导致持续增加
   const fallbackDate = useMemo(() => new Date().toLocaleString('zh-CN'), []);
@@ -606,18 +628,38 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     setLoading(false);
   }, [propsReportData]);
 
+  useEffect(() => {
+    if (propsReportData?.aiReport && !aiReport) {
+      setAiReport(propsReportData.aiReport);
+    }
+  }, [propsReportData, aiReport]);
+
   /* ─── 滚动监听自动高亮导航 ─── */
   useEffect(() => {
     const container = contentRef.current;
     if (!container) return;
+    let rafId = null;
     const handleScroll = () => {
-      const sections = SECTIONS.map(s => document.getElementById(`ss-${s.id}`)).filter(Boolean);
-      for (let i = sections.length - 1; i >= 0; i--) {
-        if (sections[i].getBoundingClientRect().top <= 200) { setActiveSection(SECTIONS[i].id); break; }
-      }
+      if (rafId != null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const sections = SECTIONS.map(s => document.getElementById(`ss-${s.id}`)).filter(Boolean);
+        for (let i = sections.length - 1; i >= 0; i--) {
+          if (sections[i].getBoundingClientRect().top <= 200) {
+            setActiveSection(SECTIONS[i].id);
+            break;
+          }
+        }
+      });
     };
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    handleScroll();
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      if (rafId != null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      container.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   const scrollToSection = (id) => {
@@ -625,33 +667,53 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     setActiveSection(id);
   };
 
-  const d = reportData;
+  useEffect(() => {
+    if (!reportData || aiReport || reportData.aiReport) return;
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <div className="w-10 h-10 border-3 border-t-transparent rounded-full animate-spin mx-auto mb-3"
-          style={{ borderColor: 'var(--zeiss-blue)', borderTopColor: 'transparent' }} />
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载报告数据...</p>
-      </div>
-    </div>
-  );
+    const payload = buildSitStandAiPayload(reportData);
+    if (!payload) return;
 
-  if (!d) return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <p className="text-base font-medium" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
-        <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>请先完成起坐评估采集</p>
-        {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--zeiss-blue)', color: '#fff' }}>返回</button>}
-      </div>
-    </div>
-  );
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(null);
+
+    requestAssessmentAIReport(
+      'sitstand',
+      patientInfo || { name: reportData.username || '未知' },
+      payload,
+    ).then(res => {
+      if (cancelled) return;
+      if (res.success) {
+        setAiReport(res.data);
+        if (onAiReportReady) onAiReportReady(res.data);
+      } else {
+        setAiError(res.error || 'AI 分析失败');
+      }
+    }).catch(err => {
+      if (!cancelled) setAiError(err.message);
+    }).finally(() => {
+      if (!cancelled) setAiLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reportData, patientInfo, aiReport, onAiReportReady]);
+
+  const d = useMemo(() => {
+    const base = reportData || {};
+    return {
+      ...base,
+      stand_peaks: base.sit_peaks ?? base.stand_peaks,
+    };
+  }, [reportData]);
 
   /* ═══ 数据解析 ═══ */
   const heatmapData = d.heatmap_data || {};
   const copDataObj = d.cop_data || {};
   const images = d.images || {};
   const forceCurves = d.force_curves || {};
+  const displayForceCurves = d.display_force_curves || forceCurves;
 
   const standEvolutionData = heatmapData.stand_evolution || [];
   const sitEvolutionData = heatmapData.sit_evolution || [];
@@ -659,11 +721,19 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const standCopRightData = copDataObj.stand_right || null;
   const sitCopData = copDataObj.sit || null;
 
-  const standTimes = forceCurves.stand_times || d.footpad_force_curve?.times || [];
-  const standForce = forceCurves.stand_force || d.footpad_force_curve?.values || [];
-  const sitTimes = forceCurves.sit_times || d.seat_force_curve?.times || [];
-  const sitForce = forceCurves.sit_force || d.seat_force_curve?.values || [];
-  const standPeaksIdx = forceCurves.stand_peaks_idx || [];
+  const rawStandTimes = forceCurves.stand_times || d.footpad_force_curve?.times || [];
+  const rawSitTimes = forceCurves.sit_times || d.seat_force_curve?.times || [];
+  const standTimes = displayForceCurves.stand_times || rawStandTimes;
+  const standForce = displayForceCurves.stand_force || forceCurves.stand_force || d.footpad_force_curve?.values || [];
+  const sitTimes = displayForceCurves.sit_times || rawSitTimes;
+  const sitForce = displayForceCurves.sit_force || forceCurves.sit_force || d.seat_force_curve?.values || [];
+  const sitPeaksIdx = forceCurves.sit_peaks_idx || [];
+  const sitPeakTimes = displayForceCurves.sit_peak_times
+    || forceCurves.sit_peak_times
+    || sitPeaksIdx
+      .filter(idx => idx < rawSitTimes.length)
+      .map(idx => rawSitTimes[idx]);
+  const standPeaksIdx = sitPeaksIdx;
 
   const durationStats = d.duration_stats || {};
   const cycleDurations = durationStats.cycle_durations || [];
@@ -673,6 +743,24 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const rightTotal = symmetry.right_avg_force ?? symmetry.right_total ?? null;
   const pressureStats = d.pressure_stats || {};
   const cyclePeakForces = d.cycle_peak_forces || [];
+  const standEvolutionLeft = useMemo(
+    () => standEvolutionData
+      .filter(h => h.label === 0)
+      .sort((a, b) => a.sublabel - b.sublabel),
+    [standEvolutionData],
+  );
+  const standEvolutionRight = useMemo(
+    () => standEvolutionData
+      .filter(h => h.label === 1)
+      .sort((a, b) => a.sublabel - b.sublabel),
+    [standEvolutionData],
+  );
+  const sitEvolutionSorted = useMemo(
+    () => sitEvolutionData
+      .slice()
+      .sort((a, b) => a.label - b.label),
+    [sitEvolutionData],
+  );
 
   const hasStandEvoMatrix = standEvolutionData.length > 0 && standEvolutionData[0]?.matrix;
   const hasSitEvoMatrix = sitEvolutionData.length > 0 && sitEvolutionData[0]?.matrix;
@@ -686,9 +774,29 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     : totalDur <= 20 ? { text: '偏慢', color: C.amber, bg: '#D9770615' }
     : { text: '异常', color: C.red, bg: '#DC262615' };
 
-  const samplingRate = standTimes.length >= 2
-    ? Math.round(standTimes.length / (standTimes[standTimes.length - 1] - standTimes[0]))
+  const samplingRate = rawStandTimes.length >= 2
+    ? Math.round(rawStandTimes.length / Math.max(0.001, rawStandTimes[rawStandTimes.length - 1] - rawStandTimes[0]))
     : null;
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center">
+        <div className="w-10 h-10 border-3 border-t-transparent rounded-full animate-spin mx-auto mb-3"
+          style={{ borderColor: 'var(--zeiss-blue)', borderTopColor: 'transparent' }} />
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载报告数据...</p>
+      </div>
+    </div>
+  );
+
+  if (!reportData) return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center">
+        <p className="text-base font-medium" style={{ color: 'var(--text-secondary)' }}>暂无报告数据</p>
+        <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>请先完成起坐评估采集</p>
+        {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--zeiss-blue)', color: '#fff' }}>返回</button>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -871,8 +979,11 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               <SectionHeader title="力-时间曲线" subtitle="Force-Time Curve" />
               <div className="zeiss-card p-4">
                 <CombinedForceTimeChart
-                  standTimes={standTimes} standForce={standForce} standPeaksIdx={standPeaksIdx}
-                  sitTimes={sitTimes} sitForce={sitForce}
+                  standTimes={standTimes}
+                  standForce={standForce}
+                  peakTimes={sitPeakTimes}
+                  sitTimes={sitTimes}
+                  sitForce={sitForce}
                   height={320}
                 />
               </div>
@@ -897,10 +1008,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                     <div className="flex items-center gap-1 mb-2">
                       <div className="w-14 text-right text-xs font-semibold shrink-0 pr-1" style={{ color: C.blue }}>左脚</div>
                       <div className="flex gap-0.5 flex-1">
-                        {standEvolutionData
-                          .filter(h => h.label === 0)
-                          .sort((a, b) => a.sublabel - b.sublabel)
-                          .map((h, i) => (
+                        {standEvolutionLeft.map((h, i) => (
                             <div key={i} className="flex-1 aspect-square">
                               <HeatmapCanvas matrix={h.matrix} />
                             </div>
@@ -911,10 +1019,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                     <div className="flex items-center gap-1">
                       <div className="w-14 text-right text-xs font-semibold shrink-0 pr-1" style={{ color: C.green }}>右脚</div>
                       <div className="flex gap-0.5 flex-1">
-                        {standEvolutionData
-                          .filter(h => h.label === 1)
-                          .sort((a, b) => a.sublabel - b.sublabel)
-                          .map((h, i) => (
+                        {standEvolutionRight.map((h, i) => (
                             <div key={i} className="flex-1 aspect-square">
                               <HeatmapCanvas matrix={h.matrix} />
                             </div>
@@ -976,9 +1081,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                       ))}
                     </div>
                     <div className="flex gap-0.5">
-                      {sitEvolutionData
-                        .sort((a, b) => a.label - b.label)
-                        .map((h, i) => (
+                      {sitEvolutionSorted.map((h, i) => (
                           <div key={i} className="flex-1 aspect-square">
                             <HeatmapCanvas matrix={h.matrix} />
                           </div>
@@ -1046,70 +1149,14 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
             {/* ═══════════ 11. 综合评估 ═══════════ */}
             <section id="ss-conclusion">
-              <SectionHeader title="综合评估" subtitle="Comprehensive Assessment" />
-              <div className="zeiss-card p-5">
-                {/* 评估等级标签 */}
-                <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: '1px solid var(--border-light)' }}>
-                  <div className="px-4 py-2 rounded-lg text-sm font-bold"
-                    style={{ background: evalLevel.bg, color: evalLevel.color }}>
-                    评估等级: {evalLevel.text}
-                  </div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    依据 EWGSOP2 标准（五次起坐测试 &lt;15s 为正常）
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {/* 测试概况 */}
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                    <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>测试概况</h5>
-                    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      受试者完成五次起坐测试，总时长 <b>{totalDur.toFixed(1)}</b> 秒，
-                      共检测到 <b>{d.stand_peaks || standPeaksIdx.length || '--'}</b> 个力峰值，
-                      <b>{durationStats.num_cycles || '--'}</b> 个完整周期，
-                      平均周期时长 <b>{durationStats.avg_duration?.toFixed(2) || '--'}</b> 秒。
-                      {cycleDurations.length > 0 && (
-                        <>最快周期 <b>{Math.min(...cycleDurations).toFixed(2)}s</b>，最慢周期 <b>{Math.max(...cycleDurations).toFixed(2)}s</b>。</>
-                      )}
-                    </p>
-                  </div>
-
-                  {/* 对称性评估 */}
-                  {symmetryRatio != null && (
-                    <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                      <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>对称性评估</h5>
-                      <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                        左右脚对称性指数为{' '}
-                        <b style={{ color: symmetryRatio >= 80 ? C.green : symmetryRatio >= 60 ? C.amber : C.red }}>
-                          {symmetryRatio.toFixed(1)}%
-                        </b>
-                        {leftTotal != null && rightTotal != null && (
-                          <>（左脚总力 {Number(leftTotal).toLocaleString()}，右脚总力 {Number(rightTotal).toLocaleString()}）</>
-                        )}。
-                        {symmetryRatio >= 80
-                          ? '左右脚受力分布均衡，对称性良好。'
-                          : symmetryRatio >= 60
-                          ? '左右脚受力存在一定差异，建议关注重心偏移。'
-                          : '左右脚受力明显不对称，建议进一步评估是否存在单侧肌力不足。'}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* 临床建议 */}
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                    <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>临床建议</h5>
-                    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      根据国际肌少症工作组 (EWGSOP2) 标准，五次起坐测试时间
-                      {totalDur <= 15 ? (
-                        <><b style={{ color: C.green }}>小于15秒</b>，该受试者下肢肌力处于正常范围。建议定期复查以监测变化趋势。</>
-                      ) : totalDur <= 20 ? (
-                        <><b style={{ color: C.amber }}>在15~20秒之间</b>，提示下肢肌力可能存在轻度下降。建议加强下肢力量训练，并在3个月后复查。</>
-                      ) : (
-                        <><b style={{ color: C.red }}>大于20秒</b>，提示下肢肌力明显下降，存在肌少症风险。建议进行详细的肌肉质量评估（如DXA或BIA），并制定个性化的运动康复方案。</>
-                      )}
-                    </p>
-                  </div>
-                </div>
+              <SectionHeader title="AI综合评估" subtitle="AI Comprehensive Assessment" />
+              <div className="zeiss-card p-5 mb-4">
+                <AssessmentAiPanel
+                  aiLoading={aiLoading}
+                  aiError={aiError}
+                  aiReport={aiReport}
+                  sections={ASSESSMENT_AI_SECTION_CONFIG.sitstand}
+                />
               </div>
             </section>
 

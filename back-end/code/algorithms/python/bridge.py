@@ -106,6 +106,8 @@ def _sitstand_report(params):
     return generate_sit_stand_report(
         stand_data=params.get('stand_data', []),
         sit_data=params.get('sit_data', []),
+        stand_times=params.get('stand_times'),
+        sit_times=params.get('sit_times'),
         username=params.get('username', '用户'),
     )
 

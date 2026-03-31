@@ -1,20 +1,102 @@
-/**
- * 起坐评估报告数据生成器
- * 将采集的坐垫/脚垫压力数据转换为报告组件所需的结构化数据
- * 输出格式与后端 sit_stand_render_data.py 保持一致
- */
+const DEFAULT_INTERVAL_SEC = 0.1;
+const DEFAULT_DISPLAY_INTERVAL_SEC = 0.3;
+const DEFAULT_MAX_DISPLAY_POINTS = 48;
+
+function roundTo(value, digits = 2) {
+  return Number(Number(value || 0).toFixed(digits));
+}
+
+function buildRelativeTimes(length, timestamps = [], fallbackIntervalSec = DEFAULT_INTERVAL_SEC) {
+  if (
+    Array.isArray(timestamps) &&
+    timestamps.length === length &&
+    timestamps.every((value) => Number.isFinite(Number(value)))
+  ) {
+    const normalized = timestamps.map((value) => Number(value));
+    const base = normalized[0];
+    return normalized.map((value) => roundTo(Math.max(0, (value - base) / 1000), 2));
+  }
+
+  return Array.from({ length }, (_, index) => roundTo(index * fallbackIntervalSec, 2));
+}
+
+function getAverageIntervalSec(times, fallbackIntervalSec = DEFAULT_INTERVAL_SEC) {
+  if (!Array.isArray(times) || times.length < 2) {
+    return fallbackIntervalSec;
+  }
+
+  const diffs = [];
+  for (let i = 1; i < times.length; i++) {
+    const diff = Number(times[i]) - Number(times[i - 1]);
+    if (Number.isFinite(diff) && diff > 0) {
+      diffs.push(diff);
+    }
+  }
+
+  if (!diffs.length) {
+    return fallbackIntervalSec;
+  }
+
+  return diffs.reduce((sum, value) => sum + value, 0) / diffs.length;
+}
+
+function downsampleSeries(
+  times,
+  values,
+  { displayIntervalSec = DEFAULT_DISPLAY_INTERVAL_SEC, maxDisplayPoints = DEFAULT_MAX_DISPLAY_POINTS } = {},
+) {
+  const length = Math.min(times.length, values.length);
+  if (length <= 1) {
+    return {
+      times: times.slice(0, length),
+      values: values.slice(0, length),
+    };
+  }
+
+  const avgIntervalSec = getAverageIntervalSec(times, DEFAULT_INTERVAL_SEC);
+  let step = Math.max(1, Math.round(displayIntervalSec / Math.max(avgIntervalSec, 0.001)));
+
+  if (maxDisplayPoints > 0) {
+    step = Math.max(step, Math.ceil(length / maxDisplayPoints));
+  }
+
+  if (step === 1) {
+    return {
+      times: times.slice(0, length),
+      values: values.slice(0, length),
+    };
+  }
+
+  const sampledTimes = [];
+  const sampledValues = [];
+
+  for (let index = 0; index < length; index += step) {
+    sampledTimes.push(times[index]);
+    sampledValues.push(values[index]);
+  }
+
+  if (sampledTimes[sampledTimes.length - 1] !== times[length - 1]) {
+    sampledTimes.push(times[length - 1]);
+    sampledValues.push(values[length - 1]);
+  }
+
+  return {
+    times: sampledTimes,
+    values: sampledValues,
+  };
+}
+
+function pickPeakTimes(times, peaks) {
+  return peaks
+    .filter((index) => index >= 0 && index < times.length)
+    .map((index) => times[index]);
+}
 
 /**
- * 从采集的压力历史数据生成起坐评估报告
+ * Generate fallback sit-stand report data.
  *
- * @param {Array} seatPressureHistory - 坐垫压力历史 [number, ...]
- * @param {Array} footpadPressureHistory - 脚垫压力历史 [number, ...]
- * @param {Object} seatStats - 坐垫统计 { max, mean, totalPressure, contactArea }
- * @param {Object} footpadStats - 脚垫统计 { max, mean, totalPressure, contactArea }
- * @param {Object} seatCoP - 坐垫COP { x, y }
- * @param {Object} footpadCoP - 脚垫COP { x, y }
- * @param {number} timer - 采集时长（单位：0.1秒）
- * @returns {Object} 报告数据对象（与后端 generate_sit_stand_report 返回格式一致）
+ * The analysis always runs on the full-resolution series.
+ * Display curves are downsampled separately to keep the report light.
  */
 export function generateSitStandReportData(
   seatPressureHistory = [],
@@ -23,51 +105,68 @@ export function generateSitStandReportData(
   footpadStats = null,
   seatCoP = null,
   footpadCoP = null,
-  timer = 0
+  timer = 0,
+  options = {},
 ) {
-  const totalDuration = timer / 10; // 转换为秒
-  const interval = 0.1; // 100ms 采样间隔
+  const seatTimes = buildRelativeTimes(
+    seatPressureHistory.length,
+    options.seatTimestamps,
+    DEFAULT_INTERVAL_SEC,
+  );
+  const standTimes = buildRelativeTimes(
+    footpadPressureHistory.length,
+    options.footpadTimestamps,
+    DEFAULT_INTERVAL_SEC,
+  );
+  const sitForce = seatPressureHistory.map((value) => roundTo(value, 1));
+  const standForce = footpadPressureHistory.map((value) => roundTo(value, 1));
 
-  // ── 生成时间轴 ──
-  const sitTimes = seatPressureHistory.map((_, i) => parseFloat((i * interval).toFixed(2)));
-  const standTimes = footpadPressureHistory.map((_, i) => parseFloat((i * interval).toFixed(2)));
-  const sitForce = seatPressureHistory.map(v => parseFloat(v.toFixed(1)));
-  const standForce = footpadPressureHistory.map(v => parseFloat(v.toFixed(1)));
+  const sitIntervalSec = getAverageIntervalSec(seatTimes, DEFAULT_INTERVAL_SEC);
+  const minPeakDistance = Math.max(4, Math.round(2 / Math.max(sitIntervalSec, 0.001)));
+  const peaks = detectPeaks(sitForce, minPeakDistance);
+  const peakTimes = pickPeakTimes(seatTimes, peaks);
 
-  // ── 峰值检测（与后端一致，增加最小间距过滤） ──
-  const peaks = detectPeaks(standForce, 20);
-
-  // ── 周期分析 ──
-  const numCycles = Math.max(peaks.length - 1, 0);
-  const avgDuration = numCycles > 0 ? totalDuration / numCycles : 0;
-
-  // 周期时长明细
   const cycleDurations = [];
-  for (let i = 0; i < peaks.length - 1; i++) {
-    const dur = standTimes[peaks[i + 1]] - standTimes[peaks[i]];
-    cycleDurations.push(parseFloat(dur.toFixed(2)));
+  for (let i = 0; i < peakTimes.length - 1; i++) {
+    cycleDurations.push(roundTo(peakTimes[i + 1] - peakTimes[i], 2));
   }
+
+  const numCycles = Math.max(peaks.length, 0);
+  const avgDuration = numCycles > 0
+    ? roundTo(Math.max(
+      timer / 10,
+      standTimes[standTimes.length - 1] || 0,
+      seatTimes[seatTimes.length - 1] || 0,
+    ) / numCycles, 2)
+    : 0;
   const minCycleDuration = cycleDurations.length > 0 ? Math.min(...cycleDurations) : 0;
   const maxCycleDuration = cycleDurations.length > 0 ? Math.max(...cycleDurations) : 0;
+  const totalDuration = roundTo(Math.max(
+    timer / 10,
+    standTimes[standTimes.length - 1] || 0,
+    seatTimes[seatTimes.length - 1] || 0,
+  ), 2);
 
-  // 各峰值力
-  const cyclePeakForces = peaks.map(idx => standForce[idx]);
+  const cyclePeakForces = peaks.map((index) => standForce[index]);
 
-  // ── 压力统计 ──
   const footMax = standForce.length > 0 ? Math.max(...standForce) : 0;
   const footAvg = standForce.length > 0 ? standForce.reduce((a, b) => a + b, 0) / standForce.length : 0;
   const sitMax = sitForce.length > 0 ? Math.max(...sitForce) : 0;
   const sitAvg = sitForce.length > 0 ? sitForce.reduce((a, b) => a + b, 0) / sitForce.length : 0;
 
-  // 最大变化率
   const footDiffs = [];
-  for (let i = 1; i < standForce.length; i++) footDiffs.push(Math.abs(standForce[i] - standForce[i - 1]));
+  for (let i = 1; i < standForce.length; i++) {
+    footDiffs.push(Math.abs(standForce[i] - standForce[i - 1]));
+  }
   const sitDiffs = [];
-  for (let i = 1; i < sitForce.length; i++) sitDiffs.push(Math.abs(sitForce[i] - sitForce[i - 1]));
+  for (let i = 1; i < sitForce.length; i++) {
+    sitDiffs.push(Math.abs(sitForce[i] - sitForce[i - 1]));
+  }
   const maxFootRate = footDiffs.length > 0 ? Math.max(...footDiffs) : 0;
   const maxSitRate = sitDiffs.length > 0 ? Math.max(...sitDiffs) : 0;
 
-  // ── 旧格式兼容字段 ──
+  const displayStand = downsampleSeries(standTimes, standForce, options);
+  const displaySit = downsampleSeries(seatTimes, sitForce, options);
   const cycles = detectCycles(footpadPressureHistory);
 
   return {
@@ -75,21 +174,22 @@ export function generateSitStandReportData(
     duration_stats: {
       total_duration: totalDuration,
       num_cycles: numCycles,
-      avg_duration: parseFloat(avgDuration.toFixed(2)),
+      avg_duration: avgDuration,
       cycle_durations: cycleDurations,
-      min_cycle_duration: parseFloat(minCycleDuration.toFixed(2)),
-      max_cycle_duration: parseFloat(maxCycleDuration.toFixed(2)),
+      min_cycle_duration: roundTo(minCycleDuration, 2),
+      max_cycle_duration: roundTo(maxCycleDuration, 2),
     },
     stand_frames: footpadPressureHistory.length,
     sit_frames: seatPressureHistory.length,
     stand_peaks: peaks.length,
+    sit_peaks: peaks.length,
     pressure_stats: {
       foot_max: Math.round(footMax),
       foot_avg: Math.round(footAvg),
       sit_max: Math.round(sitMax),
       sit_avg: Math.round(sitAvg),
-      max_foot_change_rate: parseFloat(maxFootRate.toFixed(1)),
-      max_sit_change_rate: parseFloat(maxSitRate.toFixed(1)),
+      max_foot_change_rate: roundTo(maxFootRate, 1),
+      max_sit_change_rate: roundTo(maxSitRate, 1),
     },
     cycle_peak_forces: cyclePeakForces,
     seat_stats: seatStats ? {
@@ -106,15 +206,25 @@ export function generateSitStandReportData(
     } : null,
     seat_cop: seatCoP ? { x: seatCoP.x, y: seatCoP.y } : null,
     footpad_cop: footpadCoP ? { x: footpadCoP.x, y: footpadCoP.y } : null,
-    // 力-时间曲线（与后端 force_curves 格式一致）
-    seat_force_curve: { times: sitTimes, values: sitForce },
-    footpad_force_curve: { times: standTimes, values: standForce },
+    seat_force_curve: { times: displaySit.times, values: displaySit.values },
+    footpad_force_curve: { times: displayStand.times, values: displayStand.values },
     force_curves: {
       stand_times: standTimes,
       stand_force: standForce,
-      sit_times: sitTimes,
+      sit_times: seatTimes,
       sit_force: sitForce,
       stand_peaks_idx: peaks,
+      stand_peak_times: peakTimes,
+      sit_peaks_idx: peaks,
+      sit_peak_times: peakTimes,
+    },
+    display_force_curves: {
+      stand_times: displayStand.times,
+      stand_force: displayStand.values,
+      sit_times: displaySit.times,
+      sit_force: displaySit.values,
+      stand_peak_times: peakTimes,
+      sit_peak_times: peakTimes,
     },
     images: {
       stand_evolution: [],
@@ -128,15 +238,11 @@ export function generateSitStandReportData(
   };
 }
 
-/**
- * 峰值检测（与后端算法一致）
- * 使用阈值 + 最小间距过滤
- */
 function detectPeaks(values, minDistance = 20) {
   if (values.length < 3) return [];
 
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const std = Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length);
+  const std = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
   const threshold = mean + 0.5 * std;
 
   const peaks = [];
@@ -150,12 +256,10 @@ function detectPeaks(values, minDistance = 20) {
   return peaks;
 }
 
-/**
- * 检测起坐周期（旧版兼容）
- * 通过脚垫压力的显著变化来检测
- */
 function detectCycles(pressureHistory) {
-  if (pressureHistory.length < 20) return [{ start: 0, end: pressureHistory.length - 1 }];
+  if (pressureHistory.length < 20) {
+    return [{ start: 0, end: Math.max(pressureHistory.length - 1, 0) }];
+  }
 
   const smoothed = smoothArray(pressureHistory, 5);
   const mean = smoothed.reduce((a, b) => a + b, 0) / smoothed.length;
@@ -185,7 +289,8 @@ function detectCycles(pressureHistory) {
 function smoothArray(arr, windowSize) {
   const result = [];
   for (let i = 0; i < arr.length; i++) {
-    let sum = 0, count = 0;
+    let sum = 0;
+    let count = 0;
     for (let j = Math.max(0, i - windowSize); j <= Math.min(arr.length - 1, i + windowSize); j++) {
       sum += arr[j];
       count++;

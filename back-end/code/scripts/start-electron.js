@@ -1,10 +1,13 @@
-const { spawn, execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const electron = require('electron');
 
 const backendDir = path.join(__dirname, '..');
 const frontendDir = path.join(__dirname, '..', '..', '..', 'front-end');
+const llmConfigDir = path.join(__dirname, '..', 'python', 'app', 'algorithms');
+const llmSettingsPath = path.join(llmConfigDir, 'llm_settings.json');
+const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings.example.json');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function getMissingDirectDeps(projectDir) {
@@ -54,15 +57,40 @@ function ensureProjectDeps(projectDir, label) {
   }
 }
 
+function ensureLlmSettingsFile() {
+  try {
+    if (fs.existsSync(llmSettingsPath)) {
+      return;
+    }
+
+    if (fs.existsSync(llmSettingsExamplePath)) {
+      fs.copyFileSync(llmSettingsExamplePath, llmSettingsPath);
+      console.log('[start] Created llm_settings.json from llm_settings.example.json.');
+      return;
+    }
+
+    const fallback = {
+      api_key: '',
+      base_url: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k2-turbo-preview',
+      extra_body: { enable_thinking: false },
+    };
+    fs.writeFileSync(llmSettingsPath, JSON.stringify(fallback, null, 2), 'utf8');
+    console.log('[start] Created llm_settings.json with fallback defaults.');
+  } catch (e) {
+    console.error('[start] Failed to ensure llm_settings.json:', e.message);
+  }
+}
+
 // 启动前确保前后端依赖都可用，避免主进程加载时缺模块
 ensureProjectDeps(backendDir, '后端');
 ensureProjectDeps(frontendDir, '前端');
+ensureLlmSettingsFile();
 
-// 启动 Electron（Electron 主进程会自动启动 Vite dev server）
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-console.log('[start] 启动 Electron（将自动启动前端开发服务器）...');
+console.log('[start] Launching Electron app...');
 
 const child = spawn(electron, ['.'], {
   stdio: 'inherit',

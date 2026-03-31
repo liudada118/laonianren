@@ -340,6 +340,13 @@ def detect_stand_peaks_assisted(stand_data, stand_times, sit_data, sit_times):
         return AMPD(stand_force)
 
     sit_peak_timestamps = sit_times.iloc[sit_peaks_idx].values
+    if len(stand_times) > 0 and len(sit_peak_timestamps) > 0:
+        stand_start = stand_times.iloc[0].to_datetime64()
+        stand_end = stand_times.iloc[-1].to_datetime64()
+        sit_peak_timestamps = np.array([
+            ts for ts in sit_peak_timestamps
+            if stand_start <= ts <= stand_end
+        ])
     print(f"    检测到 {len(sit_peak_timestamps)} 次坐下动作")
 
     stand_split_indices = []
@@ -392,6 +399,474 @@ def calculate_cycle_durations(stand_times, stand_peaks):
     }
 
 # ================= 足部分析工具 =================
+
+def _mask_to_segments(mask):
+    segments = []
+    start = None
+    for idx, value in enumerate(np.asarray(mask, dtype=bool)):
+        if value:
+            if start is None:
+                start = idx
+        elif start is not None:
+            segments.append((start, idx))
+            start = None
+    if start is not None:
+        segments.append((start, len(mask)))
+    return segments
+
+
+def _fill_short_gaps(mask, max_gap):
+    mask = np.asarray(mask, dtype=bool).copy()
+    if max_gap <= 0:
+        return mask
+
+    idx = 0
+    while idx < len(mask):
+        if mask[idx]:
+            idx += 1
+            continue
+
+        gap_start = idx
+        while idx < len(mask) and not mask[idx]:
+            idx += 1
+        gap_end = idx
+
+        has_left = gap_start > 0 and mask[gap_start - 1]
+        has_right = gap_end < len(mask) and mask[gap_end]
+        if has_left and has_right and (gap_end - gap_start) <= max_gap:
+            mask[gap_start:gap_end] = True
+
+    return mask
+
+
+def _remove_short_segments(mask, min_length):
+    mask = np.asarray(mask, dtype=bool).copy()
+    if min_length <= 1:
+        return mask
+
+    for start, end in _mask_to_segments(mask):
+        if (end - start) < min_length:
+            mask[start:end] = False
+    return mask
+
+
+def _estimate_frame_interval_seconds(times):
+    if len(times) < 2:
+        return 0.1
+
+    diffs = times.diff().dt.total_seconds().dropna()
+    diffs = diffs[diffs > 0]
+    if len(diffs) == 0:
+        return 0.1
+    return float(np.median(diffs))
+
+
+def _time_to_numpy_datetime(value):
+    if isinstance(value, pd.Timestamp):
+        return value.to_datetime64()
+    return np.datetime64(value)
+
+
+def time_window_to_index_range(times, start_time, end_time):
+    if len(times) == 0:
+        return None
+
+    values = times.values
+    start_value = _time_to_numpy_datetime(start_time)
+    end_value = _time_to_numpy_datetime(end_time)
+
+    start_idx = int(np.searchsorted(values, start_value, side='left'))
+    end_idx = int(np.searchsorted(values, end_value, side='right'))
+
+    start_idx = max(0, min(start_idx, len(values) - 1))
+    end_idx = max(start_idx + 1, min(end_idx, len(values)))
+    return start_idx, end_idx
+
+
+def build_sit_cycle_windows(sit_times, sit_segments, sit_peaks):
+    cycle_windows = []
+    if len(sit_segments) == 0 or len(sit_peaks) == 0:
+        return cycle_windows
+
+    for idx, peak_idx in enumerate(sit_peaks):
+        if idx == 0:
+            start_time = sit_times.iloc[sit_segments[idx][0]]
+        else:
+            prev_peak_time = sit_times.iloc[sit_peaks[idx - 1]]
+            curr_peak_time = sit_times.iloc[peak_idx]
+            start_time = prev_peak_time + (curr_peak_time - prev_peak_time) / 2
+
+        if idx == len(sit_peaks) - 1:
+            last_frame_idx = max(sit_segments[idx][1] - 1, sit_segments[idx][0])
+            end_time = sit_times.iloc[last_frame_idx]
+        else:
+            curr_peak_time = sit_times.iloc[peak_idx]
+            next_peak_time = sit_times.iloc[sit_peaks[idx + 1]]
+            end_time = curr_peak_time + (next_peak_time - curr_peak_time) / 2
+
+        if end_time < start_time:
+            end_time = start_time
+
+        cycle_windows.append({
+            "peak_idx": int(peak_idx),
+            "peak_time": sit_times.iloc[peak_idx],
+            "sit_start_idx": int(sit_segments[idx][0]),
+            "sit_end_idx": int(max(sit_segments[idx][1] - 1, sit_segments[idx][0])),
+            "start_time": start_time,
+            "end_time": end_time,
+        })
+
+    return cycle_windows
+
+
+def detect_sit_peak_cycles(sit_data, sit_times):
+    print(" [Sit Peaks] counting seated peaks from the seat cushion...")
+
+    if len(sit_data) == 0 or len(sit_times) == 0:
+        return {
+            "sit_force": np.array([], dtype=np.float64),
+            "smooth_force": np.array([], dtype=np.float64),
+            "threshold": 0.0,
+            "sit_segments": [],
+            "sit_peaks": [],
+            "cycle_windows": [],
+        }
+
+    sit_force = np.sum(sit_data, axis=(1, 2)).astype(np.float64)
+    frame_dt = _estimate_frame_interval_seconds(sit_times)
+    sigma_frames = max(1.0, min(6.0, 0.18 / max(frame_dt, 1e-3)))
+    smooth_force = (
+        scipy.ndimage.gaussian_filter1d(sit_force, sigma=sigma_frames)
+        if len(sit_force) >= 5 else sit_force.copy()
+    )
+
+    low = float(np.percentile(smooth_force, 15))
+    high = float(np.percentile(smooth_force, 85))
+    dynamic_range = max(0.0, high - low)
+    threshold = low + dynamic_range * 0.45 if dynamic_range > 0 else float(np.mean(smooth_force))
+
+    seated_mask = smooth_force >= threshold
+    gap_frames = max(1, int(round(0.25 / max(frame_dt, 1e-3))))
+    min_segment_frames = max(3, int(round(0.35 / max(frame_dt, 1e-3))))
+    seated_mask = _fill_short_gaps(seated_mask, gap_frames)
+    seated_mask = _remove_short_segments(seated_mask, min_segment_frames)
+
+    sit_segments = _mask_to_segments(seated_mask)
+    if len(sit_segments) == 0 and len(smooth_force) > 0:
+        peak_idx = int(np.argmax(smooth_force))
+        half_width = max(1, min_segment_frames // 2)
+        sit_segments = [(
+            max(0, peak_idx - half_width),
+            min(len(smooth_force), peak_idx + half_width + 1),
+        )]
+
+    sit_peaks = []
+    for start, end in sit_segments:
+        local_max_idx = int(np.argmax(smooth_force[start:end]))
+        sit_peaks.append(start + local_max_idx)
+
+    cycle_windows = build_sit_cycle_windows(sit_times, sit_segments, sit_peaks)
+    print(f"    seated peaks: {len(sit_peaks)}")
+
+    return {
+        "sit_force": sit_force,
+        "smooth_force": smooth_force,
+        "threshold": threshold,
+        "sit_segments": sit_segments,
+        "sit_peaks": sit_peaks,
+        "cycle_windows": cycle_windows,
+    }
+
+
+def calculate_cycle_stats_from_windows(cycle_windows):
+    if len(cycle_windows) == 0:
+        return None
+
+    cycle_durations = []
+    for window in cycle_windows:
+        duration = (window["end_time"] - window["start_time"]).total_seconds()
+        cycle_durations.append(round(max(duration, 0.0), 2))
+
+    total_duration = round(sum(cycle_durations), 2)
+    num_cycles = len(cycle_durations)
+    avg_duration = total_duration / num_cycles if num_cycles > 0 else 0
+
+    return {
+        "total_duration": total_duration,
+        "num_cycles": num_cycles,
+        "avg_duration": avg_duration,
+        "cycle_durations": cycle_durations,
+    }
+
+
+def build_sit_timing_cycles(
+    sit_times,
+    sit_segments,
+    sit_peaks=None,
+    landing_cap_sec=0.5,
+):
+    timing_cycles = []
+    if len(sit_times) == 0 or len(sit_segments) == 0:
+        return timing_cycles
+
+    peak_lookup = {}
+    if sit_peaks:
+        for seg_idx, peak_idx in enumerate(sit_peaks[:len(sit_segments)]):
+            peak_lookup[seg_idx] = int(peak_idx)
+
+    base_time = sit_times.iloc[0]
+    prev_segment_end_time = base_time
+    segment_indices = list(range(len(sit_segments)))
+
+    for cycle_idx, seg_idx in enumerate(segment_indices):
+        seg_start_idx = int(sit_segments[seg_idx][0])
+        seg_end_idx = int(max(sit_segments[seg_idx][1] - 1, sit_segments[seg_idx][0]))
+
+        seat_start_time = sit_times.iloc[seg_start_idx]
+        seat_end_time = sit_times.iloc[seg_end_idx]
+        if seat_end_time < seat_start_time:
+            seat_end_time = seat_start_time
+
+        transition_start_time = prev_segment_end_time if prev_segment_end_time is not None else base_time
+        if transition_start_time > seat_start_time:
+            transition_start_time = seat_start_time
+
+        transition_duration = max((seat_start_time - transition_start_time).total_seconds(), 0.0)
+        seat_contact_duration = max((seat_end_time - seat_start_time).total_seconds(), 0.0)
+        effective_seat_duration = min(seat_contact_duration, max(landing_cap_sec, 0.0))
+        effective_duration = transition_duration + effective_seat_duration
+
+        peak_idx = peak_lookup.get(seg_idx)
+        peak_time = sit_times.iloc[peak_idx] if peak_idx is not None and 0 <= peak_idx < len(sit_times) else seat_start_time
+        peak_offset = max((peak_time - seat_start_time).total_seconds(), 0.0)
+        effective_peak_offset = min(peak_offset, effective_seat_duration)
+
+        timing_cycles.append({
+            "cycle_index": int(cycle_idx),
+            "segment_index": int(seg_idx),
+            "peak_idx": int(peak_idx) if peak_idx is not None else None,
+            "transition_start_time": transition_start_time,
+            "seat_start_time": seat_start_time,
+            "seat_end_time": seat_end_time,
+            "transition_duration": transition_duration,
+            "seat_contact_duration": seat_contact_duration,
+            "effective_seat_duration": effective_seat_duration,
+            "effective_duration": effective_duration,
+            "peak_time": peak_time,
+            "effective_peak_offset": effective_peak_offset,
+        })
+
+        prev_segment_end_time = seat_end_time
+
+    return timing_cycles
+
+
+def split_edge_baseline_cycles(
+    timing_cycles,
+    min_keep_cycles=1,
+):
+    if len(timing_cycles) == 0:
+        return timing_cycles, None, None
+
+    required_cycles = max(int(min_keep_cycles), 1)
+    if len(timing_cycles) - 2 < required_cycles:
+        return timing_cycles, None, None
+
+    lead_in_cycle = dict(timing_cycles[0])
+    tail_out_cycle = dict(timing_cycles[-1])
+
+    trimmed_cycles = []
+    for new_idx, cycle in enumerate(timing_cycles[1:-1]):
+        next_cycle = dict(cycle)
+        next_cycle["cycle_index"] = int(new_idx)
+        trimmed_cycles.append(next_cycle)
+
+    if len(trimmed_cycles) < required_cycles:
+        return timing_cycles, None, None
+
+    return trimmed_cycles, lead_in_cycle, tail_out_cycle
+
+
+def trim_edge_baseline_cycles(
+    timing_cycles,
+    min_keep_cycles=1,
+):
+    trimmed_cycles, _, _ = split_edge_baseline_cycles(
+        timing_cycles,
+        min_keep_cycles=min_keep_cycles,
+    )
+    return trimmed_cycles
+
+
+def calculate_cycle_stats_from_timing_cycles(timing_cycles):
+    if len(timing_cycles) == 0:
+        return None
+
+    cycle_durations = [
+        round(max(float(cycle.get("effective_duration", 0.0)), 0.0), 2)
+        for cycle in timing_cycles
+    ]
+
+    total_duration = round(sum(cycle_durations), 2)
+    num_cycles = len(cycle_durations)
+    avg_duration = total_duration / num_cycles if num_cycles > 0 else 0
+
+    return {
+        "total_duration": total_duration,
+        "num_cycles": num_cycles,
+        "avg_duration": avg_duration,
+        "cycle_durations": cycle_durations,
+    }
+
+
+def _append_scaled_time_segment(out_times, out_values, times, values, idx_range, display_start, display_duration):
+    if idx_range is None:
+        return display_start
+
+    start_idx, end_idx = idx_range
+    if end_idx <= start_idx or start_idx >= len(times):
+        return display_start
+
+    segment_times = times.iloc[start_idx:end_idx]
+    if len(segment_times) == 0:
+        return display_start
+
+    segment_values = values[start_idx:end_idx]
+    real_start = segment_times.iloc[0]
+    real_end = segment_times.iloc[-1]
+    real_duration = max((real_end - real_start).total_seconds(), 0.0)
+    scale = (display_duration / real_duration) if real_duration > 0 and display_duration > 0 else 0.0
+
+    for idx, (sample_time, sample_value) in enumerate(zip(segment_times, segment_values)):
+        offset = (sample_time - real_start).total_seconds()
+        mapped_time = display_start + (offset * scale if scale > 0 else 0.0)
+        if out_times and mapped_time <= out_times[-1]:
+            mapped_time = out_times[-1] + (0.001 if idx > 0 or display_duration > 0 else 0.0)
+        out_times.append(round(mapped_time, 3))
+        out_values.append(float(sample_value))
+
+    return display_start + max(display_duration, 0.0)
+
+
+def _append_relative_time_segment(out_times, out_values, times, values, idx_range, base_time):
+    if idx_range is None or base_time is None:
+        return
+
+    start_idx, end_idx = idx_range
+    if end_idx <= start_idx or start_idx >= len(times):
+        return
+
+    segment_times = times.iloc[start_idx:end_idx]
+    if len(segment_times) == 0:
+        return
+
+    segment_values = values[start_idx:end_idx]
+    for sample_time, sample_value in zip(segment_times, segment_values):
+        mapped_time = (sample_time - base_time).total_seconds()
+        if mapped_time < 0:
+            continue
+        mapped_time = round(mapped_time, 3)
+        if out_times and mapped_time < out_times[-1]:
+            continue
+        if out_times and mapped_time == out_times[-1]:
+            if float(sample_value) == float(out_values[-1]):
+                continue
+            mapped_time = round(mapped_time + 0.001, 3)
+        out_times.append(mapped_time)
+        out_values.append(float(sample_value))
+
+
+def build_effective_display_force_curves(
+    stand_times,
+    stand_force,
+    sit_times,
+    sit_force,
+    timing_cycles,
+    lead_in_cycle=None,
+    window_start_time=None,
+    window_end_time=None,
+):
+    if len(timing_cycles) == 0 and lead_in_cycle is None and (window_start_time is None or window_end_time is None):
+        return None
+
+    display_curves = {
+        "stand_times": [],
+        "stand_force": [],
+        "sit_times": [],
+        "sit_force": [],
+        "stand_peak_times": [],
+        "sit_peak_times": [],
+        "lead_in_end_time": None,
+    }
+
+    start_candidates = [window_start_time] if window_start_time is not None else []
+    end_candidates = [window_end_time] if window_end_time is not None else []
+    if lead_in_cycle is not None:
+        if lead_in_cycle.get("transition_start_time") is not None:
+            start_candidates.append(lead_in_cycle["transition_start_time"])
+        if lead_in_cycle.get("seat_end_time") is not None:
+            end_candidates.append(lead_in_cycle["seat_end_time"])
+    if len(timing_cycles) > 0:
+        first_cycle = timing_cycles[0]
+        last_cycle = timing_cycles[-1]
+        if first_cycle.get("transition_start_time") is not None:
+            start_candidates.append(first_cycle["transition_start_time"])
+        if last_cycle.get("seat_end_time") is not None:
+            end_candidates.append(last_cycle["seat_end_time"])
+
+    if not start_candidates or not end_candidates:
+        return None
+
+    window_start_time = min(start_candidates)
+    window_end_time = max(end_candidates)
+    if window_end_time < window_start_time:
+        window_end_time = window_start_time
+
+    stand_range = time_window_to_index_range(stand_times, window_start_time, window_end_time)
+    sit_range = time_window_to_index_range(sit_times, window_start_time, window_end_time)
+
+    _append_relative_time_segment(
+        display_curves["stand_times"],
+        display_curves["stand_force"],
+        stand_times,
+        stand_force,
+        stand_range,
+        window_start_time,
+    )
+    _append_relative_time_segment(
+        display_curves["sit_times"],
+        display_curves["sit_force"],
+        sit_times,
+        sit_force,
+        sit_range,
+        window_start_time,
+    )
+
+    if lead_in_cycle is not None and lead_in_cycle.get("seat_end_time") is not None:
+        display_curves["lead_in_end_time"] = round(
+            max((lead_in_cycle["seat_end_time"] - window_start_time).total_seconds(), 0.0),
+            3,
+        )
+
+    for cycle in timing_cycles:
+        peak_time = cycle.get("peak_time")
+        if peak_time is None:
+            peak_time = cycle.get("seat_start_time")
+        if peak_time is None:
+            continue
+        display_peak_time = round(
+            max((peak_time - window_start_time).total_seconds(), 0.0),
+            3,
+        )
+        display_curves["stand_peak_times"].append(display_peak_time)
+        display_curves["sit_peak_times"].append(display_peak_time)
+
+    has_data = (
+        len(display_curves["stand_times"]) > 0
+        or len(display_curves["sit_times"]) > 0
+    )
+    return display_curves if has_data else None
+
 
 def get_foot_masks_and_bbox(pressure_data_np):
     """获取左右脚掩膜和边界框"""
@@ -1119,7 +1594,15 @@ def generate_report(data_dir, output_dir=None, pdf_name="Report.pdf", username="
     
     # 2. 周期检测
     stand_peaks = detect_stand_peaks_assisted(stand_data, stand_times, sit_data, sit_times)
-    duration_stats = calculate_cycle_durations(stand_times, stand_peaks)
+    sit_cycle_info = detect_sit_peak_cycles(sit_data, sit_times)
+    sit_peaks = sit_cycle_info.get("sit_peaks", [])
+    sit_segments = sit_cycle_info.get("sit_segments", [])
+    cycle_windows = sit_cycle_info.get("cycle_windows", [])
+    raw_timing_cycles = build_sit_timing_cycles(sit_times, sit_segments, sit_peaks)
+    timing_cycles, lead_in_cycle, tail_out_cycle = split_edge_baseline_cycles(raw_timing_cycles)
+    duration_stats = calculate_cycle_stats_from_timing_cycles(timing_cycles)
+    if not duration_stats:
+        duration_stats = calculate_cycle_stats_from_windows(cycle_windows)
     
     if not duration_stats:
         print(" 错误: 无法计算周期统计信息")
@@ -1227,7 +1710,8 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     sit_data, sit_times = load_sit_data(sit_csv)
 
     # 1.5 对齐时间范围：裁剪到两个传感器的重叠区间，保持数据真实
-    if len(stand_times) > 0 and len(sit_times) > 0:
+    keep_full_sensor_timeline = True
+    if (not keep_full_sensor_timeline) and len(stand_times) > 0 and len(sit_times) > 0:
         overlap_end = min(stand_times.iloc[-1], sit_times.iloc[-1])
         overlap_start = max(stand_times.iloc[0], sit_times.iloc[0])
         # 裁剪足底
@@ -1245,7 +1729,15 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
 
     # 2. 周期检测
     stand_peaks = detect_stand_peaks_assisted(stand_data, stand_times, sit_data, sit_times)
-    duration_stats = calculate_cycle_durations(stand_times, stand_peaks)
+    sit_cycle_info = detect_sit_peak_cycles(sit_data, sit_times)
+    sit_peaks = sit_cycle_info.get("sit_peaks", [])
+    sit_segments = sit_cycle_info.get("sit_segments", [])
+    cycle_windows = sit_cycle_info.get("cycle_windows", [])
+    raw_timing_cycles = build_sit_timing_cycles(sit_times, sit_segments, sit_peaks)
+    timing_cycles, lead_in_cycle, tail_out_cycle = split_edge_baseline_cycles(raw_timing_cycles)
+    duration_stats = calculate_cycle_stats_from_timing_cycles(timing_cycles)
+    if not duration_stats:
+        duration_stats = calculate_cycle_stats_from_windows(cycle_windows)
 
     if not duration_stats:
         # 峰值不足2个时，提供默认周期统计（不再抛异常，让报告继续生成）
@@ -1258,6 +1750,7 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             "total_duration": total_dur,
             "num_cycles": 0,
             "avg_duration": 0,
+            "cycle_durations": [],
         }
 
     # [已注释] 3. base64 PNG 图片生成 — 前端已使用 heatmap_data + cop_data 通过 Canvas 渲染，不再需要 images
@@ -1432,8 +1925,69 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         t0 = min(t0_stand, t0_sit)
     else:
         t0 = t0_stand or t0_sit
+    effective_sit_peaks = [
+        int(cycle["peak_idx"])
+        for cycle in timing_cycles
+        if cycle.get("peak_idx") is not None
+    ]
     stand_time_list = [(t - t0).total_seconds() for t in stand_times] if t0 is not None and len(stand_times) > 0 else []
     sit_time_list = [(t - t0).total_seconds() for t in sit_times] if t0 is not None and len(sit_times) > 0 else []
+    stand_peak_time_list = [(stand_times.iloc[idx] - t0).total_seconds() for idx in stand_peaks] if t0 is not None and len(stand_peaks) > 0 else []
+    sit_peak_time_list = [(sit_times.iloc[idx] - t0).total_seconds() for idx in effective_sit_peaks] if t0 is not None and len(effective_sit_peaks) > 0 else []
+    display_window_start = None
+    display_window_end = None
+    if len(raw_timing_cycles) > 0:
+        display_window_start = raw_timing_cycles[0].get("transition_start_time")
+        display_window_end = raw_timing_cycles[-1].get("seat_end_time")
+    display_force_curves = build_effective_display_force_curves(
+        stand_times,
+        stand_force,
+        sit_times,
+        sit_force,
+        timing_cycles,
+        lead_in_cycle=lead_in_cycle,
+        window_start_time=display_window_start,
+        window_end_time=display_window_end,
+    )
+
+    stand_cycle_ranges = []
+    sit_cycle_ranges = []
+    if len(timing_cycles) > 0:
+        for cycle in timing_cycles:
+            stand_range = time_window_to_index_range(
+                stand_times,
+                cycle["transition_start_time"],
+                cycle["seat_end_time"],
+            )
+            sit_range = time_window_to_index_range(
+                sit_times,
+                cycle["transition_start_time"],
+                cycle["seat_end_time"],
+            )
+            if stand_range is not None:
+                stand_cycle_ranges.append(stand_range)
+            if sit_range is not None:
+                sit_cycle_ranges.append(sit_range)
+    elif len(cycle_windows) > 0:
+        for window in cycle_windows:
+            stand_range = time_window_to_index_range(stand_times, window["start_time"], window["end_time"])
+            sit_range = time_window_to_index_range(sit_times, window["start_time"], window["end_time"])
+            if stand_range is not None:
+                stand_cycle_ranges.append(stand_range)
+            if sit_range is not None:
+                sit_cycle_ranges.append(sit_range)
+    elif len(stand_peaks) >= 2:
+        for idx in range(len(stand_peaks) - 1):
+            start_idx = int(stand_peaks[idx])
+            end_idx = int(stand_peaks[idx + 1]) + 1
+            stand_cycle_ranges.append((start_idx, end_idx))
+            sit_range = time_window_to_index_range(
+                sit_times,
+                stand_times.iloc[start_idx],
+                stand_times.iloc[int(stand_peaks[idx + 1])],
+            )
+            if sit_range is not None:
+                sit_cycle_ranges.append(sit_range)
 
     # ====== 4.6 补充前端所需的额外字段 ======
 
@@ -1441,27 +1995,28 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     print(" 生成热力图矩阵数据 (heatmap_data)...")
     # 计算左右脚掩码和边界框（原在 images 段计算，现移至此处）
     l_mask = r_mask = l_bbox = r_bbox = None
-    if len(stand_peaks) >= 2:
+    if len(stand_cycle_ranges) > 0:
         l_mask, r_mask, l_bbox, r_bbox = get_foot_masks_and_bbox(stand_data)
     stand_evo_matrix = []
-    if len(stand_peaks) >= 2:
-        start_idx, end_idx = stand_peaks[0], stand_peaks[1]
-        cycle_data = stand_data[start_idx : end_idx+1]
-        indices = [int(p * (len(cycle_data)-1)) for p in np.linspace(0, 1, 11)]
-        for col_idx, frame_idx in enumerate(indices):
-            frame = cycle_data[frame_idx]
-            for row_idx, (mask, bbox, label) in enumerate([
-                (l_mask, l_bbox, "left"), (r_mask, r_bbox, "right")
-            ]):
-                crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
-                stand_evo_matrix.append({
-                    'label': row_idx,
-                    'sublabel': col_idx,
-                    'matrix': crop.tolist(),
-                })
+    if len(stand_cycle_ranges) > 0:
+        start_idx, end_idx = stand_cycle_ranges[0]
+        cycle_data = stand_data[start_idx:end_idx]
+        if len(cycle_data) > 0:
+            indices = [int(p * (len(cycle_data) - 1)) for p in np.linspace(0, 1, 11)]
+            for col_idx, frame_idx in enumerate(indices):
+                frame = cycle_data[frame_idx]
+                for row_idx, (mask, bbox, label) in enumerate([
+                    (l_mask, l_bbox, "left"), (r_mask, r_bbox, "right")
+                ]):
+                    crop = (frame * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+                    stand_evo_matrix.append({
+                        'label': row_idx,
+                        'sublabel': col_idx,
+                        'matrix': crop.tolist(),
+                    })
 
     sit_evo_matrix = []
-    if len(stand_peaks) >= 2:
+    if len(stand_cycle_ranges) > 0 and l_mask is not None:
         stand_times_val = stand_times.values
         sit_times_val = sit_times.values
         best_cycle_idx = 0
@@ -1501,6 +2056,31 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
                         'matrix': frame.tolist(),
                     })
 
+    rep_segment = None
+    sit_evo_matrix = []
+    if len(timing_cycles) > 0:
+        rep_cycle_idx = len(timing_cycles) // 2
+        seg_idx = int(timing_cycles[rep_cycle_idx]["segment_index"])
+        if 0 <= seg_idx < len(sit_segments):
+            seg_start, seg_end = sit_segments[seg_idx]
+            rep_segment = sit_data[seg_start:seg_end]
+    elif len(sit_segments) > 0:
+        rep_cycle_idx = len(sit_segments) // 2
+        seg_start, seg_end = sit_segments[rep_cycle_idx]
+        rep_segment = sit_data[seg_start:seg_end]
+    elif len(sit_cycle_ranges) > 0:
+        rep_cycle_idx = len(sit_cycle_ranges) // 2
+        seg_start, seg_end = sit_cycle_ranges[rep_cycle_idx]
+        rep_segment = sit_data[seg_start:seg_end]
+    if rep_segment is not None and len(rep_segment) > 1:
+        sit_indices = [int(p * (len(rep_segment) - 1)) for p in np.linspace(0, 1, 11)]
+        for col_idx, frame_idx in enumerate(sit_indices):
+            frame = rep_segment[frame_idx]
+            sit_evo_matrix.append({
+                'label': col_idx,
+                'matrix': frame.tolist(),
+            })
+
     heatmap_data = {
         'stand_evolution': stand_evo_matrix,
         'sit_evolution': sit_evo_matrix,
@@ -1509,15 +2089,25 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     # --- 4.6.2 cop_data: COP 轨迹数据（供前端 Canvas 渲染） ---
     print(" 生成COP轨迹数据 (cop_data)...")
     cop_data = {'stand_left': None, 'stand_right': None, 'sit': None}
-    if len(stand_peaks) >= 2:
+    if len(stand_cycle_ranges) > 0:
         # 站立 COP：背景矩阵 + 轨迹坐标
-        peak_frames = stand_data[stand_peaks]
-        avg_peak = np.mean(peak_frames, axis=0)
+        peak_frames = []
+        for start_idx, end_idx in stand_cycle_ranges:
+            seg = stand_data[start_idx:end_idx]
+            if len(seg) == 0:
+                continue
+            local_peak_idx = int(np.argmax(np.sum(seg, axis=(1, 2))))
+            peak_frames.append(seg[local_peak_idx])
+
+        if len(peak_frames) == 0:
+            peak_frames = []
+
+        avg_peak = np.mean(np.array(peak_frames), axis=0) if len(peak_frames) > 0 else np.zeros_like(stand_data[0])
         for foot_name, mask, bbox in [("left", l_mask, l_bbox), ("right", r_mask, r_bbox)]:
             bg = (avg_peak * mask)[bbox[0]:bbox[1], bbox[2]:bbox[3]]
             trajectories = []
-            for i in range(len(stand_peaks) - 1):
-                seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
+            for start_idx, end_idx in stand_cycle_ranges:
+                seg = stand_data[start_idx:end_idx]
                 l_cops, r_cops = calculate_split_cop(seg, l_mask, r_mask)
                 cops = l_cops if foot_name == "left" else r_cops
                 pts = []
@@ -1540,13 +2130,7 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         THRESHOLD = max(global_max_val * 0.03, 50)
         all_cycles_cops = []
         valid_frames_accumulator = []
-        stand_times_val = stand_times.values
-        sit_times_val = sit_times.values
-        for i in range(len(stand_peaks) - 1):
-            t_start = stand_times_val[stand_peaks[i]]
-            t_end = stand_times_val[stand_peaks[i+1]]
-            idx_start = np.searchsorted(sit_times_val, t_start)
-            idx_end = np.searchsorted(sit_times_val, t_end)
+        for idx_start, idx_end in (sit_cycle_ranges if len(sit_cycle_ranges) > 0 else sit_segments):
             if idx_end <= idx_start:
                 continue
             segment_data = sit_data[idx_start:idx_end]
@@ -1571,22 +2155,16 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
 
     # --- 4.6.3 cycle_durations: 各周期时长明细 ---
     print(" 计算各周期时长明细...")
-    cycle_durations = []
-    if len(stand_peaks) >= 2:
-        for i in range(len(stand_peaks) - 1):
-            t_start = stand_times.iloc[stand_peaks[i]]
-            t_end = stand_times.iloc[stand_peaks[i+1]]
-            dur = (t_end - t_start).total_seconds()
-            cycle_durations.append(round(dur, 2))
+    cycle_durations = duration_stats.get('cycle_durations', []) if duration_stats else []
 
     # --- 4.6.4 symmetry: 左右脚对称性（每帧平均力，牛顿） ---
     print(" 计算左右脚对称性...")
     symmetry = {}
-    if len(stand_peaks) >= 2:
+    if len(stand_cycle_ranges) > 0 and l_mask is not None:
         left_forces = []
         right_forces = []
-        for i in range(len(stand_peaks) - 1):
-            seg = stand_data[stand_peaks[i]:stand_peaks[i+1]+1]
+        for start_idx, end_idx in stand_cycle_ranges:
+            seg = stand_data[start_idx:end_idx]
             for frame in seg:
                 newton_frame = adc_to_newton_foot(frame)
                 left_forces.append(float(np.sum(newton_frame * l_mask)))
@@ -1629,38 +2207,50 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     # --- 4.6.6 cycle_peak_forces: 各周期峰值力 ---
     print(" 计算各周期峰值力...")
     cycle_peak_forces = []
-    if len(stand_peaks) >= 2:
-        for i in range(len(stand_peaks) - 1):
-            seg_force = stand_force_arr[stand_peaks[i]:stand_peaks[i+1]+1]
-            if len(seg_force) > 0:
-                cycle_peak_forces.append(round(float(np.max(seg_force)), 0))
+    for start_idx, end_idx in stand_cycle_ranges:
+        seg_force = stand_force_arr[start_idx:end_idx]
+        if len(seg_force) > 0:
+            cycle_peak_forces.append(round(float(np.max(seg_force)), 0))
 
     # 5. 构建返回结果
-    return {
+    result = {
         'duration_stats': {
             'total_duration': round(duration_stats['total_duration'], 2),
             'num_cycles': duration_stats['num_cycles'],
             'avg_duration': round(duration_stats['avg_duration'], 2),
-            'cycle_durations': cycle_durations,
+            'cycle_durations': duration_stats.get('cycle_durations', []),
+            'min_cycle_duration': round(min(duration_stats.get('cycle_durations', [])), 2) if duration_stats.get('cycle_durations') else 0,
+            'max_cycle_duration': round(max(duration_stats.get('cycle_durations', [])), 2) if duration_stats.get('cycle_durations') else 0,
         },
         'stand_frames': len(stand_data),
         'sit_frames': len(sit_data),
         'stand_peaks': len(stand_peaks) if stand_peaks is not None else 0,
+        'sit_peaks': len(effective_sit_peaks),
         'username': username,
         'images': images,
         'heatmap_data': heatmap_data,
         'cop_data': cop_data,
         'symmetry': symmetry,
         'pressure_stats': pressure_stats,
-        'cycle_peak_forces': cycle_peak_forces,
+        'cycle_peak_forces': [
+            round(float(np.max(stand_force_arr[start_idx:end_idx])), 0)
+            for start_idx, end_idx in stand_cycle_ranges
+            if len(stand_force_arr[start_idx:end_idx]) > 0
+        ],
         'force_curves': {
             'stand_times': stand_time_list,
             'stand_force': stand_force,
             'sit_times': sit_time_list,
             'sit_force': sit_force,
             'stand_peaks_idx': stand_peaks.tolist() if isinstance(stand_peaks, np.ndarray) else (list(stand_peaks) if stand_peaks else []),
+            'stand_peak_times': stand_peak_time_list,
+            'sit_peaks_idx': effective_sit_peaks,
+            'sit_peak_times': sit_peak_time_list,
         },
+        'display_force_curves': display_force_curves,
     }
+
+    return result
 
 
 # ================= 主程序入口 =================

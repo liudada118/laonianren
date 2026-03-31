@@ -549,7 +549,7 @@ export default function Dashboard() {
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐能力评估准备</h3>
             <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
               请被评估者坐在椅子上，双手交叉放于胸前。<br/>
-              评估开始后，请用最快速度完成<span className="font-semibold" style={{ color: '#059669' }}>起坐 5 次</span>。
+              评估开始后，请用最快速度完成<span className="font-semibold" style={{ color: '#059669' }}>起坐 6 次，即 5 个周期</span>。
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowSitStandTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>

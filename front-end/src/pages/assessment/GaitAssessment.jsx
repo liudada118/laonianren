@@ -11,6 +11,12 @@ import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
 import GaitAverageChart from '../../components/ui/GaitAverageChart';
 import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
+import AssessmentAiPanel from '../../components/report/AssessmentAiPanel';
+import {
+  ASSESSMENT_AI_SECTION_CONFIG,
+  buildGaitAiPayload,
+  requestAssessmentAIReport,
+} from '../../lib/assessmentAi';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -125,9 +131,12 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }
 }
 
 /* ─── 步态报告组件（使用真实数据） ─── */
-export function GaitReportContent({ patientInfo, pythonResult: externalResult, onClose }) {
+export function GaitReportContent({ patientInfo, pythonResult: externalResult, onClose, onAiReportReady }) {
   const [realData, setRealData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [aiReport, setAiReport] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
   useEffect(() => {
     if (externalResult) {
@@ -139,6 +148,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     setRealData(null);
     setLoading(false);
   }, [externalResult]);
+
+  useEffect(() => {
+    if (externalResult?.aiReport && !aiReport) {
+      setAiReport(externalResult.aiReport);
+    }
+  }, [externalResult, aiReport]);
 
   const sections = [
     { id: 'spatiotemporal', title: '1. 步态时空参数' },
@@ -317,6 +332,39 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const thStyle = 'px-3 py-2 text-left text-[11px] font-semibold';
   const tdStyle = 'px-3 py-2 text-[11px]';
+
+  useEffect(() => {
+    if (!realData || aiReport || externalResult?.aiReport) return;
+
+    const payload = buildGaitAiPayload(realData);
+    if (!payload) return;
+
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(null);
+
+    requestAssessmentAIReport(
+      'gait',
+      patientInfo || { name: '未知' },
+      payload,
+    ).then(res => {
+      if (cancelled) return;
+      if (res.success) {
+        setAiReport(res.data);
+        if (onAiReportReady) onAiReportReady(res.data);
+      } else {
+        setAiError(res.error || 'AI 分析失败');
+      }
+    }).catch(err => {
+      if (!cancelled) setAiError(err.message);
+    }).finally(() => {
+      if (!cancelled) setAiLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [realData, patientInfo, aiReport, onAiReportReady]);
 
   // Hooks 必须在所有条件分支之前调用
   const gaitContentRef = React.useRef(null);
@@ -606,37 +654,14 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
         {/* 综合评估 */}
         <section id="gait-conclusion">
-          <div className="zeiss-section-title">综合评估</div>
+          <div className="zeiss-section-title">AI综合评估</div>
           <div className="zeiss-card-inner p-5 mt-3">
-            <h5 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>发现的问题</h5>
-            <div className="space-y-2">
-              {[
-                walkSpeed < 0.8 && { text: `行走速度 ${gp.walkingSpeed} m/s 低于正常参考值 (≥0.8 m/s)`, level: 'warning' },
-                Math.abs(leftStepTime - rightStepTime) > 0.15 && { text: `左右脚步长时间不对称 (差异 ${Math.abs(leftStepTime - rightStepTime).toFixed(3)}s)`, level: 'info' },
-                Math.abs(leftStepLen - rightStepLen) > 5 && { text: `左右脚步长差异 ${Math.abs(leftStepLen - rightStepLen).toFixed(1)} cm`, level: 'info' },
-                leftSteps.some(a => Math.abs(a) > 25) && { text: '部分左脚步FPA角度偏大（>25°），可能存在异常步态', level: 'warning' },
-                rightSteps.some(a => Math.abs(a) > 25) && { text: '部分右脚步FPA角度偏大（>25°），可能存在异常步态', level: 'warning' },
-              ].filter(Boolean).map((issue, i) => (
-                <div key={i} className="flex items-start gap-2 p-2 rounded-lg text-xs"
-                  style={{ background: issue.level === 'warning' ? '#FEF3C7' : '#EFF6FF', color: issue.level === 'warning' ? '#92400E' : '#1E40AF' }}>
-                  <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {issue.level === 'warning'
-                      ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                      : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    }
-                  </svg>
-                  <span>{issue.text}</span>
-                </div>
-              ))}
-              {walkSpeed >= 0.8 && Math.abs(leftStepTime - rightStepTime) <= 0.15 && !leftSteps.some(a => Math.abs(a) > 25) && !rightSteps.some(a => Math.abs(a) > 25) && (
-                <div className="flex items-center gap-2 p-2 rounded-lg text-xs" style={{ background: '#ECFDF5', color: '#065F46' }}>
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>各项步态指标均在正常范围内</span>
-                </div>
-              )}
-            </div>
+            <AssessmentAiPanel
+              aiLoading={aiLoading}
+              aiError={aiError}
+              aiReport={aiReport}
+              sections={ASSESSMENT_AI_SECTION_CONFIG.gait}
+            />
           </div>
         </section>
       </div>
@@ -977,7 +1002,13 @@ export default function GaitAssessment() {
               </div>
             </div>
           ) : (
-            <GaitReportContent patientInfo={patientInfo} pythonResult={pythonResult} />
+            <GaitReportContent
+              patientInfo={patientInfo}
+              pythonResult={pythonResult}
+              onAiReportReady={(aiData) => {
+                completeAssessment('gait', { completed: true, reportData: { ...pythonResult, aiReport: aiData } }, { pythonResult: { ...pythonResult, aiReport: aiData } }, assessmentIdRef.current);
+              }}
+            />
           )}
         </main>
       </div>

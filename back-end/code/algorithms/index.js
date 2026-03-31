@@ -64,6 +64,8 @@ async function callAlgorithm(funcName, params = {}) {
       return callPython('generate_sit_stand_render_report', {
         stand_data: params.stand_data || [],
         sit_data: params.sit_data || [],
+        stand_times: params.stand_times || null,
+        sit_times: params.sit_times || null,
         username: params.username || '用户',
       });
 

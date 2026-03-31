@@ -177,6 +177,11 @@ export default function SitStandAssessment() {
   const [seatPressureHistory, setSeatPressureHistory] = useState([]);
   const [footpadPressureHistory, setFootpadPressureHistory] = useState([]);
   const assessmentIdRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const seatPressureFullRef = useRef([]);
+  const footpadPressureFullRef = useRef([]);
+  const seatTimeFullRef = useRef([]);
+  const footpadTimeFullRef = useRef([]);
 
   const [sceneConfig, setSceneConfig] = useState({
     showHeatmap: true,
@@ -204,12 +209,20 @@ export default function SitStandAssessment() {
     isGlobalConnected,
     backendMode: 3, // 模式3：坐垫+脚垫
     onSeatData: useCallback((frame, stats) => {
+      if (isRecordingRef.current) {
+        seatPressureFullRef.current.push(stats.totalPressure);
+        seatTimeFullRef.current.push(frame?.timestamp || Date.now());
+      }
       setSeatPressureHistory(prev => {
         const next = [...prev, stats.totalPressure];
         return next.length > 100 ? next.slice(-100) : next;
       });
     }, []),
     onFootpadData: useCallback((frame, stats) => {
+      if (isRecordingRef.current) {
+        footpadPressureFullRef.current.push(stats.totalPressure);
+        footpadTimeFullRef.current.push(frame?.timestamp || Date.now());
+      }
       setFootpadPressureHistory(prev => {
         const next = [...prev, stats.totalPressure];
         return next.length > 100 ? next.slice(-100) : next;
@@ -229,8 +242,13 @@ export default function SitStandAssessment() {
 
   const start = async () => {
     if (!deviceConnected) return;
+    isRecordingRef.current = true;
     setPhase('recording'); setTimer(0);
     setSeatPressureHistory([]); setFootpadPressureHistory([]);
+    seatPressureFullRef.current = [];
+    footpadPressureFullRef.current = [];
+    seatTimeFullRef.current = [];
+    footpadTimeFullRef.current = [];
 
     // 后端模式：开始数据采集
     if (isBackendMode) {
@@ -273,6 +291,7 @@ export default function SitStandAssessment() {
   };
 
   const stop = async () => {
+    isRecordingRef.current = false;
     clearInterval(timerRef.current);
     stopSimulation(); // 停止模拟数据更新
     setPhase('processing');
@@ -311,8 +330,19 @@ export default function SitStandAssessment() {
       // 前端算法 fallback
       try {
         const report = generateSitStandReportData(
-          seatPressureHistory, footpadPressureHistory,
-          seatStats, footpadStats, seatCoP, footpadCoP, timer
+          seatPressureFullRef.current,
+          footpadPressureFullRef.current,
+          seatStats,
+          footpadStats,
+          seatCoP,
+          footpadCoP,
+          timer,
+          {
+            seatTimestamps: seatTimeFullRef.current,
+            footpadTimestamps: footpadTimeFullRef.current,
+            displayIntervalSec: 0.3,
+            maxDisplayPoints: 48,
+          }
         );
         console.log('[SitStand] 前端报告数据已生成:', report);
         setSitstandReportData(report);
@@ -327,7 +357,12 @@ export default function SitStandAssessment() {
   const viewReport = () => {
     stopSimulation(); // 停止模拟，释放3D场景资源
     setShowComplete(false); setPhase('report'); setReportMode('static');
-    completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory }, assessmentIdRef.current);
+    completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, {
+      seatPressureHistory: seatPressureFullRef.current,
+      footpadPressureHistory: footpadPressureFullRef.current,
+      seatTimestamps: seatTimeFullRef.current,
+      footpadTimestamps: footpadTimeFullRef.current,
+    }, assessmentIdRef.current);
   };
 
   const fmtTime = (t) => {
@@ -381,7 +416,13 @@ export default function SitStandAssessment() {
               </div>
             </div>
           ) : (
-            <SitStandReport patientInfo={patientInfo} reportData={sitstandReportData} />
+            <SitStandReport
+              patientInfo={patientInfo}
+              reportData={sitstandReportData}
+              onAiReportReady={(aiData) => {
+                completeAssessment('sitstand', { completed: true, reportData: { ...sitstandReportData, aiReport: aiData } }, null, assessmentIdRef.current);
+              }}
+            />
           )}
         </main>
       </div>
@@ -459,7 +500,7 @@ export default function SitStandAssessment() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐评估指导</h3>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              请用最快速度<span className="font-bold" style={{ color: '#059669' }}>起坐 5 次</span>
+              请用最快速度<span className="font-bold" style={{ color: '#059669' }}>起坐 6 次，即 5 个周期</span>
             </p>
             <button
               onClick={() => setShowGuideTip(false)}
@@ -481,7 +522,12 @@ export default function SitStandAssessment() {
             <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, { seatPressureHistory, footpadPressureHistory }, assessmentIdRef.current); navigate('/dashboard'); }}
+              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, {
+                seatPressureHistory: seatPressureFullRef.current,
+                footpadPressureHistory: footpadPressureFullRef.current,
+                seatTimestamps: seatTimeFullRef.current,
+                footpadTimestamps: footpadTimeFullRef.current,
+              }, assessmentIdRef.current); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
             </div>
