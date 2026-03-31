@@ -12,9 +12,10 @@ _CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_set
 _DEFAULT = {
     "api_key": "",
     "base_url": "",
-    "model": "kimi-k2.5",
+    "model": "kimi-k2-turbo-preview",
     "max_tokens": None,
     "timeout": 120,
+    "extra_body": {"enable_thinking": False},
 }
 
 
@@ -37,5 +38,22 @@ def get_llm_config():
         config["base_url"] = os.environ["MOONSHOT_BASE_URL"]
     if os.environ.get("MOONSHOT_MODEL"):
         config["model"] = os.environ["MOONSHOT_MODEL"]
+    if os.environ.get("MOONSHOT_EXTRA_BODY"):
+        # Accept JSON-like strings, e.g. {"enable_thinking": false}
+        try:
+            config["extra_body"] = json.loads(os.environ["MOONSHOT_EXTRA_BODY"])
+        except Exception:
+            config["extra_body"] = {}
+
+    # Backward compatibility: if legacy "thinking" is configured, map to extra_body.
+    if "thinking" in config and not config.get("extra_body"):
+        if isinstance(config["thinking"], dict):
+            # Try to infer disabled thinking from common legacy format.
+            thinking_type = str(config["thinking"].get("type", "")).lower()
+            config["extra_body"] = {"enable_thinking": thinking_type != "disabled"}
+        elif isinstance(config["thinking"], str):
+            config["extra_body"] = {"enable_thinking": config["thinking"].lower() != "disabled"}
+        else:
+            config["extra_body"] = {"enable_thinking": False}
 
     return config

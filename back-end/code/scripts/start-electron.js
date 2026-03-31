@@ -4,36 +4,63 @@ const fs = require('fs');
 const electron = require('electron');
 
 const frontendDir = path.join(__dirname, '..', '..', '..', 'front-end');
+const llmConfigDir = path.join(__dirname, '..', 'python', 'app', 'algorithms');
+const llmSettingsPath = path.join(llmConfigDir, 'llm_settings.json');
+const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings.example.json');
 
-// 检查前端依赖是否已安装
 function ensureFrontendDeps() {
   const nodeModules = path.join(frontendDir, 'node_modules');
-  if (!fs.existsSync(nodeModules)) {
-    console.log('[start] 前端依赖未安装，正在执行 npm install...');
-    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    try {
-      execSync(`${npmCmd} install`, {
-        cwd: frontendDir,
-        stdio: 'inherit',
-      });
-      console.log('[start] 前端依赖安装完成');
-    } catch (e) {
-      console.error('[start] 前端依赖安装失败:', e.message);
-      console.error('[start] 请手动在 front-end 目录执行 npm install');
-    }
-  } else {
-    console.log('[start] 前端依赖已就绪');
+  if (fs.existsSync(nodeModules)) {
+    console.log('[start] front-end dependencies already installed.');
+    return;
+  }
+
+  console.log('[start] Installing front-end dependencies...');
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  try {
+    execSync(`${npmCmd} install`, {
+      cwd: frontendDir,
+      stdio: 'inherit',
+    });
+    console.log('[start] front-end dependencies installed.');
+  } catch (e) {
+    console.error('[start] Failed to install front-end dependencies:', e.message);
+    console.error('[start] Please run `npm install` in front-end manually if needed.');
   }
 }
 
-// 确保前端依赖
+function ensureLlmSettingsFile() {
+  try {
+    if (fs.existsSync(llmSettingsPath)) {
+      return;
+    }
+
+    if (fs.existsSync(llmSettingsExamplePath)) {
+      fs.copyFileSync(llmSettingsExamplePath, llmSettingsPath);
+      console.log('[start] Created llm_settings.json from llm_settings.example.json.');
+      return;
+    }
+
+    const fallback = {
+      api_key: '',
+      base_url: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k2-turbo-preview',
+      extra_body: { enable_thinking: false },
+    };
+    fs.writeFileSync(llmSettingsPath, JSON.stringify(fallback, null, 2), 'utf8');
+    console.log('[start] Created llm_settings.json with fallback defaults.');
+  } catch (e) {
+    console.error('[start] Failed to ensure llm_settings.json:', e.message);
+  }
+}
+
+ensureLlmSettingsFile();
 ensureFrontendDeps();
 
-// 启动 Electron（Electron 主进程会自动启动 Vite dev server）
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-console.log('[start] 启动 Electron（将自动启动前端开发服务器）...');
+console.log('[start] Launching Electron app...');
 
 const child = spawn(electron, ['.'], {
   stdio: 'inherit',

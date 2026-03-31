@@ -11,6 +11,7 @@ const PYTHON_API_BASE_CANDIDATES = [
 
 let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
 const inFlightAiRequests = new Map();
+let runtimeLlmApiKey = '';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,6 +97,20 @@ async function parseErrorResponse(res) {
   return detail;
 }
 
+export function setRuntimeLlmApiKey(apiKey) {
+  runtimeLlmApiKey = (apiKey || '').trim();
+}
+
+function withOptionalLlmApiKey(body) {
+  if (!runtimeLlmApiKey) {
+    return body;
+  }
+  return {
+    ...body,
+    llm_api_key: runtimeLlmApiKey,
+  };
+}
+
 async function postAiReport(path, body) {
   const payload = JSON.stringify(body);
   const requestKey = `${path}::${payload}`;
@@ -142,6 +157,28 @@ export async function checkPythonBackend() {
     return data.status === 'ok';
   } catch {
     return false;
+  }
+}
+
+export async function fetchLlmConfig() {
+  try {
+    const res = await fetchPythonApi('/llm-config', () => ({
+      method: 'GET',
+      signal: AbortSignal.timeout(3000),
+    }));
+
+    if (!res.ok) {
+      return { success: false, error: await parseErrorResponse(res) };
+    }
+
+    const data = await res.json();
+    if (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'success')) {
+      return data;
+    }
+
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 }
 
@@ -225,39 +262,39 @@ export async function generateSitStandVideo(standCsv, sitCsv) {
 }
 
 export async function generateGripAIReport(patientInfo, gripData) {
-  return postAiReport('/generate-grip-ai-report', {
+  return postAiReport('/generate-grip-ai-report', withOptionalLlmApiKey({
     patient_info: patientInfo,
     grip_data: gripData,
-  });
+  }));
 }
 
 export async function generateSitStandAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-sitstand-ai-report', {
+  return postAiReport('/generate-sitstand-ai-report', withOptionalLlmApiKey({
     patient_info: patientInfo,
     assessment_data: assessmentData,
-  });
+  }));
 }
 
 export async function generateStandingAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-standing-ai-report', {
+  return postAiReport('/generate-standing-ai-report', withOptionalLlmApiKey({
     patient_info: patientInfo,
     assessment_data: assessmentData,
-  });
+  }));
 }
 
 export async function generateGaitAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-gait-ai-report', {
+  return postAiReport('/generate-gait-ai-report', withOptionalLlmApiKey({
     patient_info: patientInfo,
     assessment_data: assessmentData,
-  });
+  }));
 }
 
 export async function streamGripAIReport(patientInfo, gripData, onChunk) {
   try {
-    const payload = JSON.stringify({
+    const payload = JSON.stringify(withOptionalLlmApiKey({
       patient_info: patientInfo,
       grip_data: gripData,
-    });
+    }));
     const res = await fetchPythonApi('/stream-grip-ai-report', () => ({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
