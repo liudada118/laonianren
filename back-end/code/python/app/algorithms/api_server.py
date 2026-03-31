@@ -154,7 +154,6 @@ def analyze_grip(request: GripAnalyzeRequest):
 
 # 延迟导入，避免启动时导入失败导致整个服务挂掉
 _sitstand_report = None
-_sitstand_video = None
 
 def _get_sitstand_report():
     global _sitstand_report
@@ -164,12 +163,7 @@ def _get_sitstand_report():
     return _sitstand_report
 
 def _get_sitstand_video():
-    global _sitstand_video
-    if _sitstand_video is None:
-        from generate_ss_dashboard_v3 import generate_video_from_content
-        _sitstand_video = generate_video_from_content
-    return _sitstand_video
-
+    raise RuntimeError("Sit-stand dynamic video feature has been removed")
 
 class SitStandAnalyzeRequest(BaseModel):
     """起坐分析请求（小数据用 JSON）"""
@@ -224,6 +218,7 @@ async def generate_sitstand_video(
     stand_file: UploadFile = File(...),
     sit_file: UploadFile = File(...),
 ):
+    raise HTTPException(status_code=410, detail="Sit-stand dynamic video feature has been removed")
     """生成起坐动态视频，保存到 public 目录"""
     try:
         stand_content = (await stand_file.read()).decode("utf-8")

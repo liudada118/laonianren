@@ -242,25 +242,6 @@ export async function analyzeStandingCSV(csvContent, fps = 42, thresholdRatio = 
   return res.json();
 }
 
-export async function generateSitStandVideo(standCsv, sitCsv) {
-  const res = await fetchPythonApi('/generate-sitstand-video', () => {
-    const form = new FormData();
-    form.append('stand_file', new Blob([standCsv], { type: 'text/csv' }), 'stand.csv');
-    form.append('sit_file', new Blob([sitCsv], { type: 'text/csv' }), 'sit.csv');
-    return {
-      method: 'POST',
-      body: form,
-    };
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || res.statusText);
-  }
-
-  return res.json();
-}
-
 export async function generateGripAIReport(patientInfo, gripData) {
   return postAiReport('/generate-grip-ai-report', withOptionalLlmApiKey({
     patient_info: patientInfo,

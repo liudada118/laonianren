@@ -164,7 +164,8 @@ export default function SitStandAssessment() {
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
-  const [reportMode, setReportMode] = useState('static');
+  const reportMode = 'static';
+  const setReportMode = () => {};
   const [showComplete, setShowComplete] = useState(false);
   const [sitstandReportData, setSitstandReportData] = useState(
     viewReportMode ? (assessments.sitstand?.report?.reportData || null) : null
@@ -356,7 +357,7 @@ export default function SitStandAssessment() {
 
   const viewReport = () => {
     stopSimulation(); // 停止模拟，释放3D场景资源
-    setShowComplete(false); setPhase('report'); setReportMode('static');
+    setShowComplete(false); setPhase('report');
     completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, {
       seatPressureHistory: seatPressureFullRef.current,
       footpadPressureHistory: footpadPressureFullRef.current,
@@ -386,7 +387,7 @@ export default function SitStandAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+            <div className="hidden items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
               <button onClick={() => setReportMode('static')}
                 className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'static' ? 'zeiss-btn-primary' : ''}`}
                 style={reportMode !== 'static' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
@@ -409,21 +410,13 @@ export default function SitStandAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 overflow-auto">
-          {reportMode === 'dynamic' ? (
-            <div className="flex items-center justify-center h-full p-6">
-              <div className="zeiss-card p-6 max-w-4xl w-full">
-                <video src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
-              </div>
-            </div>
-          ) : (
-            <SitStandReport
-              patientInfo={patientInfo}
-              reportData={sitstandReportData}
-              onAiReportReady={(aiData) => {
-                completeAssessment('sitstand', { completed: true, reportData: { ...sitstandReportData, aiReport: aiData } }, null, assessmentIdRef.current);
-              }}
-            />
-          )}
+          <SitStandReport
+            patientInfo={patientInfo}
+            reportData={sitstandReportData}
+            onAiReportReady={(aiData) => {
+              completeAssessment('sitstand', { completed: true, reportData: { ...sitstandReportData, aiReport: aiData } }, null, assessmentIdRef.current);
+            }}
+          />
         </main>
       </div>
     );
