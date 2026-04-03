@@ -31,14 +31,14 @@ function EChart({ option, height = 280 }) {
 
 /* ─── 报告目录 ─── */
 const SECTIONS = [
-  { id: 'overview', label: '?????????' },
-  { id: 'arch-zones', label: '???????' },
-  { id: 'pressure', label: '??????' },
-  { id: 'cop-heatmap', label: 'COP ??????' },
-  { id: 'cop-velocity', label: 'COP ??????' },
-  { id: 'cop-params', label: 'COP ???' },
-  { id: 'annotation', label: '????' },
-  { id: 'summary', label: 'AI ????' },
+  { id: 'overview', label: '基本信息与足弓指标' },
+  { id: 'arch-zones', label: '足弓区域分布图' },
+  { id: 'pressure', label: '压力分布热力图' },
+  { id: 'cop-heatmap', label: 'COP 轨迹与热力图' },
+  { id: 'cop-velocity', label: 'COP 速度与加速度' },
+  { id: 'cop-params', label: 'COP 参数' },
+  { id: 'annotation', label: '医师注释' },
+  { id: 'summary', label: 'AI 报告' },
 ];
 
 const STANDING_SPACING_MM = 14;

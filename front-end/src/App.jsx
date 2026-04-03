@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AssessmentProvider } from './contexts/AssessmentContext';
 import { ToastProvider } from './components/ui/Toast';
+import DeviceAlertOverlay from './components/ui/DeviceAlertOverlay';
 
 // Pages
 import Login from './pages/Login';
@@ -25,6 +26,7 @@ function App() {
       <AssessmentProvider>
         <ToastProvider>
           <UpdateNotification />
+          <DeviceAlertOverlay />
           <Routes>
             <Route path="/" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
