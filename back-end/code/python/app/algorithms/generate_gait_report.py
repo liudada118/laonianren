@@ -3661,6 +3661,11 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
 
         support_phases_result = swap_left_right_dict(support_phases_result)
         cycle_phases_result = swap_left_right_dict(cycle_phases_result)
+        # 交换阶段名中的左右脚
+        for side in ("left", "right"):
+            d = cycle_phases_result.get(side, {})
+            if "左脚单支撑期" in d and "右脚单支撑期" in d:
+                d["左脚单支撑期"], d["右脚单支撑期"] = d["右脚单支撑期"], d["左脚单支撑期"]
         gait_avg_data = swap_left_right_dict(gait_avg_data)
         pressure_evo_data = swap_left_right_dict(pressure_evo_data)
 
