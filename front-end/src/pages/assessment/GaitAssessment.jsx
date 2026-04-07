@@ -137,6 +137,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
   const [aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const aiRequestStartedRef = useRef(false);
+  const onAiReportReadyRef = useRef(onAiReportReady);
+
+  useEffect(() => {
+    onAiReportReadyRef.current = onAiReportReady;
+  }, [onAiReportReady]);
 
   useEffect(() => {
     if (externalResult) {
@@ -220,6 +226,10 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const leftRegionCoords = realData?.regionCoords?.left || {};
   const rightRegionCoords = realData?.regionCoords?.right || {};
+  // Desired page order:
+  // left foot = outer -> inner
+  // right foot = inner -> outer
+  const innerOnRight = useMemo(() => ({ left: true, right: false }), []);
 
   const spLeft = realData?.supportPhases?.left || {};
   const spRight = realData?.supportPhases?.right || {};
@@ -332,12 +342,17 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const thStyle = 'px-3 py-2 text-left text-[11px] font-semibold';
   const tdStyle = 'px-3 py-2 text-[11px]';
+  const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
 
   useEffect(() => {
-    if (!realData || aiReport || externalResult?.aiReport) return;
+    // 当报告数据切换时，允许重新发起一次 AI 请求
+    aiRequestStartedRef.current = false;
+  }, [aiPayload, externalResult?.aiReport]);
 
-    const payload = buildGaitAiPayload(realData);
-    if (!payload) return;
+  useEffect(() => {
+    if (!aiPayload || aiReport || externalResult?.aiReport) return;
+    if (aiRequestStartedRef.current) return;
+    aiRequestStartedRef.current = true;
 
     let cancelled = false;
     setAiLoading(true);
@@ -346,14 +361,17 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     requestAssessmentAIReport(
       'gait',
       patientInfo || { name: '未知' },
-      payload,
+      aiPayload,
     ).then(res => {
-      if (cancelled) return;
       if (res.success) {
-        setAiReport(res.data);
-        if (onAiReportReady) onAiReportReady(res.data);
+        if (!cancelled) {
+          setAiReport(res.data);
+        }
+        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
       } else {
-        setAiError(res.error || 'AI 分析失败');
+        if (!cancelled) {
+          setAiError(res.error || 'AI 分析失败');
+        }
       }
     }).catch(err => {
       if (!cancelled) setAiError(err.message);
@@ -364,7 +382,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     return () => {
       cancelled = true;
     };
-  }, [realData, patientInfo, aiReport, onAiReportReady]);
+  }, [aiPayload, patientInfo, aiReport, externalResult?.aiReport]);
 
   // Hooks 必须在所有条件分支之前调用
   const gaitContentRef = React.useRef(null);
@@ -501,7 +519,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
             <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要</h4>
             <div>
               {gaitAverageData ? (
-                <GaitAverageChart gaitAvgData={gaitAverageData} />
+                <GaitAverageChart gaitAvgData={gaitAverageData} innerOnRight={innerOnRight} />
               ) : images.gaitAverage ? (
                 <img src={images.gaitAverage} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
               ) : (
@@ -577,7 +595,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-regions">
           <div className="zeiss-section-title">7. 分区点位图（压力分区 S1-S6）</div>
           <div className="zeiss-card p-4">
-            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} />
+            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} innerOnRight={innerOnRight} />
           </div>
         </section>
 
@@ -602,7 +620,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                 <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
               </tr><tr className="zeiss-table-header">
                 <th className={thStyle}></th><th className={thStyle}></th>
-                {['时长ms', 'COP速度', '最大面积', '最大负荷', '时长ms', 'COP速度', '最大面积', '最大负荷'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
+                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
               </tr></thead>
               <tbody>{supportPhases.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
@@ -633,7 +651,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                 <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
               </tr><tr className="zeiss-table-header">
                 <th className={thStyle}></th>
-                {['时长ms', 'COP速度', '最大面积', '最大负荷', '时长ms', 'COP速度', '最大面积', '最大负荷'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
+                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
               </tr></thead>
               <tbody>{cyclePhases.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
@@ -676,7 +694,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, updateAssessmentAiReport, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
@@ -955,6 +973,10 @@ export default function GaitAssessment() {
     completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
   };
 
+  const handleGaitAiReportReady = useCallback((aiData) => {
+    updateAssessmentAiReport('gait', aiData, assessmentIdRef.current);
+  }, [updateAssessmentAiReport]);
+
   // 清理
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -1005,9 +1027,7 @@ export default function GaitAssessment() {
             <GaitReportContent
               patientInfo={patientInfo}
               pythonResult={pythonResult}
-              onAiReportReady={(aiData) => {
-                completeAssessment('gait', { completed: true, reportData: { ...pythonResult, aiReport: aiData } }, { pythonResult: { ...pythonResult, aiReport: aiData } }, assessmentIdRef.current);
-              }}
+              onAiReportReady={handleGaitAiReportReady}
             />
           )}
         </main>

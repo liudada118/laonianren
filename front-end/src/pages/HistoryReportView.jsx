@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getRecord, updateAssessmentAiReport } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
@@ -21,10 +21,18 @@ export default function HistoryReportView() {
   const [searchParams] = useSearchParams();
   const recordId = searchParams.get('id');
   const assessmentType = searchParams.get('type');
+  const isPageMountedRef = useRef(true);
 
   // 从后端数据库获取记录
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    isPageMountedRef.current = true;
+    return () => {
+      isPageMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!recordId) {
@@ -65,25 +73,27 @@ export default function HistoryReportView() {
       const ok = updateAssessmentAiReport(record.id, assessmentType, aiData);
       if (!ok) return;
 
-      setRecord(prev => {
-        if (!prev?.assessments?.[assessmentType]) return prev;
-        return {
-          ...prev,
-          assessments: {
-            ...prev.assessments,
-            [assessmentType]: {
-              ...prev.assessments[assessmentType],
-              report: {
-                ...(prev.assessments[assessmentType].report || {}),
-                reportData: {
-                  ...(prev.assessments[assessmentType].report?.reportData || {}),
-                  aiReport: aiData,
+      if (isPageMountedRef.current) {
+        setRecord(prev => {
+          if (!prev?.assessments?.[assessmentType]) return prev;
+          return {
+            ...prev,
+            assessments: {
+              ...prev.assessments,
+              [assessmentType]: {
+                ...prev.assessments[assessmentType],
+                report: {
+                  ...(prev.assessments[assessmentType].report || {}),
+                  reportData: {
+                    ...(prev.assessments[assessmentType].report?.reportData || {}),
+                    aiReport: aiData,
+                  },
                 },
               },
             },
-          },
-        };
-      });
+          };
+        });
+      }
     } catch (e) {
       console.error('AI 报告补存失败:', e);
     }

@@ -184,6 +184,58 @@ export function AssessmentProvider({ children }) {
     });
   }, []);
 
+  const updateAssessmentAiReport = useCallback((type, aiReport, assessmentId = null) => {
+    setState(prev => {
+      const current = prev.assessments?.[type];
+      if (!current?.completed || !current?.report?.reportData) {
+        return prev;
+      }
+
+      // 防止旧请求回写覆盖新一次评估结果
+      if (
+        assessmentId &&
+        current.assessmentId &&
+        String(current.assessmentId) !== String(assessmentId)
+      ) {
+        return prev;
+      }
+
+      const nextReport = {
+        ...(current.report || {}),
+        reportData: {
+          ...(current.report?.reportData || {}),
+          aiReport,
+        },
+      };
+
+      const assessments = {
+        ...prev.assessments,
+        [type]: {
+          ...current,
+          report: nextReport,
+        },
+      };
+
+      if (prev.patientInfo) {
+        const assessmentsForSave = {};
+        for (const [key, val] of Object.entries(assessments)) {
+          assessmentsForSave[key] = {
+            completed: val.completed,
+            report: val.report,
+            assessmentId: val.assessmentId || null,
+          };
+        }
+        try {
+          saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave, prev.sessionId);
+        } catch (e) {
+          console.error('自动保存历史记录失败:', e);
+        }
+      }
+
+      return { ...prev, assessments };
+    });
+  }, []);
+
   const resetAssessment = useCallback((type) => {
     setState(prev => {
       const assessments = { ...prev.assessments };
@@ -213,6 +265,7 @@ export function AssessmentProvider({ children }) {
     logout,
     setPatientInfo,
     completeAssessment,
+    updateAssessmentAiReport,
     resetAssessment,
     startNewSession,
     // 设备连接相关

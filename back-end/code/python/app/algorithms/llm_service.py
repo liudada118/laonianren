@@ -2,7 +2,9 @@
 LLM service for assessment reports.
 """
 
+import asyncio
 import json
+import os
 
 from openai import OpenAI
 
@@ -55,7 +57,7 @@ def _get_client_and_config(llm_overrides: dict | None = None):
 
     api_key = _normalize_optional_text(config.get("api_key"))
     if not api_key or api_key == "sk-xxx":
-        raise ValueError("没有api-key，无法使用AI综合评估功能")
+        raise ValueError("未配置有效的 api_key，无法使用 AI 综合评估功能")
     config["api_key"] = api_key
 
     client = OpenAI(
@@ -68,15 +70,14 @@ def _get_client_and_config(llm_overrides: dict | None = None):
 
 def _build_messages(assessment_type: str, patient_info: dict, assessment_data: dict):
     if assessment_type not in ASSESSMENT_PROMPTS:
-        raise ValueError(f"不支持的 assessment_type: {assessment_type}")
+        raise ValueError(f"Unsupported assessment_type: {assessment_type}")
 
     system_prompt, prompt_builder = ASSESSMENT_PROMPTS[assessment_type]
     user_prompt = append_common_user_rules(prompt_builder(patient_info, assessment_data))
     messages = [
         {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
     ]
-
-    messages.append({"role": "user", "content": user_prompt})
     return messages
 
 
@@ -181,7 +182,8 @@ async def call_assessment_ai_report(
     messages = _build_messages(assessment_type, patient_info, assessment_data)
     request_kwargs = _build_request_kwargs(config=config, messages=messages, stream=False)
 
-    response = _create_completion_with_fallback(client, request_kwargs)
+    # OpenAI Python SDK here is sync; offload to thread to avoid blocking FastAPI event loop.
+    response = await asyncio.to_thread(_create_completion_with_fallback, client, request_kwargs)
     content = response.choices[0].message.content
     return _parse_json_response(content)
 

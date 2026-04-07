@@ -44,7 +44,7 @@ function renderHeatmap(ctx, data, vmax, x, y, w, h) {
   ctx.drawImage(off, x, y, w, h);
 }
 
-export default function GaitAverageChart({ gaitAvgData, className = '' }) {
+export default function GaitAverageChart({ gaitAvgData, className = '', innerOnRight = null }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
@@ -112,9 +112,12 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     sides.forEach((side, idx) => {
       const fx = PAD + idx * (FOOT_W + GAP);
       const fy = PAD + LABEL_H;
-      const hm = side.data.heatmap;
+      const hmRaw = side.data.heatmap;
+      const hm = hmRaw;
       const hmH = hm.length;
       const hmW = hm[0].length;
+      const rawHm = side.data.rawHeatmap || hmRaw;
+      const copTrails = side.data.copTrajectories || [];
 
       // 标签
       ctx.fillStyle = side.color;
@@ -147,19 +150,25 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
       ctx.roundRect(fx + 1, fy + 1, FOOT_W - 2, FOOT_H - 2, 3);
       ctx.clip();
 
-      renderHeatmap(ctx, hm, globalVmax, offX, offY, drawW, drawH);
+      // 水平镜像热力图，使其与COP轨迹的解剖方向一致
+      ctx.save();
+      ctx.translate(offX + drawW, offY);
+      ctx.scale(-1, 1);
+      renderHeatmap(ctx, hm, globalVmax, 0, 0, drawW, drawH);
+      ctx.restore();
 
       // COP 轨迹
       const pxPerCol = drawW / hmW;
       const pxPerRow = drawH / hmH;
-      (side.data.copTrajectories || []).forEach(trail => {
+      const mapColToPx = (col) => offX + (hmW - 1 - col) * pxPerCol;
+      copTrails.forEach(trail => {
         if (!trail || trail.length < 2) return;
 
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(255,255,255,0.8)';
         ctx.lineWidth = 1.5;
         for (let i = 0; i < trail.length; i++) {
-          const px = offX + trail[i][1] * pxPerCol;
+          const px = mapColToPx(trail[i][1]);
           const py = offY + trail[i][0] * pxPerRow;
           if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
         }
@@ -168,30 +177,51 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
         // 起点 cyan
         const s = trail[0];
         ctx.beginPath();
-        ctx.arc(offX + s[1] * pxPerCol, offY + s[0] * pxPerRow, 3, 0, Math.PI * 2);
+        ctx.arc(mapColToPx(s[1]), offY + s[0] * pxPerRow, 3, 0, Math.PI * 2);
         ctx.fillStyle = '#00FFFF';
         ctx.fill();
 
         // 终点 red
         const e = trail[trail.length - 1];
         ctx.beginPath();
-        ctx.arc(offX + e[1] * pxPerCol, offY + e[0] * pxPerRow, 3, 0, Math.PI * 2);
+        ctx.arc(mapColToPx(e[1]), offY + e[0] * pxPerRow, 3, 0, Math.PI * 2);
         ctx.fillStyle = '#FF4444';
         ctx.fill();
       });
 
       ctx.restore();
 
+      // 方向标记：按当前左右脚朝向标注
+      // 左脚：左=外侧，右=内侧；右脚：左=内侧，右=外侧
+      const isLeftFoot = idx === 0;
+      const sideKey = isLeftFoot ? 'left' : 'right';
+      const inferredInnerOnRight = typeof innerOnRight?.[sideKey] === 'boolean'
+        ? innerOnRight[sideKey]
+        : (isLeftFoot ? true : false);
+      const leftHint = inferredInnerOnRight ? '外侧' : '内侧';
+      const rightHint = inferredInnerOnRight ? '内侧' : '外侧';
+      const hintY = fy + FOOT_H - 6;
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textBaseline = 'bottom';
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillText(leftHint, fx + 8, hintY);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillText(rightHint, fx + FOOT_W - 8, hintY);
+
       // tooltip用rawHeatmap（原始牛顿值），渲染用heatmap（插值平滑版）
-      const rawHm = side.data.rawHeatmap || hm;
       footMeta.push({
         x: offX, y: offY, w: drawW, h: drawH,
         rawHeatmap: rawHm, rawH: rawHm.length, rawW: rawHm[0].length,
+        mirrored: false,
       });
     });
 
     metaRef.current = footMeta;
-  }, [gaitAvgData, containerWidth]);
+  }, [gaitAvgData, containerWidth, innerOnRight]);
 
   const handleMouseMove = useCallback((e) => {
     if (!metaRef.current || !canvasRef.current) return;
@@ -202,7 +232,8 @@ export default function GaitAverageChart({ gaitAvgData, className = '' }) {
     for (const m of metaRef.current) {
       if (mx >= m.x && mx < m.x + m.w && my >= m.y && my < m.y + m.h) {
         const r = Math.floor((my - m.y) / m.h * m.rawH);
-        const c = Math.floor((mx - m.x) / m.w * m.rawW);
+        const cRaw = Math.floor((mx - m.x) / m.w * m.rawW);
+        const c = m.mirrored ? (m.rawW - 1 - cRaw) : cRaw;
         if (r >= 0 && r < m.rawH && c >= 0 && c < m.rawW) {
           const v = m.rawHeatmap[r][c];
           if (v > 0) {

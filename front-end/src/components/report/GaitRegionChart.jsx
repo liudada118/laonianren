@@ -18,6 +18,7 @@ const REGION_COLORS_HOVER = [
 ];
 const REGION_NAMES = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 const SPACING_MM = 7;
+const MIRROR_FOOT_RENDER = true;
 
 /**
  * 将 {S1: [[x,y],...], S2: ...} 格式转为 [coords[], coords[], ...] 数组
@@ -67,7 +68,7 @@ function getTightBounds(allCoords) {
   return { minR, maxR, minC, maxC };
 }
 
-function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, tightBounds) {
+function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, tightBounds, footSide, innerOnRightByFoot) {
   const allCoords = sections.flat();
   if (allCoords.length === 0) {
     ctx.fillStyle = '#999';
@@ -104,7 +105,8 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, 
     ctx.fillStyle = isHovered ? REGION_COLORS_HOVER[i] : REGION_COLORS[i];
     for (const [r, c] of sections[i]) {
       if (r < bounds.minR || r > bounds.maxR || c < bounds.minC || c > bounds.maxC) continue;
-      const px = cx + (c - bounds.minC) * scale;
+      const colOffset = MIRROR_FOOT_RENDER ? (bounds.maxC - c) : (c - bounds.minC);
+      const px = cx + colOffset * scale;
       const py = cy + (r - bounds.minR) * scale;
       ctx.fillRect(px - cellSize / 2, py - cellSize / 2, cellSize, cellSize);
     }
@@ -138,9 +140,25 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, 
     ctx.fillStyle = REGION_COLORS[i].replace(/[\d.]+\)$/, '1)');
     ctx.fillText(`${REGION_NAMES[i]}(${sections[i].length})`, labelX, midY + 4);
   }
+
+  // 方向标记：按当前左右脚朝向标注
+  // 左脚：左=外侧，右=内侧；右脚：左=内侧，右=外侧
+  const inferredInnerOnRight = typeof innerOnRightByFoot?.[footSide] === 'boolean'
+    ? innerOnRightByFoot[footSide]
+    : (footSide === 'left');
+  const leftHint = inferredInnerOnRight ? '外侧' : '内侧';
+  const rightHint = inferredInnerOnRight ? '内侧' : '外侧';
+  const hintY = Math.min(canvasH - 6, cy + footH - 4);
+  ctx.font = 'bold 10px "Noto Sans SC", sans-serif';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#374151';
+  ctx.textAlign = 'left';
+  ctx.fillText(leftHint, cx + 2, hintY);
+  ctx.textAlign = 'right';
+  ctx.fillText(rightHint, cx + footW - 2, hintY);
 }
 
-export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords }) {
+export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords, innerOnRight = null }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [hoveredRegion, setHoveredRegion] = useState(null);
@@ -189,9 +207,9 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords })
     ctx.fillRect(0, 0, rect.width, canvasH);
 
     drawFoot(ctx, leftSections, 0, halfW, canvasH,
-      hoveredRegion?.side === 'left' ? hoveredRegion.index : null, '左足', leftBounds);
+      hoveredRegion?.side === 'left' ? hoveredRegion.index : null, '左足', leftBounds, 'left', innerOnRight);
     drawFoot(ctx, rightSections, halfW, halfW, canvasH,
-      hoveredRegion?.side === 'right' ? hoveredRegion.index : null, '右足', rightBounds);
+      hoveredRegion?.side === 'right' ? hoveredRegion.index : null, '右足', rightBounds, 'right', innerOnRight);
 
     // 中间分隔线
     ctx.strokeStyle = '#ddd';
@@ -201,7 +219,7 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords })
     ctx.moveTo(halfW, 10);
     ctx.lineTo(halfW, canvasH - 10);
     ctx.stroke();
-  }, [leftSections, rightSections, hoveredRegion]);
+  }, [leftSections, rightSections, hoveredRegion, innerOnRight]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -236,7 +254,8 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords })
     const cx = oX + padX + (drawW - footW) / 2;
     const cy = titleH + padY + (drawH - footH) / 2;
 
-    const dataC = (mx - cx) / scale + bounds.minC;
+    const localCol = (mx - cx) / scale;
+    const dataC = MIRROR_FOOT_RENDER ? (bounds.maxC - localCol) : (localCol + bounds.minC);
     const dataR = (my - cy) / scale + bounds.minR;
 
     let bestDist = Infinity, bestRegion = -1;
@@ -269,7 +288,13 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords })
         onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} />
       {tooltip && (
         <div className="absolute pointer-events-none z-10 bg-white/95 border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-sm"
-          style={{ left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth || 400) - 180), top: tooltip.y - 70 }}>
+          style={{
+            left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth || 400) - 180),
+            top: Math.min(
+              Math.max(tooltip.y + 16, 28),
+              (containerRef.current?.clientHeight || 320) - 90,
+            ),
+          }}>
           <div className="font-semibold" style={{ color: REGION_COLORS[tooltip.regionIndex].replace(/[\d.]+\)$/, '1)') }}>
             {tooltip.side === 'left' ? '左足' : '右足'} · {REGION_NAMES[tooltip.regionIndex]}
           </div>

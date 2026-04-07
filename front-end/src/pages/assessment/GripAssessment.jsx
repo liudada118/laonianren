@@ -189,7 +189,7 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 export default function GripAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, updateAssessmentAiReport, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   const videoRef = useRef(null);
@@ -215,6 +215,8 @@ export default function GripAssessment() {
   );
   const [csvExporting, setCsvExporting] = useState(false);
   const [showGripInstruction, setShowGripInstruction] = useState(!viewReportMode);
+  const [instructionHand, setInstructionHand] = useState(viewReportMode ? null : 'left');
+  const isPageMountedRef = useRef(true);
   const timerRef = useRef(null);
   const leftRawFramesRef = useRef([]);
   const rightRawFramesRef = useRef([]);
@@ -246,6 +248,13 @@ export default function GripAssessment() {
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [simLogs, setSimLogs] = useState([]);
   const simLogIdRef = useRef(0);
+
+  useEffect(() => {
+    isPageMountedRef.current = true;
+    return () => {
+      isPageMountedRef.current = false;
+    };
+  }, []);
 
   // 模拟日志辅助函数
   const addSimLog = useCallback((message, type = 'data') => {
@@ -658,6 +667,8 @@ export default function GripAssessment() {
       setShowLeftToast(true);
       setTimeout(() => setShowLeftToast(false), 3000);
       setPhase('right-idle');
+      setInstructionHand('right');
+      setShowGripInstruction(true);
       setTimer(0);
     } else {
       setPhase('processing');
@@ -756,6 +767,15 @@ export default function GripAssessment() {
     setCsvExporting(false);
   };
 
+  const handleGripAiReportReady = useCallback((aiData) => {
+    const baseReportData = gripReportData || assessments.grip?.report?.reportData || {};
+    const nextReportData = { ...baseReportData, aiReport: aiData };
+    if (isPageMountedRef.current) {
+      setGripReportData(nextReportData);
+    }
+    updateAssessmentAiReport('grip', aiData, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
+  }, [assessments.grip?.report?.reportData, gripReportData, updateAssessmentAiReport]);
+
   /* ─── 报告模式 ─── */
   if (phase === 'report') {
     if (reportMode === 'dynamic') {
@@ -835,11 +855,7 @@ export default function GripAssessment() {
         </header>
         <main className="flex-1 min-h-0 z-10">
           <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} reportData={gripReportData}
-            onAiReportReady={(aiData) => {
-              const nextReportData = { ...gripReportData, aiReport: aiData };
-              setGripReportData(nextReportData);
-              completeAssessment('grip', { completed: true, reportData: nextReportData }, null, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
-            }} />
+            onAiReportReady={handleGripAiReportReady} />
         </main>
       </div>
     );
@@ -937,7 +953,7 @@ export default function GripAssessment() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力评估指导</h3>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              请用<span className="font-bold" style={{ color: '#0066CC' }}>最大握力</span>握 <span className="font-bold text-xl" style={{ color: '#0066CC' }}>3</span> 次
+              请用<span className="font-bold" style={{ color: '#0066CC' }}>{instructionHand === 'right' ? '右手最大握力' : '左手最大握力'}</span>抓握 <span className="font-bold text-xl" style={{ color: '#0066CC' }}>3</span> 次
             </p>
             <button
               onClick={() => setShowGripInstruction(false)}

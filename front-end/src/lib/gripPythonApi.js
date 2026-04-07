@@ -4,9 +4,10 @@
  * proxy cannot reach the Python service.
  */
 
+const DIRECT_PYTHON_API_BASE = 'http://127.0.0.1:8765';
 const PYTHON_API_BASE_CANDIDATES = [
   '/pyapi',
-  'http://127.0.0.1:8765',
+  DIRECT_PYTHON_API_BASE,
 ];
 
 let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
@@ -19,6 +20,18 @@ function sleep(ms) {
 
 function getPythonApiBases() {
   return [...new Set([preferredPythonApiBase, ...PYTHON_API_BASE_CANDIDATES])];
+}
+
+async function isPythonAiServiceRunning() {
+  try {
+    const res = await fetch(`${DIRECT_PYTHON_API_BASE}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function fetchPythonApi(path, buildInit, options = {}) {
@@ -91,7 +104,13 @@ async function parseErrorResponse(res) {
       /ECONNREFUSED|proxy error|cannot connect/i.test(detail)
     )
   ) {
-    return 'Python AI service is not running on 127.0.0.1:8765';
+    const isRunning = await isPythonAiServiceRunning();
+    if (!isRunning) {
+      return 'Python AI service is not running on 127.0.0.1:8765';
+    }
+    return detail && detail !== `HTTP ${res.status}`
+      ? detail
+      : `Python AI service returned HTTP ${res.status}`;
   }
 
   return detail;
@@ -137,7 +156,11 @@ async function postAiReport(path, body) {
 
       return res.json();
     } catch (err) {
-      return { success: false, error: err.message };
+      const isRunning = await isPythonAiServiceRunning();
+      return {
+        success: false,
+        error: isRunning ? err.message : 'Python AI service is not running on 127.0.0.1:8765',
+      };
     } finally {
       inFlightAiRequests.delete(requestKey);
     }

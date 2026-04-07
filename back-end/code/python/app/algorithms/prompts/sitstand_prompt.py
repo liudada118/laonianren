@@ -103,10 +103,10 @@ def build_sitstand_user_prompt(patient_info: dict, sitstand_data: dict) -> str:
     "text": "优秀/正常/偏慢/异常",
     "standard": "依据的判断标准说明"
   }},
-  "overview": "整体测试概况与关键数字总结",
-  "performance_analysis": "总时长、周期效率、起坐完成能力分析",
-  "symmetry_analysis": "左右受力对称性与可能代偿分析",
-  "force_analysis": "力值、压力变化、爆发力或控制能力分析",
+  "overview": "整体测试概况与关键数字总结（90~120字）",
+  "performance_analysis": "总时长、周期效率、起坐完成能力分析，结合标准分层评价功能水平（90~120字）",
+  "symmetry_analysis": "左右受力对称性与可能代偿分析，推断是否存在偏侧依赖或保护性策略（90~120字）",
+  "force_analysis": "压力变化趋势、各周期峰值力波动、起立控制能力分析（90~120字）",
   "clinical_suggestion": "具体训练建议与随访建议",
   "disclaimer": "本报告由AI辅助生成，仅供参考，最终判断请结合临床专业意见"
 }}

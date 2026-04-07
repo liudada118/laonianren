@@ -31,14 +31,14 @@ function EChart({ option, height = 280 }) {
 
 /* ─── 报告目录 ─── */
 const SECTIONS = [
-  { id: 'overview', label: '?????????' },
-  { id: 'arch-zones', label: '???????' },
-  { id: 'pressure', label: '??????' },
-  { id: 'cop-heatmap', label: 'COP ??????' },
-  { id: 'cop-velocity', label: 'COP ??????' },
-  { id: 'cop-params', label: 'COP ???' },
-  { id: 'annotation', label: '????' },
-  { id: 'summary', label: 'AI ????' },
+  { id: 'overview', label: '基本信息与足弓指标' },
+  { id: 'arch-zones', label: '足弓区域分布图' },
+  { id: 'pressure', label: '区域压力分布' },
+  { id: 'cop-heatmap', label: 'COP 压力中心轨迹' },
+  { id: 'cop-velocity', label: 'COP 速度时间序列' },
+  { id: 'cop-params', label: 'COP 参数表' },
+  { id: 'annotation', label: '参数说明' },
+  { id: 'summary', label: 'AI综合评估' },
 ];
 
 const STANDING_SPACING_MM = 14;
@@ -50,6 +50,8 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   const contentRef = useRef(null);
+  const aiRequestStartedRef = useRef(false);
+  const onAiReportReadyRef = useRef(onAiReportReady);
   // 缓存报告生成时间，避免每次渲染时重新生成
   const reportTime = useMemo(() => new Date().toLocaleString('zh-CN'), []);
   const data = useMemo(() => {
@@ -411,13 +413,23 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
   }, [reportData]);
 
   useEffect(() => {
+    onAiReportReadyRef.current = onAiReportReady;
+  }, [onAiReportReady]);
+
+  useEffect(() => {
     if (reportData?.aiReport && !aiReport) {
       setAiReport(reportData.aiReport);
     }
   }, [reportData, aiReport]);
 
   useEffect(() => {
+    aiRequestStartedRef.current = false;
+  }, [data, reportData?.aiReport]);
+
+  useEffect(() => {
     if (!data || aiReport || reportData?.aiReport) return;
+    if (aiRequestStartedRef.current) return;
+    aiRequestStartedRef.current = true;
 
     let cancelled = false;
     setAiLoading(true);
@@ -430,20 +442,23 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
 
         const { generateStandingAIReport } = await import('../../lib/gripPythonApi');
         const res = await generateStandingAIReport(
-          patientInfo || { name: '鏈煡' },
+          patientInfo || { name: '未知' },
           payload,
         );
 
-        if (cancelled) return;
         if (res.success) {
-          setAiReport(res.data);
-          if (onAiReportReady) onAiReportReady(res.data);
+          if (!cancelled) {
+            setAiReport(res.data);
+          }
+          if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
         } else {
-          setAiError(res.error || 'AI 鍒嗘瀽澶辫触');
+          if (!cancelled) {
+            setAiError(res.error || 'AI 分析失败');
+          }
         }
       } catch (err) {
         if (!cancelled) {
-          setAiError(err?.message || 'AI 鍒嗘瀽澶辫触');
+          setAiError(err?.message || 'AI 分析失败');
         }
       } finally {
         if (!cancelled) setAiLoading(false);
@@ -452,15 +467,15 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
 
     runAiAnalysis();
 
-    if (false) requestAssessmentAIReport(
-      'standing',
+    if (false) { /*
+      // legacy fallback removed
       patientInfo || { name: '未知' },
       payload,
     ).then(res => {
       if (cancelled) return;
       if (res.success) {
         setAiReport(res.data);
-        if (onAiReportReady) onAiReportReady(res.data);
+        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
       } else {
         setAiError(res.error || 'AI 分析失败');
       }
@@ -469,11 +484,12 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
     }).finally(() => {
       if (!cancelled) setAiLoading(false);
     });
+    */ }
 
     return () => {
       cancelled = true;
     };
-  }, [data, patientInfo, aiReport, onAiReportReady, reportData?.aiReport]);
+  }, [data, patientInfo, aiReport, reportData?.aiReport]);
 
   const scrollToSection = (id) => {
     const el = document.getElementById(`standing-${id}`);

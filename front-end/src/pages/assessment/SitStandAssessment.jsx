@@ -159,7 +159,7 @@ function SceneControlPanel({ config, onConfigChange }) {
 export default function SitStandAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, institution, completeAssessment, updateAssessmentAiReport, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
@@ -370,6 +370,9 @@ export default function SitStandAssessment() {
     const s = Math.floor(t / 10);
     return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   };
+  const handleSitStandAiReportReady = useCallback((aiData) => {
+    updateAssessmentAiReport('sitstand', aiData, assessmentIdRef.current);
+  }, [updateAssessmentAiReport]);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
@@ -413,9 +416,7 @@ export default function SitStandAssessment() {
           <SitStandReport
             patientInfo={patientInfo}
             reportData={sitstandReportData}
-            onAiReportReady={(aiData) => {
-              completeAssessment('sitstand', { completed: true, reportData: { ...sitstandReportData, aiReport: aiData } }, null, assessmentIdRef.current);
-            }}
+            onAiReportReady={handleSitStandAiReportReady}
           />
         </main>
       </div>

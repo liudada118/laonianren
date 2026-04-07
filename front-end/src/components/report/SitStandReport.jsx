@@ -618,6 +618,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   const contentRef = useRef(null);
+  const aiRequestStartedRef = useRef(false);
+  const onAiReportReadyRef = useRef(onAiReportReady);
   // 缓存报告生成时间，避免每次渲染时重新生成时间导致持续增加
   const fallbackDate = useMemo(() => new Date().toLocaleString('zh-CN'), []);
 
@@ -633,6 +635,14 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
       setAiReport(propsReportData.aiReport);
     }
   }, [propsReportData, aiReport]);
+
+  useEffect(() => {
+    onAiReportReadyRef.current = onAiReportReady;
+  }, [onAiReportReady]);
+
+  useEffect(() => {
+    aiRequestStartedRef.current = false;
+  }, [reportData, reportData?.aiReport]);
 
   /* ─── 滚动监听自动高亮导航 ─── */
   useEffect(() => {
@@ -669,6 +679,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
   useEffect(() => {
     if (!reportData || aiReport || reportData.aiReport) return;
+    if (aiRequestStartedRef.current) return;
+    aiRequestStartedRef.current = true;
 
     const payload = buildSitStandAiPayload(reportData);
     if (!payload) return;
@@ -682,12 +694,15 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
       patientInfo || { name: reportData.username || '未知' },
       payload,
     ).then(res => {
-      if (cancelled) return;
       if (res.success) {
-        setAiReport(res.data);
-        if (onAiReportReady) onAiReportReady(res.data);
+        if (!cancelled) {
+          setAiReport(res.data);
+        }
+        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
       } else {
-        setAiError(res.error || 'AI 分析失败');
+        if (!cancelled) {
+          setAiError(res.error || 'AI 分析失败');
+        }
       }
     }).catch(err => {
       if (!cancelled) setAiError(err.message);
@@ -698,7 +713,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     return () => {
       cancelled = true;
     };
-  }, [reportData, patientInfo, aiReport, onAiReportReady]);
+  }, [reportData, patientInfo, aiReport]);
 
   const d = useMemo(() => {
     const base = reportData || {};
