@@ -7,9 +7,12 @@ const { autoUpdater } = require('electron-updater')
 const { ipcMain, BrowserWindow } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const http = require('http')
+const https = require('https')
 
 // 更新服务器地址
 const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluate'
+const UPDATE_INFO_FILE = process.platform === 'darwin' ? 'latest-mac.yml' : 'latest.yml'
 
 // 更新检查间隔（毫秒）- 默认每30分钟检查一次
 const CHECK_INTERVAL = 30 * 60 * 1000
@@ -17,6 +20,48 @@ const CHECK_INTERVAL = 30 * 60 * 1000
 let checkTimer = null
 let updaterEnabled = false
 let updaterIpcRegistered = false
+
+function buildUpdateInfoUrl() {
+  return `${UPDATE_SERVER_URL.replace(/\/$/, '')}/${UPDATE_INFO_FILE}`
+}
+
+function probeUrl(url, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const transport = url.startsWith('https:') ? https : http
+    const req = transport.request(url, { method: 'GET' }, (res) => {
+      res.resume()
+      resolve({
+        ok: res.statusCode >= 200 && res.statusCode < 300,
+        statusCode: res.statusCode
+      })
+    })
+
+    req.on('error', (err) => resolve({ ok: false, error: err.message }))
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      resolve({ ok: false, error: 'timeout' })
+    })
+    req.end()
+  })
+}
+
+function startAutomaticChecks(mainWindow) {
+  // 启动后延迟检查更新（给应用5秒启动时间）
+  setTimeout(() => {
+    console.log('[updater] 启动后首次检查更新')
+    autoUpdater.checkForUpdates().catch(err => {
+      console.error('[updater] 启动检查更新失败:', err.message)
+    })
+  }, 5000)
+
+  // 定时检查更新
+  checkTimer = setInterval(() => {
+    console.log('[updater] 定时检查更新')
+    autoUpdater.checkForUpdates().catch(err => {
+      console.error('[updater] 定时检查更新失败:', err.message)
+    })
+  }, CHECK_INTERVAL)
+}
 
 function registerUpdaterIpcHandlers() {
   if (updaterIpcRegistered) return
@@ -164,21 +209,15 @@ function initAutoUpdater(mainWindow) {
     })
   })
 
-  // 启动后延迟检查更新（给应用5秒启动时间）
-  setTimeout(() => {
-    console.log('[updater] 启动后首次检查更新')
-    autoUpdater.checkForUpdates().catch(err => {
-      console.error('[updater] 启动检查更新失败:', err.message)
-    })
-  }, 5000)
-
-  // 定时检查更新
-  checkTimer = setInterval(() => {
-    console.log('[updater] 定时检查更新')
-    autoUpdater.checkForUpdates().catch(err => {
-      console.error('[updater] 定时检查更新失败:', err.message)
-    })
-  }, CHECK_INTERVAL)
+  const updateInfoUrl = buildUpdateInfoUrl()
+  probeUrl(updateInfoUrl).then((result) => {
+    if (!result.ok) {
+      const reason = result.statusCode || result.error || 'unknown'
+      console.warn(`[updater] 更新源不可用，跳过自动检查: ${updateInfoUrl} (${reason})`)
+      return
+    }
+    startAutomaticChecks(mainWindow)
+  })
 }
 
 /**

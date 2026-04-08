@@ -30,20 +30,85 @@ const userDataDir =
   typeof process.env.userData === 'string' && process.env.userData.trim()
     ? process.env.userData.trim()
     : null
-const resourcesBase =
-  process.env.resourcesPath ||
-  process.resourcesPath ||
-  (appPath ? path.dirname(appPath) : __dirname)
-const storageBase = isPackaged ? (userDataDir || resourcesBase) : path.join(__dirname, '..')
+const bundledBase = path.join(__dirname, '..')
+const fallbackUserDataDir = (() => {
+  if (!isPackaged) return null
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', '肌少症评估系统')
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '肌少症评估系统')
+  }
+  return path.join(os.homedir(), '.肌少症评估系统')
+})()
+const storageBase = isPackaged ? (userDataDir || fallbackUserDataDir) : bundledBase
 
-let pdfDir = path.join(storageBase, 'OneStep')
-let uploadDir = path.join(storageBase, 'img')
-if (!fs.existsSync(pdfDir)) {
-  fs.mkdirSync(pdfDir, { recursive: true })
+function ensureDirSync(dir) {
+  fs.mkdirSync(dir, { recursive: true })
 }
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true })
+
+function ensureSeedFile(src, dest) {
+  try {
+    if (!src || !fs.existsSync(src) || fs.existsSync(dest)) return
+    ensureDirSync(path.dirname(dest))
+    fs.copyFileSync(src, dest)
+  } catch (err) {
+    console.warn('[storage] failed to seed file:', src, '->', dest, err.message)
+  }
 }
+
+ensureDirSync(storageBase)
+
+const bundledConfigPath = path.join(bundledBase, 'config.txt')
+const dbPath = path.join(storageBase, 'db')
+const csvPath = path.join(storageBase, 'data')
+const pdfPath = path.join(storageBase, 'OneStep')
+const imgPath = path.join(storageBase, 'img')
+const userConfigPath = path.join(storageBase, 'config.txt')
+const packagedResourcesDir = process.env.resourcesPath || process.resourcesPath || bundledBase
+
+function getPackagedAppRootDir() {
+  if (!isPackaged) return bundledBase
+
+  if (process.platform === 'darwin') {
+    const resourcesDir =
+      process.env.resourcesPath ||
+      process.resourcesPath ||
+      (appPath ? path.dirname(appPath) : __dirname)
+    const appBundleDir = path.resolve(resourcesDir, '..', '..')
+    return path.dirname(appBundleDir)
+  }
+
+  if (process.execPath) {
+    return path.dirname(process.execPath)
+  }
+
+  return storageBase
+}
+
+const packagedAppRootDir = getPackagedAppRootDir()
+const serialPathCandidates = (() => {
+  if (!isPackaged) {
+    return [path.join(bundledBase, 'serial.txt')]
+  }
+  return [
+    path.join(packagedAppRootDir, 'serial.txt'),
+    path.join(packagedResourcesDir, 'serial.txt'),
+    path.join(storageBase, 'serial.txt'),
+  ]
+})()
+
+ensureDirSync(dbPath)
+ensureDirSync(csvPath)
+ensureDirSync(pdfPath)
+ensureDirSync(imgPath)
+
+if (isPackaged) {
+  ensureSeedFile(bundledConfigPath, userConfigPath)
+}
+
+let pdfDir = pdfPath
+let uploadDir = imgPath
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -424,17 +489,74 @@ function parseSerialTypeMap(raw) {
   return map
 }
 
+function normalizeSerialIdentifier(value) {
+  if (!value) return ''
+  let text = String(value).trim().toUpperCase()
+  const taggedMatch = text.match(/UNIQUE\s+ID:\s*([A-Z0-9]+)/i)
+  if (taggedMatch && taggedMatch[1]) {
+    return taggedMatch[1].trim().toUpperCase()
+  }
+  text = text.replace(/^UNIQUE\s+ID:\s*/i, '')
+  text = text.split(/--|VERSIONS\s*:|COMPANY\s*:|\r|\n/i)[0] || text
+  const idMatch = text.match(/[A-Z0-9]+/)
+  return idMatch ? idMatch[0].trim().toUpperCase() : ''
+}
+
 function getTypeFromSerialCache(uniqueId) {
   if (!uniqueId) return null
   const cache = readSerialCache()
   const map = parseSerialTypeMap(cache && cache.key)
-  const target = String(uniqueId).trim().toUpperCase()
+  const target = normalizeSerialIdentifier(uniqueId)
+  if (!target) return null
   for (const key of Object.keys(map || {})) {
-    if (String(key).trim().toUpperCase() === target) {
+    if (normalizeSerialIdentifier(key) === target) {
       return map[key]
     }
   }
   return null
+}
+
+function syncMacInfoType(pathKey, typeValue, permissionValue) {
+  if (!pathKey) return
+  if (!macInfo[pathKey]) macInfo[pathKey] = {}
+  if (typeValue) macInfo[pathKey].type = typeValue
+  if (permissionValue !== undefined) macInfo[pathKey].premission = permissionValue
+}
+
+function pushMacInfoUpdate() {
+  try {
+    if (macInfo && Object.keys(macInfo).length) {
+      socketSendData(server, JSON.stringify({ macInfo }))
+    }
+  } catch {}
+}
+
+function reapplySerialTypeMappings() {
+  let changed = false
+  for (const pathKey of Object.keys(macInfo || {})) {
+    const info = macInfo[pathKey] || {}
+    const dataItem = dataMap[pathKey]
+    const uniqueId = info.uniqueId || info.mac
+    if (!uniqueId || !dataItem) continue
+
+    const mappedType = getTypeFromSerialCache(uniqueId)
+    if (!mappedType) continue
+
+    const normalizedType = String(mappedType).trim()
+    if (dataItem.type !== normalizedType || dataItem.premission !== true || info.type !== normalizedType) {
+      dataItem.type = normalizedType
+      dataItem.premission = true
+      syncMacInfoType(pathKey, normalizedType, true)
+      changed = true
+      console.log(`[serialCache] reapplied type ${normalizedType} for ${pathKey} (${uniqueId})`)
+    }
+  }
+
+  if (changed) {
+    pushMacInfoUpdate()
+  }
+
+  return changed
 }
 
 function normalizeActiveTypes(value) {
@@ -494,15 +616,30 @@ app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
 // serial.txt cache
-const serialPath = (() => {
-  if (isPackaged) {
-    const base = appPath ? path.dirname(appPath) : (process.resourcesPath || __dirname)
-    return path.join(base, 'serial.txt')
+function resolveSerialPath(preferExisting = true) {
+  if (preferExisting) {
+    for (const candidate of serialPathCandidates) {
+      try {
+        if (fs.existsSync(candidate)) return candidate
+      } catch {}
+    }
   }
-  return path.join(__dirname, '../serial.txt')
-})()
+  return serialPathCandidates[0]
+}
+
+function resolveWritableSerialPath() {
+  for (const candidate of serialPathCandidates) {
+    try {
+      ensureDirSync(path.dirname(candidate))
+      fs.accessSync(path.dirname(candidate), fs.constants.W_OK)
+      return candidate
+    } catch {}
+  }
+  return serialPathCandidates[0]
+}
 
 function readSerialCache() {
+  const serialPath = resolveSerialPath(true)
   try {
     if (!fs.existsSync(serialPath)) return null
     const raw = fs.readFileSync(serialPath, 'utf-8').trim()
@@ -518,6 +655,7 @@ function readSerialCache() {
 }
 
 function writeSerialCache(payload) {
+  const serialPath = resolveWritableSerialPath()
   const data = {
     key: payload.key || '',
     orgName: payload.orgName || '',
@@ -528,43 +666,14 @@ function writeSerialCache(payload) {
   return data
 }
 
-
-let dbPath = path.join(__dirname, '../db')
-let pdfPath = path.join(__dirname, "../OneStep");
-let imgPath = path.join(__dirname, '../img')
-
 console.log(isPackaged, appPath, 'app.isPackaged')
-
-if (isPackaged) {
-  if (os.platform() == 'darwin') {
-    // filePath = '../..' + '/db'
-    // filePath = path.join(app.getAppPath(), 'Resources/db',);
-    dbPath = path.join(__dirname, '../../db')
-    csvPath = path.join(__dirname, '../../data')
-    nameTxt = path.join(__dirname, '../../config.txt')
-    console.log(dbPath, path.join(appPath, 'Resources/db',))
-    // nameTxt = 
-    // csvPath = '../..' + '/data'
-    // nameTxt = '../..' + "/config.txt";
-  } else {
-
-    dbPath = 'resources' + '/db'
-    csvPath = 'resources' + '/data'
-    pdfPath = 'resources' + "/OneStep";
-    imgPath = 'resources' + '/img'
-    nameTxt = 'resources' + "/config.txt";
-
-    console.log(dbPath, path.join(appPath, 'Resources/db',))
-  }
-
-}
 
 const port = 19245
 
 function resolveConfigPath() {
   const candidates = [
-    path.join(dbPath, 'config.txt'),
-    path.join(__dirname, '../config.txt'),
+    userConfigPath,
+    bundledConfigPath,
     path.join(process.cwd(), 'config.txt'),
   ]
   for (const p of candidates) {
@@ -1219,7 +1328,8 @@ app.post('/serialCache', (req, res) => {
       return
     }
     const saved = writeSerialCache({ key, orgName, llmApiKey })
-    res.json(new HttpResult(0, saved, 'success'))
+    const reapplied = reapplySerialTypeMappings()
+    res.json(new HttpResult(0, { ...saved, reapplied }, 'success'))
   } catch (err) {
     res.json(new HttpResult(1, {}, 'save failed'))
   }
@@ -3605,11 +3715,12 @@ async function connectPort() {
           if (mappedType) {
             dataItem.type = String(mappedType).trim();
             dataItem.premission = true;
+            syncMacInfoType(path, dataItem.type, true);
             console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path}`);
+          } else {
+            console.log(`[TEST] No serial type match for ${path}: raw=${uniqueId}, normalized=${normalizeSerialIdentifier(uniqueId)}`);
           }
-          if (Object.keys(macInfo).length == ports.length) {
-            socketSendData(server, JSON.stringify({ macInfo }));
-          }
+          pushMacInfoUpdate()
         }
       } else {
         sendMacCommand(port, path, portBaudRate, parserItem)
@@ -3645,11 +3756,11 @@ async function connectPort() {
           const str = buffer.toString()
           if (str.includes('Unique ID')) {
 
-            const uniqueIdMatch = str.match(/Unique ID:\s*([^\s-]+)/);
-            const versionMatch = str.match(/Versions:\s*([^\s-]+)/);
+            const uniqueIdMatch = str.match(/Unique ID:\s*([A-Za-z0-9]+)/i);
+            const versionMatch = str.match(/Versions:\s*([A-Za-z0-9._-]+)/i);
 
-            const uniqueId = uniqueIdMatch ? uniqueIdMatch[1] : null;
-            const version = versionMatch ? versionMatch[1] : null;
+            const uniqueId = uniqueIdMatch ? uniqueIdMatch[1].trim() : null;
+            const version = versionMatch ? versionMatch[1].trim() : null;
 
             console.log("Unique ID:", uniqueId);  // 34463730155032138F
             console.log("Versions:", version);    // C40510
@@ -3672,14 +3783,17 @@ async function connectPort() {
             if (deviceCat === 'hand' || deviceCat === 'sit') {
               // 手套和起坐垫：获取到 MAC 即确认授权
               dataItem.premission = true
+              syncMacInfoType(path, dataItem.type, true)
             } else if (deviceCat === 'foot') {
               // 脚垫：通过 MAC 地址查映射表确定 foot1-4
               const mappedType = getTypeFromSerialCache(uniqueId)
               if (mappedType) {
                 dataItem.type = String(mappedType).trim()
                 dataItem.premission = true
+                syncMacInfoType(path, dataItem.type, true)
                 console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type}`)
               } else {
+                console.log(`[foot] no local serial match for ${path}: raw=${uniqueId}, normalized=${normalizeSerialIdentifier(uniqueId)}`)
                 // MAC 未在本地缓存中，尝试从服务器查询
                 try {
                   const response = await fetch(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
@@ -3690,23 +3804,22 @@ async function connectPort() {
                   if (result.data) {
                     dataItem.type = JSON.parse(result.data.typeInfo)[0]
                     dataItem.premission = true
+                    syncMacInfoType(path, dataItem.type, true)
                   } else {
                     dataItem.premission = false
+                    syncMacInfoType(path, dataItem.type, false)
                   }
                 } catch (err) {
                   console.log('[foot] 服务器查询失败:', err.message)
                   dataItem.premission = false
+                  syncMacInfoType(path, dataItem.type, false)
                 }
               }
             } else {
               dataItem.premission = true
+              syncMacInfoType(path, dataItem.type, true)
             }
-            if (Object.keys(macInfo).length == ports.length) {
-              // console.log(macInfo)
-              // return macInfo
-
-              socketSendData(server, JSON.stringify({ macInfo }))
-            }
+            pushMacInfoUpdate()
           }
         }
         // console.log(pointArr.length)

@@ -1,0 +1,16 @@
+# Electron 运行时使用的 Python 依赖集合。
+# 这里合并了 app 与 algorithms 下实际运行需要的依赖，避免两个 requirements.txt
+# 中对 numpy/scipy/matplotlib 的冲突版本在同一个 venv 内互相覆盖。
+fastapi==0.115.0
+uvicorn==0.30.6
+numpy==2.2.6
+opencv-python==4.12.0.88
+scipy==1.16.1
+matplotlib==3.10.5
+pandas==2.3.1
+reportlab>=4.0.0,<5
+scikit-image==0.25.0
+seaborn==0.13.2
+openai>=1.0.0
+python-multipart>=0.0.9
+Pillow>=10.0.0

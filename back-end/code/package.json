@@ -10,6 +10,7 @@
     "copy:renderer": "node scripts/copy-renderer.js",
     "build": "pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -w",
     "build:mac": "pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -m",
+    "build:mac:local": "pnpm run build:renderer && pnpm run copy:renderer && CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder -m --config electron-builder.local.js && node scripts/copy-local-runtime-files.js",
     "build:mac:release": "node scripts/check-mac-release-env.js && pnpm run build:renderer && pnpm run copy:renderer && pnpm exec electron-builder -m -c.mac.notarize.teamId=$APPLE_TEAM_ID"
   },
   "author": "",
@@ -72,7 +73,22 @@
           ]
         }
       ]
-    }
+    },
+    "extraResources": [
+      {
+        "from": "python/app",
+        "to": "python/app",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/.DS_Store"
+        ]
+      },
+      {
+        "from": "python/requirements-electron.txt",
+        "to": "python/requirements-electron.txt"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^31.3.0",

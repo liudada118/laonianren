@@ -157,3 +157,4 @@ package-lock.json
 # macOS
 .DS_Store
 back-end/code/serial.txt
+/.pnpm-store

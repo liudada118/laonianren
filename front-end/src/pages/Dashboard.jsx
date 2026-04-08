@@ -188,6 +188,7 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
           {macEntries.map(([port, info]) => (
             <div key={port} className="flex items-center gap-1 truncate">
               <span className="font-mono">{info.uniqueId ? info.uniqueId.slice(-8) : 'N/A'}</span>
+              <span style={{ color: 'var(--zeiss-blue)' }}>{info.type || '未分配'}</span>
               <span style={{ color: 'var(--text-muted)' }}>{info.version || ''}</span>
             </div>
           ))}

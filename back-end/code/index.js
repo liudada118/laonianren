@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
-const { fork, spawn } = require('child_process')
+const { fork, spawn, spawnSync } = require('child_process')
 const { getHardwareFingerprint } = require('./util/getWinConfig')
 const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
@@ -485,6 +485,45 @@ function aiApiPy() {
     : path.join(process.resourcesPath, 'python', 'app', 'algorithms', 'api_server.py')
 }
 
+function aiRequirementsPath() {
+  const isDev = !app.isPackaged
+  return isDev
+    ? path.join(__dirname, 'python', 'requirements-electron.txt')
+    : path.join(process.resourcesPath, 'python', 'requirements-electron.txt')
+}
+
+function checkPythonAiDeps(pythonBin) {
+  if (!pythonBin) {
+    return { ok: false, reason: 'Python runtime not found' }
+  }
+
+  const probeCode = [
+    'import fastapi',
+    'import uvicorn',
+    'import numpy',
+    'import pydantic',
+    'import matplotlib',
+    'import pandas',
+  ].join('; ')
+
+  try {
+    const result = spawnSync(pythonBin, ['-c', probeCode], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      encoding: 'utf8',
+    })
+
+    if (result.status === 0) {
+      return { ok: true }
+    }
+
+    const detail = (result.stderr || result.stdout || '').trim() || `exit ${result.status}`
+    return { ok: false, reason: detail }
+  } catch (err) {
+    return { ok: false, reason: err.message }
+  }
+}
+
 async function startPythonAiChild() {
   if (await checkPythonAiOnce(1000)) {
     console.log(`[pyai] Python AI service already running on port ${pythonAiPort}`)
@@ -504,6 +543,15 @@ async function startPythonAiChild() {
   }
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`AI api server not found: ${scriptPath}`)
+  }
+
+  const depsCheck = checkPythonAiDeps(pythonBin)
+  if (!depsCheck.ok) {
+    const requirementsPath = aiRequirementsPath()
+    const installHint = fs.existsSync(requirementsPath)
+      ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
+      : 'Install the Python AI dependencies before starting the packaged app'
+    throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
   }
 
   console.log(`[pyai] starting AI service with ${pythonBin}`)
@@ -644,7 +692,7 @@ app.whenReady().then(async () => {
   try {
     await startPythonAiChild()
   } catch (err) {
-    console.error('[pyai] failed to start:', err.message)
+    console.warn('[pyai] AI service unavailable, continuing without AI report generation:', err.message)
   }
   // 开启python线程
   // startWorker(); // [已迁移到JS算法] Python子进程不再需要
@@ -748,4 +796,3 @@ app.on('will-quit', () => {
     pythonAiChild = null
   }
 })
-
