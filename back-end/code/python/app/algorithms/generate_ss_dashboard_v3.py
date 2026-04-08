@@ -16,7 +16,9 @@ from scipy.spatial.distance import cdist
 # 【配置区】
 # =================================================================
 # 请根据实际环境修改 ffmpeg 路径
-plt.rcParams['animation.ffmpeg_path'] = r"D:\ProgramData\Anaconda3\envs\cop_env\Library\bin\ffmpeg.exe"
+ffmpeg_path = os.environ.get('FFMPEG_PATH', '').strip()
+if ffmpeg_path:
+    plt.rcParams['animation.ffmpeg_path'] = ffmpeg_path
 plt.rcParams['font.sans-serif'] = ['SimSun', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
 

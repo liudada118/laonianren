@@ -137,6 +137,12 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
   const [aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const aiRequestStartedRef = useRef(false);
+  const onAiReportReadyRef = useRef(onAiReportReady);
+
+  useEffect(() => {
+    onAiReportReadyRef.current = onAiReportReady;
+  }, [onAiReportReady]);
 
   useEffect(() => {
     if (externalResult) {
@@ -220,6 +226,10 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const leftRegionCoords = realData?.regionCoords?.left || {};
   const rightRegionCoords = realData?.regionCoords?.right || {};
+  // Desired page order:
+  // left foot = outer -> inner
+  // right foot = inner -> outer
+  const innerOnRight = useMemo(() => ({ left: true, right: false }), []);
 
   const spLeft = realData?.supportPhases?.left || {};
   const spRight = realData?.supportPhases?.right || {};
@@ -332,12 +342,17 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const thStyle = 'px-3 py-2 text-left text-[11px] font-semibold';
   const tdStyle = 'px-3 py-2 text-[11px]';
+  const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
 
   useEffect(() => {
-    if (!realData || aiReport || externalResult?.aiReport) return;
+    // 当报告数据切换时，允许重新发起一次 AI 请求
+    aiRequestStartedRef.current = false;
+  }, [aiPayload, externalResult?.aiReport]);
 
-    const payload = buildGaitAiPayload(realData);
-    if (!payload) return;
+  useEffect(() => {
+    if (!aiPayload || aiReport || externalResult?.aiReport) return;
+    if (aiRequestStartedRef.current) return;
+    aiRequestStartedRef.current = true;
 
     let cancelled = false;
     setAiLoading(true);
@@ -346,14 +361,17 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     requestAssessmentAIReport(
       'gait',
       patientInfo || { name: '未知' },
-      payload,
+      aiPayload,
     ).then(res => {
-      if (cancelled) return;
       if (res.success) {
-        setAiReport(res.data);
-        if (onAiReportReady) onAiReportReady(res.data);
+        if (!cancelled) {
+          setAiReport(res.data);
+        }
+        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
       } else {
-        setAiError(res.error || 'AI 分析失败');
+        if (!cancelled) {
+          setAiError(res.error || 'AI 分析失败');
+        }
       }
     }).catch(err => {
       if (!cancelled) setAiError(err.message);
@@ -364,7 +382,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     return () => {
       cancelled = true;
     };
-  }, [realData, patientInfo, aiReport, onAiReportReady]);
+  }, [aiPayload, patientInfo, aiReport, externalResult?.aiReport]);
 
   // Hooks 必须在所有条件分支之前调用
   const gaitContentRef = React.useRef(null);
@@ -501,7 +519,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
             <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要</h4>
             <div>
               {gaitAverageData ? (
-                <GaitAverageChart gaitAvgData={gaitAverageData} />
+                <GaitAverageChart gaitAvgData={gaitAverageData} innerOnRight={innerOnRight} />
               ) : images.gaitAverage ? (
                 <img src={images.gaitAverage} alt="Gait Average Summary" className="max-w-full" style={{ maxHeight: '500px', imageRendering: 'auto' }} />
               ) : (
@@ -577,7 +595,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-regions">
           <div className="zeiss-section-title">7. 分区点位图（压力分区 S1-S6）</div>
           <div className="zeiss-card p-4">
-            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} />
+            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} innerOnRight={innerOnRight} />
           </div>
         </section>
 
@@ -602,7 +620,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                 <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
               </tr><tr className="zeiss-table-header">
                 <th className={thStyle}></th><th className={thStyle}></th>
-                {['时长ms', 'COP速度', '最大面积', '最大负荷', '时长ms', 'COP速度', '最大面积', '最大负荷'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
+                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
               </tr></thead>
               <tbody>{supportPhases.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
@@ -633,7 +651,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                 <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
               </tr><tr className="zeiss-table-header">
                 <th className={thStyle}></th>
-                {['时长ms', 'COP速度', '最大面积', '最大负荷', '时长ms', 'COP速度', '最大面积', '最大负荷'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
+                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
               </tr></thead>
               <tbody>{cyclePhases.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
@@ -676,7 +694,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, updateAssessmentAiReport, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
@@ -753,6 +771,13 @@ export default function GaitAssessment() {
     cadence: '—', stride: '—', speed: '—', symmetry: '—',
   });
 
+  /* 步态实时检测器 */
+  const stepDetectorRef = useRef({
+    padWasActive: [false, false, false, false],
+    stepEvents: [],    // { time, padIdx, peak, positionCm }
+    lastStepTime: 0,
+  });
+
   /* 噪音过滤 */
   const denoiseMatrix = useCallback((matrix, threshold = 10, minRegionSize = 15) => {
     const rows = matrix.length;
@@ -827,13 +852,100 @@ export default function GaitAssessment() {
       activePoints.push(active);
     });
 
-    setSensorStats(prev => {
-      const newHistory = [...prev.history, totals].slice(-60);
-      return {
-        totals, maxVals, activePoints, history: newHistory,
-        cadence: '110', stride: '65.5', speed: '1.10', symmetry: '0.95',
-      };
+    // --- 步态事件检测 ---
+    const det = stepDetectorRef.current;
+    const now = Date.now();
+    const PAD_ACTIVATE = 500;
+    const PAD_DEACTIVATE = 200;
+    const MIN_INTERVAL = 250; // ms，两步最小间隔
+
+    SENSOR_KEYS.forEach((_, idx) => {
+      const pressure = totals[idx];
+      const wasActive = det.padWasActive[idx];
+      const isActive = pressure > (wasActive ? PAD_DEACTIVATE : PAD_ACTIVATE);
+
+      if (isActive && !wasActive && now - det.lastStepTime > MIN_INTERVAL) {
+        // 计算COP行位置（行走方向）和列位置（横向，区分左右脚）
+        const matrix = data[SENSOR_KEYS[idx]];
+        let copRow = 32, copCol = 32;
+        if (matrix && matrix.length > 0) {
+          let sumW = 0, sumR = 0, sumC = 0;
+          for (let r = 0; r < matrix.length; r++) {
+            for (let c = 0; c < matrix[r].length; c++) {
+              const v = matrix[r][c];
+              if (v > 5) { sumW += v; sumR += r * v; sumC += c * v; }
+            }
+          }
+          if (sumW > 0) { copRow = sumR / sumW; copCol = sumC / sumW; }
+        }
+        // 后端拼接: hstack([pad4,pad3,pad2,pad1]) + fliplr + rot90
+        // pad4→rows 0-63, pad3→64-127, pad2→128-191, pad1→192-255
+        // sensor idx 0=pad1, 1=pad2, 2=pad3, 3=pad4
+        const absoluteRow = (3 - idx) * 64 + (63 - copRow);
+        const positionCm = absoluteRow * 1.4;
+        // copCol < 32 → 步道一侧, copCol >= 32 → 另一侧（用于区分左右脚）
+        det.stepEvents.push({ time: now, padIdx: idx, peak: pressure, positionCm, copCol });
+        det.lastStepTime = now;
+        if (det.stepEvents.length > 30) det.stepEvents.shift();
+      }
+
+      // 更新当前步的峰值压力
+      if (isActive && det.stepEvents.length > 0) {
+        const last = det.stepEvents[det.stepEvents.length - 1];
+        if (last.padIdx === idx) last.peak = Math.max(last.peak, pressure);
+      }
+
+      det.padWasActive[idx] = isActive;
     });
+
+    // --- 计算综合指标 ---
+    const steps = det.stepEvents;
+    let cadence = '—', stride = '—', speed = '—', symmetry = '—';
+
+    // 步频：最近若干步的频率 → steps/min
+    if (steps.length >= 3) {
+      const recent = steps.slice(-8);
+      const elapsed = recent[recent.length - 1].time - recent[0].time;
+      if (elapsed > 0) {
+        cadence = String(Math.round(((recent.length - 1) / elapsed) * 60000));
+      }
+    }
+
+    // 步幅：只取右脚（copCol >= 32 的一侧），相邻右脚步的位置差
+    // 右脚→右脚 = 一个完整步态周期的步幅
+    const rightSteps = steps.filter(s => s.copCol >= 32);
+    if (rightSteps.length >= 2) {
+      const recent = rightSteps.slice(-6);
+      const dists = [];
+      for (let i = 1; i < recent.length; i++) {
+        const d = Math.abs(recent[i].positionCm - recent[i - 1].positionCm);
+        if (d > 20) dists.push(d); // 忽略 <20cm 的非步态移动
+      }
+      if (dists.length > 0) {
+        stride = (dists.reduce((a, b) => a + b, 0) / dists.length).toFixed(1);
+      }
+    }
+
+    // 速度：步幅(m) × 步频(steps/min) / 60
+    if (cadence !== '—' && stride !== '—') {
+      speed = ((parseFloat(stride) / 100) * (parseInt(cadence, 10) / 60)).toFixed(2);
+    }
+
+    // 对称性：左右脚峰值压力比
+    const leftSteps = steps.filter(s => s.copCol < 32);
+    if (rightSteps.length >= 2 && leftSteps.length >= 2) {
+      const avgRight = rightSteps.slice(-4).reduce((a, s) => a + s.peak, 0) / Math.min(rightSteps.length, 4);
+      const avgLeft = leftSteps.slice(-4).reduce((a, s) => a + s.peak, 0) / Math.min(leftSteps.length, 4);
+      if (avgRight > 0 && avgLeft > 0) {
+        symmetry = (Math.min(avgRight, avgLeft) / Math.max(avgRight, avgLeft)).toFixed(2);
+      }
+    }
+
+    setSensorStats(prev => ({
+      totals, maxVals, activePoints,
+      history: [...prev.history, totals].slice(-60),
+      cadence, stride, speed, symmetry,
+    }));
   }, []);
 
   // ─── 挂载时激活步道模式，使采集前就能显示可视化 ───
@@ -903,6 +1015,8 @@ export default function GaitAssessment() {
     if (!isGlobalConnected) return;
     setPhase('recording'); setTimer(0);
     setAnalysisError('');
+    // 重置步态检测器
+    stepDetectorRef.current = { padWasActive: [false, false, false, false], stepEvents: [], lastStepTime: 0 };
 
     try {
       await backendBridge.setActiveMode(5); // 5=脚垫模式
@@ -955,6 +1069,10 @@ export default function GaitAssessment() {
     completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
   };
 
+  const handleGaitAiReportReady = useCallback((aiData) => {
+    updateAssessmentAiReport('gait', aiData, assessmentIdRef.current);
+  }, [updateAssessmentAiReport]);
+
   // 清理
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -1005,9 +1123,7 @@ export default function GaitAssessment() {
             <GaitReportContent
               patientInfo={patientInfo}
               pythonResult={pythonResult}
-              onAiReportReady={(aiData) => {
-                completeAssessment('gait', { completed: true, reportData: { ...pythonResult, aiReport: aiData } }, { pythonResult: { ...pythonResult, aiReport: aiData } }, assessmentIdRef.current);
-              }}
+              onAiReportReady={handleGaitAiReportReady}
             />
           )}
         </main>

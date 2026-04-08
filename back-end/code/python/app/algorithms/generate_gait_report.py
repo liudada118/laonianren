@@ -1228,22 +1228,19 @@ def divide_y_regions(section_coords, foot_side="Left"):
     # section_coords: X 轴初步划分区域, foot_side: 左右脚标识
     # 返回: 细分后的 S1, S2, S3, S4, S5, S6 六个功能分区坐标
 
-    section1_coords = section_coords[0]
-    section2_coords = section_coords[1]
-    section3_coords = section_coords[2]
-    section4_coords = section_coords[3]
+    # Use a detached copy so subsequent mutations do not accidentally
+    # reuse stale references from the original list objects.
+    section_coords = [list(coords) if coords else [] for coords in section_coords]
 
     def get_y_range(coords):
         if not coords: return (0, 0)
         y_values = [coord[1] for coord in coords]
         return (min(y_values), max(y_values))
     
-    if foot_side == "Right":
-        all_y = [coord[1] for section in section_coords for coord in section]
-        if all_y:
-            y_min, y_max = min(all_y), max(all_y)
-            for i in range(len(section_coords)):
-                section_coords[i] = [(x, y_max - (y - y_min)) for (x, y) in section_coords[i]]
+    section1_coords = section_coords[0]
+    section2_coords = section_coords[1]
+    section3_coords = section_coords[2]
+    section4_coords = section_coords[3]
 
     s1_coords = section1_coords
     section2_y_min, section2_y_max = get_y_range(section2_coords)
@@ -1822,10 +1819,12 @@ def build_footprint_heatmap_data(left_regions, right_regions, total_matrix, left
             heel_col_m = (W - 1 - float(heel[0]))
             fore_col_m = (W - 1 - float(fore[0]))
             fpa_lines.append({
+                'frameIndex': int(idx),
                 'heel': [round((heel_col_m - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
                 'fore': [round((fore_col_m - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
                 'angle': round(float(angle), 1),
-                'isRight': False,
+                'sourceIsRight': False,
+                'footCenterColMirrored': round((heel_col_m + fore_col_m) / 2.0, 2),
             })
     for idx in right_peaks:
         if idx >= len(total_matrix): continue
@@ -1835,11 +1834,82 @@ def build_footprint_heatmap_data(left_regions, right_regions, total_matrix, left
             heel_col_m = (W - 1 - float(heel[0]))
             fore_col_m = (W - 1 - float(fore[0]))
             fpa_lines.append({
+                'frameIndex': int(idx),
                 'heel': [round((heel_col_m - crop_c) * UPSCALE, 1), round((float(heel[1]) - crop_r) * UPSCALE, 1)],
                 'fore': [round((fore_col_m - crop_c) * UPSCALE, 1), round((float(fore[1]) - crop_r) * UPSCALE, 1)],
                 'angle': round(float(angle), 1),
-                'isRight': True,
+                'sourceIsRight': True,
+                'footCenterColMirrored': round((heel_col_m + fore_col_m) / 2.0, 2),
             })
+
+    # sort by frame index to keep real step order
+    fpa_lines.sort(key=lambda item: item.get('frameIndex', 0))
+
+    # merge near-duplicate peaks for the same foot
+    deduped = []
+    SAME_FOOT_MIN_GAP = 6
+    for item in fpa_lines:
+        if not deduped:
+            deduped.append(item)
+            continue
+        prev = deduped[-1]
+        if item.get('sourceIsRight') == prev.get('sourceIsRight') and abs(item.get('frameIndex', 0) - prev.get('frameIndex', 0)) <= SAME_FOOT_MIN_GAP:
+            if abs(float(item.get('angle', 0))) > abs(float(prev.get('angle', 0))):
+                deduped[-1] = item
+            continue
+        deduped.append(item)
+    fpa_lines = deduped
+
+    # detect initial static standing segment:
+    # - 初始平行站立常出现左右脚近同步峰，不应计入“第1步”
+    # - 仅从首次稳定交替步态开始编号
+    STEP_SYNC_GAP = 8
+    STEP_MIN_WALK_GAP = 5
+    baseline_indexes = set()
+    walk_start_idx = None
+
+    for i in range(max(0, len(fpa_lines) - 2)):
+        a, b, c = fpa_lines[i], fpa_lines[i + 1], fpa_lines[i + 2]
+        g1 = abs(a.get('frameIndex', 0) - b.get('frameIndex', 0))
+        g2 = abs(b.get('frameIndex', 0) - c.get('frameIndex', 0))
+        if (
+            a.get('sourceIsRight') != b.get('sourceIsRight')
+            and b.get('sourceIsRight') != c.get('sourceIsRight')
+            and a.get('sourceIsRight') == c.get('sourceIsRight')
+            and g1 >= STEP_MIN_WALK_GAP
+            and g2 >= STEP_MIN_WALK_GAP
+        ):
+            walk_start_idx = i
+            break
+
+    if walk_start_idx is not None and walk_start_idx > 0:
+        baseline_indexes.update(range(walk_start_idx))
+
+    if len(fpa_lines) >= 2:
+        first, second = fpa_lines[0], fpa_lines[1]
+        if first.get('sourceIsRight') != second.get('sourceIsRight') and abs(first.get('frameIndex', 0) - second.get('frameIndex', 0)) <= STEP_SYNC_GAP:
+            baseline_indexes.update([0, 1])
+
+    # attach step labels
+    center_l_m = (W - 1 - float(center_l))
+    center_r_m = (W - 1 - float(center_r))
+    mirrored_mid_col = (center_l_m + center_r_m) / 2.0
+    step_counter = 0
+    for i, item in enumerate(fpa_lines):
+        # 在最终“镜像后显示坐标系”里判定左右脚，避免标签与图面左右相反
+        is_right_visual = float(item.get('footCenterColMirrored', mirrored_mid_col)) > mirrored_mid_col
+        item['isRight'] = bool(is_right_visual)
+        side_text = '右脚' if item.get('isRight') else '左脚'
+        if i in baseline_indexes:
+            item['isBaseline'] = True
+            item['stepIndex'] = None
+            item['stepLabel'] = f"起始{side_text}"
+        else:
+            item['isBaseline'] = False
+            step_counter += 1
+            item['stepIndex'] = step_counter
+            item['stepLabel'] = f"第{step_counter}步{side_text}"
+        item['angleLabel'] = f"足偏角：{float(item.get('angle', 0)):.1f}°"
 
     return {
         'heatmap': [[round(float(v), 1) for v in row] for row in smooth],
@@ -3294,23 +3364,17 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     right_on = lr_on_off["right"]["foot_on"]
     right_off = lr_on_off["right"]["toe_off"]
 
-    # 8. 足偏角 — 使用raw数据确保与足印热力图脚印数量一致
-    # raw_lx 检测的是物理右脚, raw_rx 检测的是物理左脚（标签互换）
-    # 角度值本身正确，只需交换左右归属
-    fpa_raw_l, fpa_raw_r = calculate_average_fpa_from_peaks(raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r)
-    fpa_l = fpa_raw_r   # raw_rx 算的是物理左脚
-    fpa_r = fpa_raw_l   # raw_lx 算的是物理右脚
-    # 每步 FPA — raw_rx 是物理左脚
+    # 8. 足偏角 — 使用 raw 数据，左右脚口径与全链路保持一致（left=raw_lx, right=raw_rx）
+    fpa_l, fpa_r = calculate_average_fpa_from_peaks(raw_total_matrix, raw_lx, raw_rx, raw_center_l, raw_center_r)
     fpa_per_step_left = []
-    for idx in raw_rx:
-        if idx < len(raw_total_matrix):
-            angle = calculate_single_fpa(np.array(raw_total_matrix[idx]), True, raw_center_l, raw_center_r)
-            fpa_per_step_left.append(round(float(angle), 1) if not np.isnan(angle) else 0)
-    # 每步 FPA — raw_lx 是物理右脚
-    fpa_per_step_right = []
     for idx in raw_lx:
         if idx < len(raw_total_matrix):
             angle = calculate_single_fpa(np.array(raw_total_matrix[idx]), False, raw_center_l, raw_center_r)
+            fpa_per_step_left.append(round(float(angle), 1) if not np.isnan(angle) else 0)
+    fpa_per_step_right = []
+    for idx in raw_rx:
+        if idx < len(raw_total_matrix):
+            angle = calculate_single_fpa(np.array(raw_total_matrix[idx]), True, raw_center_l, raw_center_r)
             fpa_per_step_right.append(round(float(angle), 1) if not np.isnan(angle) else 0)
 
     # 9. 速度
@@ -3366,6 +3430,78 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
     pressure_evo_data = build_pressure_evolution_data(
         total_matrix, left_on, left_off, right_on, right_off, center_l, center_r
     )
+
+    def infer_side_mapping_from_footprint(footprint_data):
+        """
+        Use footprint visual labels as canonical side mapping.
+        Returns:
+            {
+              "left": "left" | "right",
+              "right": "left" | "right",
+              "swapped": bool,
+              "evidenceCount": int,
+              "naturalVotes": int,
+              "swappedVotes": int
+            }
+        """
+        default_mapping = {
+            "left": "left",
+            "right": "right",
+            "swapped": False,
+            "evidenceCount": 0,
+            "naturalVotes": 0,
+            "swappedVotes": 0,
+        }
+        if not isinstance(footprint_data, dict):
+            return default_mapping
+
+        lines = footprint_data.get("fpaLines", [])
+        natural_votes = 0
+        swapped_votes = 0
+        evidence_count = 0
+
+        for line in lines:
+            source_is_right = line.get("sourceIsRight")
+            visual_is_right = line.get("isRight")
+            if not isinstance(source_is_right, bool) or not isinstance(visual_is_right, bool):
+                continue
+            evidence_count += 1
+            if source_is_right == visual_is_right:
+                natural_votes += 1
+            else:
+                swapped_votes += 1
+
+        if evidence_count < 2:
+            return default_mapping
+
+        swapped = swapped_votes > natural_votes
+        return {
+            "left": "right" if swapped else "left",
+            "right": "left" if swapped else "right",
+            "swapped": bool(swapped),
+            "evidenceCount": int(evidence_count),
+            "naturalVotes": int(natural_votes),
+            "swappedVotes": int(swapped_votes),
+        }
+
+    def swap_left_right_pair(left_value, right_value):
+        return right_value, left_value
+
+    def swap_left_right_dict(data):
+        if not isinstance(data, dict):
+            return data
+        if "left" not in data and "right" not in data:
+            return data
+        swapped = dict(data)
+        swapped["left"] = data.get("right")
+        swapped["right"] = data.get("left")
+        return swapped
+
+    side_mapping = infer_side_mapping_from_footprint(footprint_hm_data)
+    visual_side_swapped = bool(side_mapping.get("swapped", False))
+    if isinstance(footprint_hm_data, dict):
+        footprint_hm_data["visualSideSwapped"] = bool(visual_side_swapped)
+        footprint_hm_data["sideMapping"] = side_mapping
 
     # 11. 构建步态参数
     l_diff = np.diff(lx) if len(lx) >= 2 else []
@@ -3512,6 +3648,27 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
         }
 
     # 18. 组装结果
+    # Keep all side-specific outputs consistent with footprint visual-side convention.
+    if visual_side_swapped:
+        left_step_time, right_step_time = swap_left_right_pair(left_step_time, right_step_time)
+        left_step_length, right_step_length = swap_left_right_pair(left_step_length, right_step_length)
+        left_fpa_str, right_fpa_str = swap_left_right_pair(left_fpa_str, right_fpa_str)
+        fpa_per_step_left, fpa_per_step_right = swap_left_right_pair(fpa_per_step_left, fpa_per_step_right)
+        left_bal, right_bal = swap_left_right_pair(left_bal, right_bal)
+        left_series, right_series = swap_left_right_pair(left_series, right_series)
+        left_line, right_line = swap_left_right_pair(left_line, right_line)
+        ls, rs = swap_left_right_pair(ls, rs)
+
+        support_phases_result = swap_left_right_dict(support_phases_result)
+        cycle_phases_result = swap_left_right_dict(cycle_phases_result)
+        # 交换阶段名中的左右脚
+        for side in ("left", "right"):
+            d = cycle_phases_result.get(side, {})
+            if "左脚单支撑期" in d and "右脚单支撑期" in d:
+                d["左脚单支撑期"], d["右脚单支撑期"] = d["右脚单支撑期"], d["左脚单支撑期"]
+        gait_avg_data = swap_left_right_dict(gait_avg_data)
+        pressure_evo_data = swap_left_right_dict(pressure_evo_data)
+
     result = {
         "gaitParams": {
             "leftStepTime": left_step_time,

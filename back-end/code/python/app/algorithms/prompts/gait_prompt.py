@@ -82,11 +82,11 @@ def build_gait_user_prompt(patient_info: dict, gait_data: dict) -> str:
     "text": "正常/需关注/异常",
     "standard": "依据步速、对称性、足偏角与支撑稳定性综合判断"
   }},
-  "overview": "整体步态概况与关键发现总结",
-  "spatiotemporal_analysis": "步速、步长、步时等时空参数分析",
-  "symmetry_analysis": "左右对称性与可能代偿分析",
-  "posture_analysis": "足偏角和步态姿势特征分析",
-  "stability_analysis": "平衡、双支撑时间、支撑相和步态稳定性分析",
+  "overview": "整体步态概况与关键发现总结（90~120字）",
+  "spatiotemporal_analysis": "步速、步长、步时等时空参数分析，结合年龄和步速评价行走效率（90~120字）",
+  "symmetry_analysis": "左右对称性与可能代偿分析，从步时差、步长差、支撑相等多角度展开（90~120字）",
+  "posture_analysis": "足偏角和步态姿势特征分析，推断行走中足部着地方式和姿态倾向（90~120字）",
+  "stability_analysis": "平衡、双支撑时间、支撑相和步态稳定性分析，评估跌倒风险（90~120字）",
   "clinical_suggestion": "训练建议、复查建议和风险提示",
   "disclaimer": "本报告由AI辅助生成，仅供参考，最终判断请结合临床专业意见"
 }}

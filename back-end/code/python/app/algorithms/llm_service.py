@@ -2,7 +2,9 @@
 LLM service for assessment reports.
 """
 
+import asyncio
 import json
+import os
 
 from openai import OpenAI
 
@@ -44,6 +46,9 @@ def _merge_llm_overrides(config: dict, llm_overrides: dict | None):
     if llm_overrides.get("extra_body") is not None:
         merged["extra_body"] = llm_overrides.get("extra_body")
 
+    if llm_overrides.get("thinking") is not None:
+        merged["thinking"] = llm_overrides.get("thinking")
+
     return merged
 
 
@@ -52,7 +57,7 @@ def _get_client_and_config(llm_overrides: dict | None = None):
 
     api_key = _normalize_optional_text(config.get("api_key"))
     if not api_key or api_key == "sk-xxx":
-        raise ValueError("没有api-key，无法使用AI综合评估功能")
+        raise ValueError("未配置有效的 api_key，无法使用 AI 综合评估功能")
     config["api_key"] = api_key
 
     client = OpenAI(
@@ -65,16 +70,49 @@ def _get_client_and_config(llm_overrides: dict | None = None):
 
 def _build_messages(assessment_type: str, patient_info: dict, assessment_data: dict):
     if assessment_type not in ASSESSMENT_PROMPTS:
-        raise ValueError(f"不支持的 assessment_type: {assessment_type}")
+        raise ValueError(f"Unsupported assessment_type: {assessment_type}")
 
     system_prompt, prompt_builder = ASSESSMENT_PROMPTS[assessment_type]
     user_prompt = append_common_user_rules(prompt_builder(patient_info, assessment_data))
     messages = [
         {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
     ]
-
-    messages.append({"role": "user", "content": user_prompt})
     return messages
+
+
+def _build_request_kwargs(config: dict, messages: list, stream: bool = False):
+    request_kwargs = {
+        "model": config["model"],
+        "messages": messages,
+    }
+
+    if stream:
+        request_kwargs["stream"] = True
+
+    # Put provider-specific fields into extra_body so OpenAI SDK accepts them.
+    extra_body = dict(config.get("extra_body") or {})
+    if config.get("thinking") is not None:
+        extra_body["thinking"] = config["thinking"]
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
+
+    if config.get("max_tokens") is not None:
+        request_kwargs["max_tokens"] = config["max_tokens"]
+
+    return request_kwargs
+
+
+def _create_completion_with_fallback(client: OpenAI, request_kwargs: dict):
+    try:
+        return client.chat.completions.create(**request_kwargs)
+    except TypeError as e:
+        # Some OpenAI-compatible endpoints/SDK versions don't accept extra_body.
+        if "extra_body" in request_kwargs and "unexpected keyword argument 'extra_body'" in str(e):
+            retry_kwargs = dict(request_kwargs)
+            retry_kwargs.pop("extra_body", None)
+            return client.chat.completions.create(**retry_kwargs)
+        raise
 
 
 def _strip_markdown_fence(content: str) -> str:
@@ -142,26 +180,10 @@ async def call_assessment_ai_report(
 ) -> dict:
     client, config = _get_client_and_config(llm_overrides=llm_overrides)
     messages = _build_messages(assessment_type, patient_info, assessment_data)
+    request_kwargs = _build_request_kwargs(config=config, messages=messages, stream=False)
 
-    request_kwargs = {
-        "model": config["model"],
-        "messages": messages,
-    }
-    if config.get("extra_body") is not None:
-        request_kwargs["extra_body"] = config["extra_body"]
-    if config.get("max_tokens") is not None:
-        request_kwargs["max_tokens"] = config["max_tokens"]
-
-    try:
-        response = client.chat.completions.create(**request_kwargs)
-    except TypeError as e:
-        # Some providers/OpenAI-compatible endpoints don't accept "extra_body".
-        if "extra_body" in request_kwargs and "unexpected keyword argument 'extra_body'" in str(e):
-            request_kwargs = dict(request_kwargs)
-            request_kwargs.pop("extra_body", None)
-            response = client.chat.completions.create(**request_kwargs)
-        else:
-            raise
+    # OpenAI Python SDK here is sync; offload to thread to avoid blocking FastAPI event loop.
+    response = await asyncio.to_thread(_create_completion_with_fallback, client, request_kwargs)
     content = response.choices[0].message.content
     return _parse_json_response(content)
 
@@ -174,26 +196,9 @@ def stream_assessment_ai_report(
 ):
     client, config = _get_client_and_config(llm_overrides=llm_overrides)
     messages = _build_messages(assessment_type, patient_info, assessment_data)
+    request_kwargs = _build_request_kwargs(config=config, messages=messages, stream=True)
 
-    request_kwargs = {
-        "model": config["model"],
-        "messages": messages,
-        "stream": True,
-    }
-    if config.get("extra_body") is not None:
-        request_kwargs["extra_body"] = config["extra_body"]
-    if config.get("max_tokens") is not None:
-        request_kwargs["max_tokens"] = config["max_tokens"]
-
-    try:
-        stream = client.chat.completions.create(**request_kwargs)
-    except TypeError as e:
-        if "extra_body" in request_kwargs and "unexpected keyword argument 'extra_body'" in str(e):
-            request_kwargs = dict(request_kwargs)
-            request_kwargs.pop("extra_body", None)
-            stream = client.chat.completions.create(**request_kwargs)
-        else:
-            raise
+    stream = _create_completion_with_fallback(client, request_kwargs)
     for chunk in stream:
         delta = chunk.choices[0].delta
         if delta.content:

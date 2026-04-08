@@ -196,6 +196,8 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
   const [aiError, setAiError] = useState(null);
   const [aiStreamText, setAiStreamText] = useState('');
   const contentRef = useRef(null);
+  const aiRequestStartedRef = useRef(false);
+  const onAiReportReadyRef = useRef(onAiReportReady);
 
   // 加载数据
   useEffect(() => {
@@ -250,6 +252,10 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
   const hasBothHands = hasLeft && hasRight;
   const gripAiPayload = useMemo(() => buildGripAiPayload(rawReport), [rawReport]);
 
+  useEffect(() => {
+    onAiReportReadyRef.current = onAiReportReady;
+  }, [onAiReportReady]);
+
   // 如果历史记录里已有 AI 报告，直接用
   useEffect(() => {
     if (propsReportData?.aiReport && !aiReport) {
@@ -257,9 +263,15 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
     }
   }, [propsReportData, aiReport]);
 
+  useEffect(() => {
+    aiRequestStartedRef.current = false;
+  }, [gripAiPayload, propsReportData?.aiReport]);
+
   // AI 综合评估：data 就绪后自动调用
   useEffect(() => {
     if (!gripAiPayload || aiReport || propsReportData?.aiReport) return;
+    if (aiRequestStartedRef.current) return;
+    aiRequestStartedRef.current = true;
     let cancelled = false;
     setAiLoading(true);
     setAiError(null);
@@ -270,12 +282,15 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
         gripAiPayload,
       );
     }).then(res => {
-      if (cancelled) return;
       if (res.success) {
-        setAiReport(res.data);
-        if (onAiReportReady) onAiReportReady(res.data);
+        if (!cancelled) {
+          setAiReport(res.data);
+        }
+        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
       } else {
-        setAiError(res.error || 'AI 分析失败');
+        if (!cancelled) {
+          setAiError(res.error || 'AI 分析失败');
+        }
       }
     }).catch(err => {
       if (!cancelled) setAiError(err.message);
@@ -284,7 +299,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
     });
 
     return () => { cancelled = true; };
-  }, [gripAiPayload, patientInfo, patientName, aiReport, onAiReportReady, propsReportData?.aiReport]);
+  }, [gripAiPayload, patientInfo, patientName, aiReport, propsReportData?.aiReport]);
 
   const colors = ['#0066CC', '#0891B2', '#059669', '#D97706', '#9333EA', '#DC2626'];
   const fingerNames = ['拇指', '食指', '中指', '无名指', '小指', '手掌'];
@@ -703,8 +718,8 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: '1px solid var(--border-light)' }}>
                         <div className="px-4 py-2 rounded-lg text-sm font-bold"
                           style={{
-                            background: aiReport.eval_level.text === '正常' ? '#ECFDF5' : aiReport.eval_level.text === '偏低' ? '#FFFBEB' : '#FEF2F2',
-                            color: aiReport.eval_level.text === '正常' ? '#059669' : aiReport.eval_level.text === '偏低' ? '#D97706' : '#DC2626',
+                            background: aiReport.eval_level.text?.includes('正常') ? '#ECFDF5' : aiReport.eval_level.text?.includes('偏低') ? '#FFFBEB' : '#FEF2F2',
+                            color: aiReport.eval_level.text?.includes('正常') ? '#059669' : aiReport.eval_level.text?.includes('偏低') ? '#D97706' : '#DC2626',
                           }}>
                           评估等级: {aiReport.eval_level.text}
                         </div>

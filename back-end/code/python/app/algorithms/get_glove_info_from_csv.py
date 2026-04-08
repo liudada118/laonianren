@@ -105,14 +105,33 @@ def adc_to_force_single_point(adc):
     return force / CALIBRATION_POINTS
 
 
-def calculate_part_force(sensor_data, indices):
-    """计算部位总力：对每个传感器点单独转换后求和"""
+GLOVE_PART_FORCE_OFFSET = 20.0     # 手套设备偏差补偿（N/部位）
+GLOVE_PART_FORCE_THRESHOLD = 3.0   # 单个部位原始力 > 3N 才对该部位补偿
+GLOVE_TOTAL_FORCE_THRESHOLD = 20.0 # 全手合力 > 20N 才启用补偿（说明在真正握）
+
+
+def calculate_part_force_raw(sensor_data, indices):
+    """计算部位原始力（不含补偿）"""
     total_force = 0.0
     for idx in indices:
         array_idx = idx - 1
         if 0 <= array_idx < len(sensor_data) and sensor_data[array_idx] > 0:
             total_force += adc_to_force_single_point(sensor_data[array_idx])
     return total_force
+
+
+def apply_frame_compensation(raw_forces):
+    """对一帧的各部位力做补偿：合力>20N时，单部位>3N的加2.5N"""
+    total_raw = sum(raw_forces.values())
+    if total_raw <= GLOVE_TOTAL_FORCE_THRESHOLD:
+        return raw_forces, total_raw
+    compensated = {}
+    for key, force in raw_forces.items():
+        if force > GLOVE_PART_FORCE_THRESHOLD:
+            compensated[key] = force + GLOVE_PART_FORCE_OFFSET
+        else:
+            compensated[key] = force
+    return compensated, sum(compensated.values())
 
 
 def normalize_quaternion(q):
@@ -793,11 +812,12 @@ def _process_glove_data_core(input_csv, output_csv, hand_type):
             t = row_idx * 0.01
         times.append(t)
 
-        frame_total = 0
+        raw_forces = {}
         for part_key in part_keys:
-            force = calculate_part_force(sensor_data, part_indices[part_key])
-            force_data[part_key].append(force)
-            frame_total += force
+            raw_forces[part_key] = calculate_part_force_raw(sensor_data, part_indices[part_key])
+        compensated, frame_total = apply_frame_compensation(raw_forces)
+        for part_key in part_keys:
+            force_data[part_key].append(compensated[part_key])
         force_data['total'].append(frame_total)
 
         frame_sum = np.sum(sensor_data)
@@ -855,12 +875,17 @@ def _process_glove_data_core(input_csv, output_csv, hand_type):
     total_force = 0
     total_area = 0
 
+    peak_raw = {}
+    for part_key in part_keys:
+        peak_raw[part_key] = calculate_part_force_raw(peak_frame_data, part_indices[part_key])
+    peak_comp, _ = apply_frame_compensation(peak_raw)
+
     for part_key in part_keys:
         indices = part_indices[part_key]
         adc = calculate_part_adc(peak_frame_data, indices)
         nonzero = calculate_nonzero_count(peak_frame_data, indices)
         area = nonzero * SENSOR_AREA_MM2
-        force = calculate_part_force(peak_frame_data, indices)
+        force = peak_comp[part_key]
 
         total_force += force
         total_area += area
@@ -1020,11 +1045,12 @@ def process_glove_data(input_csv, output_csv):
             t = row_idx * 0.01
         times.append(t)
 
-        frame_total = 0
+        raw_forces = {}
         for part_key in part_keys:
-            force = calculate_part_force(sensor_data, part_indices[part_key])
-            force_data[part_key].append(force)
-            frame_total += force
+            raw_forces[part_key] = calculate_part_force_raw(sensor_data, part_indices[part_key])
+        compensated, frame_total = apply_frame_compensation(raw_forces)
+        for part_key in part_keys:
+            force_data[part_key].append(compensated[part_key])
         force_data['total'].append(frame_total)
 
         frame_sum = np.sum(sensor_data)
@@ -1088,12 +1114,17 @@ def process_glove_data(input_csv, output_csv):
     total_force = 0
     total_area = 0
 
+    peak_raw = {}
+    for part_key in part_keys:
+        peak_raw[part_key] = calculate_part_force_raw(peak_frame_data, part_indices[part_key])
+    peak_comp, _ = apply_frame_compensation(peak_raw)
+
     for part_key in part_keys:
         indices = part_indices[part_key]
         adc = calculate_part_adc(peak_frame_data, indices)
         nonzero = calculate_nonzero_count(peak_frame_data, indices)
         area = nonzero * SENSOR_AREA_MM2
-        force = calculate_part_force(peak_frame_data, indices)
+        force = peak_comp[part_key]
 
         total_force += force
         total_area += area

@@ -32,7 +32,12 @@ function renderFrame(ctx, data, vmax, x, y, w, h) {
   }
   offCtx.putImageData(imgData, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(off, x, y, w, h);
+  // 水平镜像：使足部形状符合解剖方向（与COP轨迹一致）
+  ctx.save();
+  ctx.translate(x + w, y);
+  ctx.scale(-1, 1);
+  ctx.drawImage(off, 0, 0, w, h);
+  ctx.restore();
 }
 
 export default function PressureEvolutionChart({ evolutionData, className = '' }) {
