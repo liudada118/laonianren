@@ -771,6 +771,13 @@ export default function GaitAssessment() {
     cadence: '—', stride: '—', speed: '—', symmetry: '—',
   });
 
+  /* 步态实时检测器 */
+  const stepDetectorRef = useRef({
+    padWasActive: [false, false, false, false],
+    stepEvents: [],    // { time, padIdx, peak, positionCm }
+    lastStepTime: 0,
+  });
+
   /* 噪音过滤 */
   const denoiseMatrix = useCallback((matrix, threshold = 10, minRegionSize = 15) => {
     const rows = matrix.length;
@@ -845,13 +852,100 @@ export default function GaitAssessment() {
       activePoints.push(active);
     });
 
-    setSensorStats(prev => {
-      const newHistory = [...prev.history, totals].slice(-60);
-      return {
-        totals, maxVals, activePoints, history: newHistory,
-        cadence: '110', stride: '65.5', speed: '1.10', symmetry: '0.95',
-      };
+    // --- 步态事件检测 ---
+    const det = stepDetectorRef.current;
+    const now = Date.now();
+    const PAD_ACTIVATE = 500;
+    const PAD_DEACTIVATE = 200;
+    const MIN_INTERVAL = 250; // ms，两步最小间隔
+
+    SENSOR_KEYS.forEach((_, idx) => {
+      const pressure = totals[idx];
+      const wasActive = det.padWasActive[idx];
+      const isActive = pressure > (wasActive ? PAD_DEACTIVATE : PAD_ACTIVATE);
+
+      if (isActive && !wasActive && now - det.lastStepTime > MIN_INTERVAL) {
+        // 计算COP行位置（行走方向）和列位置（横向，区分左右脚）
+        const matrix = data[SENSOR_KEYS[idx]];
+        let copRow = 32, copCol = 32;
+        if (matrix && matrix.length > 0) {
+          let sumW = 0, sumR = 0, sumC = 0;
+          for (let r = 0; r < matrix.length; r++) {
+            for (let c = 0; c < matrix[r].length; c++) {
+              const v = matrix[r][c];
+              if (v > 5) { sumW += v; sumR += r * v; sumC += c * v; }
+            }
+          }
+          if (sumW > 0) { copRow = sumR / sumW; copCol = sumC / sumW; }
+        }
+        // 后端拼接: hstack([pad4,pad3,pad2,pad1]) + fliplr + rot90
+        // pad4→rows 0-63, pad3→64-127, pad2→128-191, pad1→192-255
+        // sensor idx 0=pad1, 1=pad2, 2=pad3, 3=pad4
+        const absoluteRow = (3 - idx) * 64 + (63 - copRow);
+        const positionCm = absoluteRow * 1.4;
+        // copCol < 32 → 步道一侧, copCol >= 32 → 另一侧（用于区分左右脚）
+        det.stepEvents.push({ time: now, padIdx: idx, peak: pressure, positionCm, copCol });
+        det.lastStepTime = now;
+        if (det.stepEvents.length > 30) det.stepEvents.shift();
+      }
+
+      // 更新当前步的峰值压力
+      if (isActive && det.stepEvents.length > 0) {
+        const last = det.stepEvents[det.stepEvents.length - 1];
+        if (last.padIdx === idx) last.peak = Math.max(last.peak, pressure);
+      }
+
+      det.padWasActive[idx] = isActive;
     });
+
+    // --- 计算综合指标 ---
+    const steps = det.stepEvents;
+    let cadence = '—', stride = '—', speed = '—', symmetry = '—';
+
+    // 步频：最近若干步的频率 → steps/min
+    if (steps.length >= 3) {
+      const recent = steps.slice(-8);
+      const elapsed = recent[recent.length - 1].time - recent[0].time;
+      if (elapsed > 0) {
+        cadence = String(Math.round(((recent.length - 1) / elapsed) * 60000));
+      }
+    }
+
+    // 步幅：只取右脚（copCol >= 32 的一侧），相邻右脚步的位置差
+    // 右脚→右脚 = 一个完整步态周期的步幅
+    const rightSteps = steps.filter(s => s.copCol >= 32);
+    if (rightSteps.length >= 2) {
+      const recent = rightSteps.slice(-6);
+      const dists = [];
+      for (let i = 1; i < recent.length; i++) {
+        const d = Math.abs(recent[i].positionCm - recent[i - 1].positionCm);
+        if (d > 20) dists.push(d); // 忽略 <20cm 的非步态移动
+      }
+      if (dists.length > 0) {
+        stride = (dists.reduce((a, b) => a + b, 0) / dists.length).toFixed(1);
+      }
+    }
+
+    // 速度：步幅(m) × 步频(steps/min) / 60
+    if (cadence !== '—' && stride !== '—') {
+      speed = ((parseFloat(stride) / 100) * (parseInt(cadence, 10) / 60)).toFixed(2);
+    }
+
+    // 对称性：左右脚峰值压力比
+    const leftSteps = steps.filter(s => s.copCol < 32);
+    if (rightSteps.length >= 2 && leftSteps.length >= 2) {
+      const avgRight = rightSteps.slice(-4).reduce((a, s) => a + s.peak, 0) / Math.min(rightSteps.length, 4);
+      const avgLeft = leftSteps.slice(-4).reduce((a, s) => a + s.peak, 0) / Math.min(leftSteps.length, 4);
+      if (avgRight > 0 && avgLeft > 0) {
+        symmetry = (Math.min(avgRight, avgLeft) / Math.max(avgRight, avgLeft)).toFixed(2);
+      }
+    }
+
+    setSensorStats(prev => ({
+      totals, maxVals, activePoints,
+      history: [...prev.history, totals].slice(-60),
+      cadence, stride, speed, symmetry,
+    }));
   }, []);
 
   // ─── 挂载时激活步道模式，使采集前就能显示可视化 ───
@@ -921,6 +1015,8 @@ export default function GaitAssessment() {
     if (!isGlobalConnected) return;
     setPhase('recording'); setTimer(0);
     setAnalysisError('');
+    // 重置步态检测器
+    stepDetectorRef.current = { padWasActive: [false, false, false, false], stepEvents: [], lastStepTime: 0 };
 
     try {
       await backendBridge.setActiveMode(5); // 5=脚垫模式
