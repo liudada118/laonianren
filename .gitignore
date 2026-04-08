@@ -161,3 +161,4 @@ back-end/code/serial.txt
 # LLM API Key 配置（含敏感信息）
 llm_settings.json
 back-end/code/python/app/algorithms/_tmp_prompt_capture/
+/.pnpm-store
