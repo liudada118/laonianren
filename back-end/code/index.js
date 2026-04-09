@@ -504,6 +504,10 @@ function checkPythonAiDeps(pythonBin) {
     'import pydantic',
     'import matplotlib',
     'import pandas',
+    'import cv2',
+    'import scipy',
+    'import skimage',
+    'from PIL import Image',
   ].join('; ')
 
   try {

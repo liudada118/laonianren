@@ -19,6 +19,7 @@
 
 const { callPython } = require('./python/pythonBridge');
 const { processFrameRealtime, processPlaybackBatch } = require('./realtime/realtimeCOP');
+const GAIT_REPORT_TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_GAIT_MS, 10) || 600000;
 
 // 实时COP状态
 let lastFootPointArr = null;
@@ -51,14 +52,14 @@ async function callAlgorithm(funcName, params = {}) {
         board_times: params.board_times || [
           params.t1 || [], params.t2 || [], params.t3 || [], params.t4 || []
         ],
-      });
+      }, { timeoutMs: GAIT_REPORT_TIMEOUT_MS });
 
     case 'generate_gait_python_report':
       // 兼容旧调用名
       return callPython('generate_gait_render_report', {
         board_data: params.board_data || [],
         board_times: params.board_times || [],
-      });
+      }, { timeoutMs: GAIT_REPORT_TIMEOUT_MS });
 
     case 'generate_sit_stand_render_report':
       return callPython('generate_sit_stand_render_report', {

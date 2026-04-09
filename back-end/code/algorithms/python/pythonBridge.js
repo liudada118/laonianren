@@ -16,7 +16,7 @@ const fs = require('fs');
 const BRIDGE_SCRIPT = path.join(__dirname, 'bridge.py');
 
 // 超时时间（毫秒）
-const TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000; // 3分钟
+const DEFAULT_TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000; // 3分钟
 
 // ─── 自动检测 Python 可执行文件 ───
 
@@ -163,12 +163,21 @@ function getPythonCmd() {
  * @param {object} params - 参数对象
  * @returns {Promise<object>} 算法结果
  */
-async function callPython(funcName, params = {}) {
+async function callPython(funcName, params = {}, options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    const timeoutMs =
+      Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? options.timeoutMs
+        : DEFAULT_TIMEOUT_MS;
+    let timedOut = false;
+    let forceKillTimer = null;
+    let timeoutTimer = null;
     const fail = (err) => {
       if (settled) return;
       settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       reject(err);
     };
 
@@ -189,7 +198,6 @@ async function callPython(funcName, params = {}) {
     try {
       child = spawn(spawnCmd, spawnArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: TIMEOUT_MS,
         windowsHide: true,
         env: {
           ...process.env,
@@ -202,6 +210,27 @@ async function callPython(funcName, params = {}) {
       console.error('[Python] 无法启动子进程:', spawnErr.message);
       fail(new Error(`Cannot spawn Python process (cmd: ${pythonCmd}): ${spawnErr.message}`));
       return;
+    }
+
+    timeoutTimer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      console.error(`[Python] ${funcName} 执行超时: ${timeoutMs}ms`);
+      try {
+        child.kill('SIGTERM');
+      } catch {}
+      forceKillTimer = setTimeout(() => {
+        if (settled) return;
+        try {
+          child.kill('SIGKILL');
+        } catch {}
+      }, 5000);
+      if (typeof forceKillTimer.unref === 'function') {
+        forceKillTimer.unref();
+      }
+    }, timeoutMs);
+    if (typeof timeoutTimer.unref === 'function') {
+      timeoutTimer.unref();
     }
 
     let stdout = '';
@@ -228,9 +257,13 @@ async function callPython(funcName, params = {}) {
 
     child.on('close', (code, signal) => {
       if (settled) return;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
 
-      if (code !== 0) {
-        let errMsg = `Python process exited with code ${code}`;
+      if (code !== 0 || signal) {
+        let errMsg = timedOut
+          ? `Python process timed out after ${timeoutMs}ms`
+          : `Python process exited with code ${code}${signal ? ` signal ${signal}` : ''}`;
         // 提供更友好的错误提示
         if (code === 9009 || code === 127) {
           errMsg = `Python 命令 "${pythonCmd}" 未找到 (exit code ${code})。请安装 Python3 或设置环境变量 PYTHON_CMD`;
@@ -275,6 +308,8 @@ async function callPython(funcName, params = {}) {
     });
 
     child.on('error', (err) => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       console.error('[Python] 子进程错误:', err.message);
       fail(new Error(`Python process error: ${err.message}`));
     });
