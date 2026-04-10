@@ -22,10 +22,11 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   const tooltipStyle = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
   const leftPieOpt = useMemo(() => ({
-    tooltip: { trigger: 'item', ...tooltipStyle },
+    tooltip: { show: false },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
+      emphasis: { disabled: true },
       data: [
         { value: leftPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.blue } },
         { value: leftPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -35,10 +36,11 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   }), [leftPressure]);
 
   const rightPieOpt = useMemo(() => ({
-    tooltip: { trigger: 'item', ...tooltipStyle },
+    tooltip: { show: false },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
+      emphasis: { disabled: true },
       data: [
         { value: rightPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.red } },
         { value: rightPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -89,9 +91,20 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
         <div className="px-4 py-2 space-y-1">
           <Metric label="总压力" value={realtimeData.leftTotal.toFixed(0)} color={C.blue} />
           <Metric label="面积" value={realtimeData.leftArea?.toFixed(1) + ' cm²' || '---'} color={C.blue} />
-          <Metric label="前足" value={leftPressure.forefoot.toFixed(1) + '%'} color={C.blue} />
-          <Metric label="中足" value={leftPressure.midfoot.toFixed(1) + '%'} color={C.green} />
-          <Metric label="后足" value={leftPressure.hindfoot.toFixed(1) + '%'} color={C.amber} />
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.blue }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.blue }}>前足 {leftPressure.forefoot.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.green }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.green }}>中足 {leftPressure.midfoot.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.amber }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.amber }}>后足 {leftPressure.hindfoot.toFixed(1)}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -105,9 +118,20 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
         <div className="px-4 py-2 space-y-1">
           <Metric label="总压力" value={realtimeData.rightTotal.toFixed(0)} color={C.red} />
           <Metric label="面积" value={realtimeData.rightArea?.toFixed(1) + ' cm²' || '---'} color={C.red} />
-          <Metric label="前足" value={rightPressure.forefoot.toFixed(1) + '%'} color={C.red} />
-          <Metric label="中足" value={rightPressure.midfoot.toFixed(1) + '%'} color={C.green} />
-          <Metric label="后足" value={rightPressure.hindfoot.toFixed(1) + '%'} color={C.amber} />
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.red }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.red }}>前足 {rightPressure.forefoot.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.green }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.green }}>中足 {rightPressure.midfoot.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.amber }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.amber }}>后足 {rightPressure.hindfoot.toFixed(1)}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
