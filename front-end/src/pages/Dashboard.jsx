@@ -182,22 +182,7 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
         </div>
       )}
 
-      {/* MAC 地址信息显示 */}
-      {isConnected && macEntries.length > 0 && (
-        <div className="hidden lg:flex flex-col gap-0.5 px-2 py-1 text-[9px] max-w-[280px]">
-          {macEntries.map(([port, info]) => {
-            const devType = info.type || '未分配';
-            const isOnline = deviceOnlineMap[devType] === 'online';
-            return (
-              <div key={port} className="flex items-center gap-1 truncate">
-                <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{info.uniqueId ? info.uniqueId.slice(-8) : 'N/A'}</span>
-                <span style={{ color: isOnline ? '#059669' : '#DC2626', fontWeight: 600 }}>{devType}</span>
-                <span style={{ color: 'var(--text-muted)' }}>{info.version || ''}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+
 
       {/* 连接按钮 */}
       <button
