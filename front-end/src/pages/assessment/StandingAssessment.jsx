@@ -22,11 +22,12 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   const tooltipStyle = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
   const leftPieOpt = useMemo(() => ({
-    tooltip: { show: false },
+    tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
       emphasis: { disabled: true },
+      silent: true,
       data: [
         { value: leftPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.blue } },
         { value: leftPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -36,11 +37,12 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   }), [leftPressure]);
 
   const rightPieOpt = useMemo(() => ({
-    tooltip: { show: false },
+    tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
       emphasis: { disabled: true },
+      silent: true,
       data: [
         { value: rightPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.red } },
         { value: rightPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -87,7 +89,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
           <div className="w-2 h-2 rounded-full" style={{ background: C.blue }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左脚压力分布</h3>
         </div>
-        <div className="h-[140px]"><EChart option={leftPieOpt} height={140} /></div>
+        <div className="h-[140px]"><EChart option={leftPieOpt} height={140} notMerge={true} /></div>
         <div className="px-4 py-2 space-y-1">
           <Metric label="总压力" value={realtimeData.leftTotal.toFixed(0)} color={C.blue} />
           <Metric label="面积" value={realtimeData.leftArea?.toFixed(1) + ' cm²' || '---'} color={C.blue} />
@@ -114,7 +116,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
           <div className="w-2 h-2 rounded-full" style={{ background: C.red }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右脚压力分布</h3>
         </div>
-        <div className="h-[140px]"><EChart option={rightPieOpt} height={140} /></div>
+        <div className="h-[140px]"><EChart option={rightPieOpt} height={140} notMerge={true} /></div>
         <div className="px-4 py-2 space-y-1">
           <Metric label="总压力" value={realtimeData.rightTotal.toFixed(0)} color={C.red} />
           <Metric label="面积" value={realtimeData.rightArea?.toFixed(1) + ' cm²' || '---'} color={C.red} />
@@ -148,23 +150,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
         </div>
       </div>
 
-      {/* 滤波阈值 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: C.green }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>滤波设置</h3>
-        </div>
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>噪声阈值</span>
-            <span className="text-xs font-semibold tabular-nums" style={{ color: C.green }}>{filterThreshold}</span>
-          </div>
-          <input type="range" min={0} max={50} value={filterThreshold} onChange={e => onFilterChange(Number(e.target.value))}
-            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-            style={{ background: `linear-gradient(to right, ${C.green} ${filterThreshold * 2}%, var(--border-light) ${filterThreshold * 2}%)` }} />
-          <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>低于此值的数据将被过滤</p>
-        </div>
-      </div>
+
     </div>
   );
 }
