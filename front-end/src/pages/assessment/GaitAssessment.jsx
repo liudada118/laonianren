@@ -80,20 +80,22 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }
         </div>
       </div>
 
-      {/* 各传感器实时数据 */}
-      {[0, 1, 2, 3].map(idx => (
-        <div key={idx} className="zeiss-card overflow-hidden">
-          <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-            <div className="w-2 h-2 rounded-full" style={{ background: sensorColors[idx] }} />
-            <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>{sensorLabels[idx]}</h3>
+      {/* 各传感器实时数据 - 2x2 紧凑布局 */}
+      <div className="grid grid-cols-2 gap-2">
+        {[0, 1, 2, 3].map(idx => (
+          <div key={idx} className="zeiss-card overflow-hidden">
+            <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ borderBottom: '1px solid var(--border-light)' }}>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: sensorColors[idx] }} />
+              <h3 className="text-[10px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>{sensorLabels[idx]}</h3>
+            </div>
+            <div className="px-3 py-1.5 space-y-0.5">
+              <Metric label="总压力" value={sensorStats.totals[idx]} color={sensorColors[idx]} unit="" />
+              <Metric label="最大值" value={sensorStats.maxVals[idx]} color={sensorColors[idx]} unit="" />
+              <Metric label="有效点" value={sensorStats.activePoints[idx]} color={sensorColors[idx]} unit="" />
+            </div>
           </div>
-          <div className="px-4 py-2 space-y-1">
-            <Metric label="总压力" value={sensorStats.totals[idx]} color={sensorColors[idx]} unit="" />
-            <Metric label="最大值" value={sensorStats.maxVals[idx]} color={sensorColors[idx]} unit="" />
-            <Metric label="有效点" value={sensorStats.activePoints[idx]} color={sensorColors[idx]} unit="" />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
       {/* 综合指标 */}
       <div className="zeiss-card overflow-hidden">

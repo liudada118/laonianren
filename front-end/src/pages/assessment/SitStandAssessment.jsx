@@ -532,10 +532,6 @@ export default function SitStandAssessment() {
           <div className="relative w-full h-full m-3 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-light)' }}>
             <div ref={containerRef} className="w-full h-full" style={{ minHeight: 200 }} />
 
-            {/* 浮动：场景控制面板 - 右上角 */}
-            <div className="absolute top-3 right-3 w-[150px] z-10" style={{ maxHeight: 'calc(100% - 24px)', overflowY: 'auto' }}>
-              <SceneControlPanel config={sceneConfig} onConfigChange={handleConfigChange} />
-            </div>
 
             {/* 浮动：传感器信息 - 左上角 */}
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1">
