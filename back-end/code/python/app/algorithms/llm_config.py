@@ -9,8 +9,16 @@ Priority:
 
 import json
 import os
+import shutil
 
-_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_settings.json")
+_DIR = os.path.dirname(os.path.abspath(__file__))
+_CONFIG_FILE = os.path.join(_DIR, "llm_settings.json")
+_EXAMPLE_FILE = os.path.join(_DIR, "llm_settings_example.json")
+
+# 首次启动时，若 llm_settings.json 不存在，从 example 复制一份
+if not os.path.exists(_CONFIG_FILE) and os.path.exists(_EXAMPLE_FILE):
+    shutil.copy2(_EXAMPLE_FILE, _CONFIG_FILE)
+    print(f"[LLM] llm_settings.json 不存在，已从 llm_settings_example.json 复制创建")
 
 _DEFAULT = {
     "api_key": "",
