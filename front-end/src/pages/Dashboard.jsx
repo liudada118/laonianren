@@ -602,11 +602,11 @@ export default function Dashboard() {
             <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
               确认创建新的用户？
             </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowNewSessionConfirm(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowNewSessionConfirm(false)} className="zeiss-btn-secondary py-3 text-sm">取消</button>
               <button
                 onClick={() => { setShowNewSessionConfirm(false); startNewSession(); }}
-                className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer transition-all"
+                className="py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer transition-all"
                 style={{ background: '#059669' }}>
                 确认创建
               </button>
