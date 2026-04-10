@@ -697,7 +697,6 @@ export default function GaitAssessment() {
   const [showGuideDialog, setShowGuideDialog] = useState(!viewReportMode);
   const assessmentIdRef = useRef(`gait_${Date.now()}`);
   const [csvExporting, setCsvExporting] = useState(false);
-  const [reportMode, setReportMode] = useState('static');
   const [showComplete, setShowComplete] = useState(false);
   const [timer, setTimer] = useState(0);
   const [analysisError, setAnalysisError] = useState('');
@@ -1060,7 +1059,7 @@ export default function GaitAssessment() {
   };
 
   const viewReport = () => {
-    setShowComplete(false); setPhase('report'); setReportMode('static');
+    setShowComplete(false); setPhase('report');
     completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
   };
 
@@ -1087,18 +1086,6 @@ export default function GaitAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-              <button onClick={() => setReportMode('static')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'static' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'static' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                静态报告
-              </button>
-              <button onClick={() => setReportMode('dynamic')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'dynamic' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'dynamic' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                动态报告
-              </button>
-            </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
             <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-secondary text-xs py-2 px-4">
@@ -1108,19 +1095,11 @@ export default function GaitAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 overflow-auto">
-          {reportMode === 'dynamic' ? (
-            <div className="flex items-center justify-center h-full p-6">
-              <div className="zeiss-card p-6 max-w-4xl w-full">
-                <video src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
-              </div>
-            </div>
-          ) : (
-            <GaitReportContent
+          <GaitReportContent
               patientInfo={patientInfo}
               pythonResult={pythonResult}
               onAiReportReady={handleGaitAiReportReady}
             />
-          )}
         </main>
       </div>
     );

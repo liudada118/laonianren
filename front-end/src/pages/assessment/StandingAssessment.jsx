@@ -169,7 +169,6 @@ export default function StandingAssessment() {
   // 设备与连接状态
   const [deviceStatus, setDeviceStatus] = useState('disconnected'); // disconnected | connecting | connected
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle'); // idle | recording | processing | report
-  const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
   const timerRef = useRef(null);
@@ -625,7 +624,7 @@ export default function StandingAssessment() {
     setCsvExporting(false);
   };
 
-  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); setReportMode('static'); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); };
+  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); };
   const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
   const handleStandingAiReportReady = useCallback((aiData) => {
@@ -661,18 +660,6 @@ export default function StandingAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-              <button onClick={() => setReportMode('static')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'static' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'static' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                静态报告
-              </button>
-              <button onClick={() => setReportMode('dynamic')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'dynamic' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'dynamic' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                动态报告
-              </button>
-            </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
             <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-ghost text-xs flex items-center gap-1"
@@ -684,19 +671,11 @@ export default function StandingAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 overflow-auto">
-          {reportMode === 'dynamic' ? (
-            <div className="flex items-center justify-center h-full p-6">
-              <div className="zeiss-card p-6 max-w-4xl w-full">
-                <video src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
-              </div>
-            </div>
-          ) : (
-            <StandingReport
+          <StandingReport
               reportData={reportData}
               patientInfo={patientInfo}
               onAiReportReady={handleStandingAiReportReady}
             />
-          )}
         </main>
       </div>
     );

@@ -362,7 +362,7 @@ export default function Dashboard() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              <span className="hidden sm:inline">重新评估</span>
+              <span className="hidden sm:inline">新建用户</span>
             </button>
           )}
           <button onClick={() => navigate('/history')}

@@ -144,8 +144,6 @@ export default function GripAssessment() {
   const { patientInfo, institution, completeAssessment, updateAssessmentAiReport, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
-  const videoRef = useRef(null);
-
   // 如果首页已一键连接，自动进入后端模式
   const isGlobalConnected = deviceConnStatus === 'connected';
   const [deviceStatus, setDeviceStatus] = useState(isGlobalConnected ? 'connected' : 'disconnected');
@@ -155,7 +153,6 @@ export default function GripAssessment() {
   const [leftGloveConnected, setLeftGloveConnected] = useState(false);
   const [rightGloveConnected, setRightGloveConnected] = useState(false);
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'left-idle');
-  const [reportMode, setReportMode] = useState('static');
   const [timer, setTimer] = useState(0);
   const [pressure, setPressure] = useState(0);
   const [leftData, setLeftData] = useState([]);
@@ -668,7 +665,6 @@ export default function GripAssessment() {
   const viewReport = () => {
     setShowCompleteDialog(false);
     setPhase('report');
-    setReportMode('static');
     completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
   };
 
@@ -730,48 +726,6 @@ export default function GripAssessment() {
 
   /* ─── 报告模式 ─── */
   if (phase === 'report') {
-    if (reportMode === 'dynamic') {
-      return (
-        <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
-          <header className="h-14 flex items-center justify-between px-6 shrink-0 z-20"
-            style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-light)', boxShadow: 'var(--shadow-xs)' }}>
-            <div className="flex items-center gap-3">
-              <img src="/logo1.png" alt="Logo" className="w-8 h-8 rounded-lg" />
-              <h1 className="text-[15px] font-bold" style={{ color: 'var(--text-primary)' }}>
-                肌少症/老年人评估及监测系统
-                <span className="ml-2 font-normal" style={{ color: 'var(--text-muted)' }}>——1.握力评估</span>
-              </h1>
-            </div>
-            <div className="flex items-center gap-5">
-              <StepIndicator current={2} steps={['左手', '右手', '完成']} />
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '未知'}</span>
-              <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{institution || ''}</span>
-              <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs">历史记录</button>
-            </div>
-          </header>
-          <main className="flex-1 flex flex-col items-center justify-center p-6 z-10">
-            <div className="zeiss-card p-6 flex flex-col items-center gap-4 max-w-4xl w-full">
-              <div className="flex items-center justify-between w-full">
-                <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}的握力评估动态报告</h2>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setReportMode('static')}
-                    className="zeiss-btn-secondary flex items-center gap-2 text-xs py-2 px-4">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    切换静态报告
-                  </button>
-                  <button onClick={handleClose} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
-                    style={{ color: 'var(--text-muted)' }}>
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-              </div>
-              <video ref={videoRef} src="/assets/dynamic_report.mp4" controls className="w-full rounded-xl" style={{ maxHeight: '70vh', background: '#000' }} />
-            </div>
-          </main>
-        </div>
-      );
-    }
-
     return (
       <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
         <header className="h-14 flex items-center justify-between px-6 shrink-0 z-20"
@@ -791,11 +745,6 @@ export default function GripAssessment() {
             <StepIndicator current={2} steps={['左手', '右手', '完成']} />
             <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '未知'}</span>
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{institution || ''}</span>
-            <button onClick={() => setReportMode(reportMode === 'static' ? 'dynamic' : 'static')}
-              className="zeiss-btn-ghost text-xs flex items-center gap-1">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-              {reportMode === 'static' ? '动态报告' : '静态报告'}
-            </button>
             <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-ghost text-xs flex items-center gap-1"
               style={csvExporting ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
@@ -806,7 +755,7 @@ export default function GripAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 z-10">
-          <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} onSwitchDynamic={() => setReportMode('dynamic')} reportData={gripReportData}
+          <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} reportData={gripReportData}
             onAiReportReady={handleGripAiReportReady} />
         </main>
       </div>

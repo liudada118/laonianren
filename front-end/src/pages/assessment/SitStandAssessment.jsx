@@ -164,8 +164,6 @@ export default function SitStandAssessment() {
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle');
-  const reportMode = 'static';
-  const setReportMode = () => {};
   const [showComplete, setShowComplete] = useState(false);
   const [sitstandReportData, setSitstandReportData] = useState(
     viewReportMode ? (assessments.sitstand?.report?.reportData || null) : null
@@ -390,18 +388,6 @@ export default function SitStandAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <div className="hidden items-center gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-              <button onClick={() => setReportMode('static')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'static' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'static' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                静态报告
-              </button>
-              <button onClick={() => setReportMode('dynamic')}
-                className={`px-3 md:px-4 py-1.5 text-xs rounded-md transition-all font-medium ${reportMode === 'dynamic' ? 'zeiss-btn-primary' : ''}`}
-                style={reportMode !== 'dynamic' ? { color: 'var(--text-muted)', background: 'transparent' } : { padding: '6px 16px', fontSize: '12px' }}>
-                动态报告
-              </button>
-            </div>
             <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
             <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-ghost text-xs flex items-center gap-1"
