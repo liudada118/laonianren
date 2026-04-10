@@ -124,13 +124,11 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>{handLabel} · 正态分布</h3>
         </div>
         <div className="h-[100px] px-1"><EChart option={normalOpt} height={100} /></div>
-        <div className="grid grid-cols-4 gap-1 px-3 py-2">
-          {[{ l: '均值', v: activeStats.mean }, { l: '方差', v: activeStats.variance }, { l: '偏度', v: activeStats.skewness }, { l: '峰度', v: activeStats.kurtosis }].map((item, i) => (
-            <div key={i} className="text-center">
-              <div className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-              <div className="text-[11px] font-bold" style={{ color: '#0891B2' }}>{item.v}</div>
-            </div>
-          ))}
+        <div className="px-4 py-2 space-y-1">
+          <Metric label="均值" value={activeStats.mean} color="#0891B2" />
+          <Metric label="方差" value={activeStats.variance} color="#0891B2" />
+          <Metric label="偏度" value={activeStats.skewness} color="#0891B2" />
+          <Metric label="峰度" value={activeStats.kurtosis} color="#0891B2" />
         </div>
       </div>
     </div>
