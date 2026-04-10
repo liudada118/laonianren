@@ -1148,9 +1148,8 @@ export default function GaitAssessment() {
             <h3 className="text-lg font-bold text-center" style={{ color: 'var(--text-primary)' }}>步态评估指导</h3>
             <div className="text-center px-2">
               <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                请受试者<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>从脚印走向 LOGO 方向</span>，并且<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>走出步道</span>。
+                请被评估者<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>从脚印处出发</span>，以<span className="font-semibold" style={{ color: 'var(--zeiss-blue)' }}>自然的步态走出步道</span>，无需返回。
               </p>
-              <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>确保受试者以自然步态匀速行走，采集过程中请勿中途停留。</p>
             </div>
             <button onClick={() => setShowGuideDialog(false)} className="zeiss-btn-primary w-full py-3 text-sm font-semibold mt-1">我已了解，开始评估</button>
           </div>

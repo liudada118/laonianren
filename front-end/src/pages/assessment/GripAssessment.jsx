@@ -852,7 +852,7 @@ export default function GripAssessment() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力评估指导</h3>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              请用<span className="font-bold" style={{ color: '#0066CC' }}>{instructionHand === 'right' ? '右手最大握力' : '左手最大握力'}</span>抓握 <span className="font-bold text-xl" style={{ color: '#0066CC' }}>3</span> 次
+              开始评估后，请被评估者<span className="font-bold" style={{ color: '#0066CC' }}>手握圆柱体</span>，<span className="font-bold" style={{ color: '#0066CC' }}>用力抓握三次</span>
             </p>
             <button
               onClick={() => setShowGripInstruction(false)}

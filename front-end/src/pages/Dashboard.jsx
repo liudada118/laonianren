@@ -520,7 +520,7 @@ export default function Dashboard() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力评估准备</h3>
             <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
-              请确保被评估者已<span className="font-semibold" style={{ color: '#0066CC' }}>带好手套</span>，并且<span className="font-semibold" style={{ color: '#0066CC' }}>手指平铺</span>在传感器上，以确保数据采集的准确性。
+              请确保被评估者已<span className="font-semibold" style={{ color: '#0066CC' }}>戴好手套</span>，并保持<span className="font-semibold" style={{ color: '#0066CC' }}>指尖贴合</span>，<span className="font-semibold" style={{ color: '#0066CC' }}>手掌朝上展开五指</span>，以确保数据采集的准确性。
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowGripTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
@@ -547,8 +547,7 @@ export default function Dashboard() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐能力评估准备</h3>
             <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
-              请被评估者坐在椅子上，双手交叉放于胸前。<br/>
-              评估开始后，请用最快速度完成<span className="font-semibold" style={{ color: '#059669' }}>起坐 6 次，即 5 个周期</span>。
+              请被评估者坐在椅子上，<span className="font-semibold" style={{ color: '#059669' }}>双手交叉放于胸前</span>。
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowSitStandTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>

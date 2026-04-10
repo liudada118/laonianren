@@ -480,7 +480,7 @@ export default function SitStandAssessment() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>起坐评估指导</h3>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              请用最快速度<span className="font-bold" style={{ color: '#059669' }}>起坐 6 次，即 5 个周期</span>
+              开始评估后，以最快速度完成<span className="font-bold" style={{ color: '#059669' }}>5个周期的坐起动作</span>，<span className="font-bold" style={{ color: '#059669' }}>坐姿开始，坐姿结束</span>。
             </p>
             <button
               onClick={() => setShowGuideTip(false)}
