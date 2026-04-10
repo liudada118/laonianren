@@ -1,0 +1,24 @@
+问题分析：
+
+1. CoP 图没有展示完全：
+   - 当前 CoP 卡片使用 flex-1 自适应，但三个卡片等分空间时，CoP 图可能被压缩
+   - CoP 的 grid 设置 top:20 bottom:28 left:36 right:12 可能在小空间下导致截断
+   - 解决：给 CoP 图设置更合理的最小高度，或调整 grid 边距
+
+2. 饼图跟数据对应不上：
+   - 饼图数据来源：leftPressure.forefoot/midfoot/hindfoot（百分比值，如 54.6）
+   - 饼图 value 使用 toFixed(1) 转为字符串
+   - 问题可能是：EChart setOption 使用 silent:true 导致更新不触发重绘
+   - EChart 组件中 setOption 的 silent:true 是指"不触发事件"，不是"不更新"
+   - 但 lazyUpdate:true 可能导致延迟更新
+   - useMemo 依赖 [leftPressure] 对象引用，如果每次 setState 创建新对象应该会触发
+   - 实际问题可能是：饼图的颜色和下方文字的颜色不一致
+     - 左脚饼图：前足=blue, 中足=green, 后足=amber
+     - 左脚文字：前足=blue, 中足=green, 后足=amber ✓ 一致
+     - 右脚饼图：前足=red, 中足=green, 后足=amber
+     - 右脚文字：前足=red, 中足=green, 后足=amber ✓ 一致
+   - 可能是 divideXRegions 的分区逻辑有问题？
+   - 或者是 useMemo 的依赖没有正确触发更新？
+   - leftPressure 是一个对象，每次 setState 创建新对象，引用变化，useMemo 应该会重新计算
+   
+   实际最可能的原因：EChart setOption 的 silent:true + lazyUpdate:true 导致饼图不立即刷新

@@ -59,9 +59,9 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
     const pts = copTrajectory.map(p => [p.y * 7, p.x * 7]);
     return {
       animation: false,
-      tooltip: tooltipStyle, grid: { top: 20, bottom: 28, left: 36, right: 12 },
-      xAxis: { name: '左右(mm)', type: 'value', nameTextStyle: { color: chartColors.text, fontSize: 9 }, splitLine: { lineStyle: { color: chartColors.grid } }, axisLabel: { color: chartColors.text, fontSize: 8 } },
-      yAxis: { name: '前后(mm)', type: 'value', nameTextStyle: { color: chartColors.text, fontSize: 9 }, splitLine: { lineStyle: { color: chartColors.grid } }, axisLabel: { color: chartColors.text, fontSize: 8 } },
+      tooltip: tooltipStyle, grid: { top: 12, bottom: 22, left: 32, right: 8, containLabel: false },
+      xAxis: { name: '左右(mm)', type: 'value', nameTextStyle: { color: chartColors.text, fontSize: 8 }, splitLine: { lineStyle: { color: chartColors.grid } }, axisLabel: { color: chartColors.text, fontSize: 7 } },
+      yAxis: { name: '前后(mm)', type: 'value', nameTextStyle: { color: chartColors.text, fontSize: 8 }, splitLine: { lineStyle: { color: chartColors.grid } }, axisLabel: { color: chartColors.text, fontSize: 7 } },
       series: [
         { type: 'line', data: pts, showSymbol: false, lineStyle: { color: '#93C5FD', width: 1.5, opacity: 0.6 } },
         { type: 'scatter', data: pts.length > 0 ? [pts[pts.length - 1]] : [], symbolSize: 8, itemStyle: { color: C.red } }
@@ -142,12 +142,12 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       </div>
 
       {/* CoP 轨迹 */}
-      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+      <div className="zeiss-card overflow-hidden flex flex-col min-h-0" style={{ flex: '1.2 1 0%' }}>
         <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.amber }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>CoP 轨迹</h3>
         </div>
-        <div className="flex-1 min-h-[60px] px-1"><EChart option={copOpt} height="100%" /></div>
+        <div className="flex-1 min-h-[80px] px-1"><EChart option={copOpt} height="100%" /></div>
         <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="左右平衡" value={realtimeData.balance.toFixed(1) + '%'} color={C.green} />
           <Metric label="轨迹点数" value={copTrajectory.length} color={C.blue} />

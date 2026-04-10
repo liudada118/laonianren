@@ -43,11 +43,10 @@ export default function EChart({ option, height = 220, notMerge = false, classNa
   useEffect(() => {
     if (!chartRef.current || chartRef.current.isDisposed() || !option) return;
     
-    // 使用 setOption 增量更新，关闭动画避免闪烁
+    // 使用 setOption 增量更新
     chartRef.current.setOption(option, {
       notMerge,
-      lazyUpdate: true,
-      silent: true,
+      lazyUpdate: false,
     });
   }, [option, notMerge]);
 
