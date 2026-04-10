@@ -1,0 +1,6 @@
+{
+  "api_key": "",
+  "base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2-turbo-preview",
+  "extra_body": { "enable_thinking": false }
+}

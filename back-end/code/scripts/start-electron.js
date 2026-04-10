@@ -1,39 +1,70 @@
-const { spawn, execSync, spawnSync } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const electron = require('electron');
 
+const backendDir = path.join(__dirname, '..');
 const frontendDir = path.join(__dirname, '..', '..', '..', 'front-end');
-const backendCodeDir = path.join(__dirname, '..');
-const pythonDir = path.join(backendCodeDir, 'python');
+const pythonDir = path.join(backendDir, 'python');
 const pythonVenvDir = path.join(pythonDir, 'venv');
 const requirementsPath = path.join(pythonDir, 'app', 'algorithms', 'requirements.txt');
 const requirementsStampPath = path.join(pythonVenvDir, '.requirements.sha256');
 const llmConfigDir = path.join(__dirname, '..', 'python', 'app', 'algorithms');
 const llmSettingsPath = path.join(llmConfigDir, 'llm_settings.json');
 const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings.example.json');
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-function ensureFrontendDeps() {
-  const nodeModules = path.join(frontendDir, 'node_modules');
-  if (fs.existsSync(nodeModules)) {
-    console.log('[start] front-end dependencies already installed.');
+// ─── Node.js 依赖检查（来自 ld 分支，更完善） ───
+
+function getMissingDirectDeps(projectDir) {
+  const packageJsonPath = path.join(projectDir, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    return [];
+  }
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const declaredDeps = {
+    ...(packageJson.dependencies || {}),
+    ...(packageJson.devDependencies || {}),
+  };
+
+  return Object.keys(declaredDeps).filter((depName) => {
+    const depPath = path.join(projectDir, 'node_modules', ...depName.split('/'));
+    return !fs.existsSync(depPath);
+  });
+}
+
+function ensureProjectDeps(projectDir, label) {
+  const nodeModules = path.join(projectDir, 'node_modules');
+  const missingDeps = getMissingDirectDeps(projectDir);
+  const shouldInstall = !fs.existsSync(nodeModules) || missingDeps.length > 0;
+
+  if (!shouldInstall) {
+    console.log(`[start] ${label}依赖已就绪`);
     return;
   }
 
-  console.log('[start] Installing front-end dependencies...');
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  if (!fs.existsSync(nodeModules)) {
+    console.log(`[start] ${label}依赖未安装，正在执行 npm install...`);
+  } else {
+    console.log(`[start] ${label}存在缺失依赖: ${missingDeps.join(', ')}`);
+    console.log(`[start] 正在为${label}执行 npm install...`);
+  }
+
   try {
     execSync(`${npmCmd} install`, {
-      cwd: frontendDir,
+      cwd: projectDir,
       stdio: 'inherit',
     });
-    console.log('[start] front-end dependencies installed.');
+    console.log(`[start] ${label}依赖安装完成`);
   } catch (e) {
-    console.error('[start] Failed to install front-end dependencies:', e.message);
-    console.error('[start] Please run `npm install` in front-end manually if needed.');
+    console.error(`[start] ${label}依赖安装失败:`, e.message);
+    console.error(`[start] 请手动在 ${projectDir} 执行 npm install`);
   }
 }
+
+// ─── Python 相关（来自 python3 分支） ───
 
 function getVenvPythonPath() {
   if (process.platform === 'win32') {
@@ -107,7 +138,7 @@ function ensurePythonDeps() {
   const venvPython = getVenvPythonPath();
   if (!fs.existsSync(venvPython)) {
     console.log('[start] Creating Python virtual environment...');
-    const created = runCommand(bootstrapPython, ['-m', 'venv', pythonVenvDir], backendCodeDir);
+    const created = runCommand(bootstrapPython, ['-m', 'venv', pythonVenvDir], backendDir);
     if (!created) {
       console.warn('[start] Failed to create python venv automatically.');
       console.warn('[start] You can create it manually in back-end/code/python.');
@@ -130,7 +161,7 @@ function ensurePythonDeps() {
   const installed = runCommand(
     venvPython,
     ['-m', 'pip', 'install', '-r', requirementsPath],
-    backendCodeDir,
+    backendDir,
   );
 
   if (!installed) {
@@ -144,6 +175,8 @@ function ensurePythonDeps() {
   }
   console.log('[start] Python dependencies installed.');
 }
+
+// ─── LLM 配置文件（来自 python3 分支） ───
 
 function ensureLlmSettingsFile() {
   try {
@@ -170,8 +203,10 @@ function ensureLlmSettingsFile() {
   }
 }
 
+// ─── 启动前检查 ───
+ensureProjectDeps(backendDir, '后端');
+ensureProjectDeps(frontendDir, '前端');
 ensureLlmSettingsFile();
-ensureFrontendDeps();
 ensurePythonDeps();
 
 const env = { ...process.env };

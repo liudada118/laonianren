@@ -1,0 +1,239 @@
+{
+  "test_date": "2026-01-09 16:09:00",
+  "duration_stats": {
+    "total_duration": 26.84,
+    "num_cycles": 5,
+    "avg_duration": 5.37
+  },
+  "stand_evolution": {
+    "heatmaps": [
+      {
+        "row": 0,
+        "col": 0,
+        "foot": "left",
+        "file": "stand_evo_left_0.png"
+      },
+      {
+        "row": 1,
+        "col": 0,
+        "foot": "right",
+        "file": "stand_evo_right_0.png"
+      },
+      {
+        "row": 0,
+        "col": 1,
+        "foot": "left",
+        "file": "stand_evo_left_1.png"
+      },
+      {
+        "row": 1,
+        "col": 1,
+        "foot": "right",
+        "file": "stand_evo_right_1.png"
+      },
+      {
+        "row": 0,
+        "col": 2,
+        "foot": "left",
+        "file": "stand_evo_left_2.png"
+      },
+      {
+        "row": 1,
+        "col": 2,
+        "foot": "right",
+        "file": "stand_evo_right_2.png"
+      },
+      {
+        "row": 0,
+        "col": 3,
+        "foot": "left",
+        "file": "stand_evo_left_3.png"
+      },
+      {
+        "row": 1,
+        "col": 3,
+        "foot": "right",
+        "file": "stand_evo_right_3.png"
+      },
+      {
+        "row": 0,
+        "col": 4,
+        "foot": "left",
+        "file": "stand_evo_left_4.png"
+      },
+      {
+        "row": 1,
+        "col": 4,
+        "foot": "right",
+        "file": "stand_evo_right_4.png"
+      },
+      {
+        "row": 0,
+        "col": 5,
+        "foot": "left",
+        "file": "stand_evo_left_5.png"
+      },
+      {
+        "row": 1,
+        "col": 5,
+        "foot": "right",
+        "file": "stand_evo_right_5.png"
+      },
+      {
+        "row": 0,
+        "col": 6,
+        "foot": "left",
+        "file": "stand_evo_left_6.png"
+      },
+      {
+        "row": 1,
+        "col": 6,
+        "foot": "right",
+        "file": "stand_evo_right_6.png"
+      },
+      {
+        "row": 0,
+        "col": 7,
+        "foot": "left",
+        "file": "stand_evo_left_7.png"
+      },
+      {
+        "row": 1,
+        "col": 7,
+        "foot": "right",
+        "file": "stand_evo_right_7.png"
+      },
+      {
+        "row": 0,
+        "col": 8,
+        "foot": "left",
+        "file": "stand_evo_left_8.png"
+      },
+      {
+        "row": 1,
+        "col": 8,
+        "foot": "right",
+        "file": "stand_evo_right_8.png"
+      },
+      {
+        "row": 0,
+        "col": 9,
+        "foot": "left",
+        "file": "stand_evo_left_9.png"
+      },
+      {
+        "row": 1,
+        "col": 9,
+        "foot": "right",
+        "file": "stand_evo_right_9.png"
+      },
+      {
+        "row": 0,
+        "col": 10,
+        "foot": "left",
+        "file": "stand_evo_left_10.png"
+      },
+      {
+        "row": 1,
+        "col": 10,
+        "foot": "right",
+        "file": "stand_evo_right_10.png"
+      }
+    ],
+    "labels": [
+      "0%",
+      "10%",
+      "20%",
+      "30%",
+      "40%",
+      "50%",
+      "60%",
+      "70%",
+      "80%",
+      "90%",
+      "100%"
+    ]
+  },
+  "stand_cop": {
+    "left_image": "stand_cop_left.png",
+    "right_image": "stand_cop_right.png"
+  },
+  "sit_evolution": {
+    "heatmaps": [
+      {
+        "col": 0,
+        "file": "sit_evo_0.png"
+      },
+      {
+        "col": 1,
+        "file": "sit_evo_1.png"
+      },
+      {
+        "col": 2,
+        "file": "sit_evo_2.png"
+      },
+      {
+        "col": 3,
+        "file": "sit_evo_3.png"
+      },
+      {
+        "col": 4,
+        "file": "sit_evo_4.png"
+      },
+      {
+        "col": 5,
+        "file": "sit_evo_5.png"
+      },
+      {
+        "col": 6,
+        "file": "sit_evo_6.png"
+      },
+      {
+        "col": 7,
+        "file": "sit_evo_7.png"
+      },
+      {
+        "col": 8,
+        "file": "sit_evo_8.png"
+      },
+      {
+        "col": 9,
+        "file": "sit_evo_9.png"
+      },
+      {
+        "col": 10,
+        "file": "sit_evo_10.png"
+      }
+    ],
+    "labels": [
+      "Start",
+      "10%",
+      "20%",
+      "30%",
+      "40%",
+      "50%",
+      "60%",
+      "70%",
+      "80%",
+      "90%",
+      "End"
+    ]
+  },
+  "sit_cop": {
+    "image": "sit_cop.png"
+  },
+  "force_curves": {
+    "stand_curve": "stand_force_curve.png",
+    "sit_curve": "sit_force_curve.png"
+  },
+  "stand_frames_count": 2261,
+  "sit_frames_count": 2519,
+  "stand_peaks": [
+    61,
+    462,
+    856,
+    1258,
+    1691,
+    2110
+  ]
+}

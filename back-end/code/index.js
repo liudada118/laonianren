@@ -1,16 +1,20 @@
+const { configureLogging } = require('./util/configureLogging')
+configureLogging('progress')
+
 const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
-const { fork, spawn } = require('child_process')
+const { fork, spawn, spawnSync } = require('child_process')
 const { getHardwareFingerprint } = require('./util/getWinConfig')
 const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
+const { initAutoUpdater, registerUpdaterIpcHandlers, cleanupUpdater } = require('./updater')
 // const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
 const devWebRoot = path.join(__dirname, 'client', 'dist')
-const prodWebRoot = path.join(__dirname, '..', 'build')
+const prodWebRoot = path.join(__dirname, 'renderer-build')
 const webRoot = isPackaged ? prodWebRoot : devWebRoot
 const defaultDevPort = process.env.VITE_DEV_PORT || '5173'
 let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaultDevPort}`
@@ -484,6 +488,49 @@ function aiApiPy() {
     : path.join(process.resourcesPath, 'python', 'app', 'algorithms', 'api_server.py')
 }
 
+function aiRequirementsPath() {
+  const isDev = !app.isPackaged
+  return isDev
+    ? path.join(__dirname, 'python', 'requirements-electron.txt')
+    : path.join(process.resourcesPath, 'python', 'requirements-electron.txt')
+}
+
+function checkPythonAiDeps(pythonBin) {
+  if (!pythonBin) {
+    return { ok: false, reason: 'Python runtime not found' }
+  }
+
+  const probeCode = [
+    'import fastapi',
+    'import uvicorn',
+    'import numpy',
+    'import pydantic',
+    'import matplotlib',
+    'import pandas',
+    'import cv2',
+    'import scipy',
+    'import skimage',
+    'from PIL import Image',
+  ].join('; ')
+
+  try {
+    const result = spawnSync(pythonBin, ['-c', probeCode], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      encoding: 'utf8',
+    })
+
+    if (result.status === 0) {
+      return { ok: true }
+    }
+
+    const detail = (result.stderr || result.stdout || '').trim() || `exit ${result.status}`
+    return { ok: false, reason: detail }
+  } catch (err) {
+    return { ok: false, reason: err.message }
+  }
+}
+
 async function startPythonAiChild() {
   if (await checkPythonAiOnce(1000)) {
     console.log(`[pyai] Python AI service already running on port ${pythonAiPort}`)
@@ -503,6 +550,15 @@ async function startPythonAiChild() {
   }
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`AI api server not found: ${scriptPath}`)
+  }
+
+  const depsCheck = checkPythonAiDeps(pythonBin)
+  if (!depsCheck.ok) {
+    const requirementsPath = aiRequirementsPath()
+    const installHint = fs.existsSync(requirementsPath)
+      ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
+      : 'Install the Python AI dependencies before starting the packaged app'
+    throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
   }
 
   console.log(`[pyai] starting AI service with ${pythonBin}`)
@@ -643,13 +699,24 @@ app.whenReady().then(async () => {
   try {
     await startPythonAiChild()
   } catch (err) {
-    console.error('[pyai] failed to start:', err.message)
+    console.warn('[pyai] AI service unavailable, continuing without AI report generation:', err.message)
   }
   // 开启python线程
   // startWorker(); // [已迁移到JS算法] Python子进程不再需要
   await createWindow()
 
   Menu.setApplicationMenu(null);
+  registerUpdaterIpcHandlers()
+
+  // 初始化自动更新（仅在打包后的生产环境启用）
+  if (isPackaged) {
+    const allWindows = BrowserWindow.getAllWindows()
+    if (allWindows.length > 0) {
+      initAutoUpdater(allWindows[0])
+    }
+  } else {
+    console.log('[updater] 开发模式，跳过自动更新初始化')
+  }
 
   // const data1 = await getCsvData('D:/jqtoolsWin - 副本/python/app/静态数据集1.csv')
 
@@ -703,6 +770,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // 清理自动更新定时器
+  cleanupUpdater()
   // 清理 Vite 开发服务器子进程
   if (viteProcess) {
     viteProcess.kill()

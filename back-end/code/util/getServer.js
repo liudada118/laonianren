@@ -1,4 +1,3 @@
-const { default: axios } = require("axios");
 const { backendAddress } = require("./config");
 
     /**
@@ -8,9 +7,10 @@ const { backendAddress } = require("./config");
      */
     async function getKeyfromWinuuid(uuid) {
         return 1
-        const response = await axios.get(`${backendAddress}/getKey?uuid=${uuid}`)
-        console.log(response.data)
-        return response.data
+        const response = await fetch(`${backendAddress}/getKey?uuid=${uuid}`)
+        const data = await response.json()
+        console.log(data)
+        return data
         return 1
     }
 

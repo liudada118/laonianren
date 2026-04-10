@@ -2,9 +2,35 @@ const sqlite3 = require("sqlite3").verbose();
 const csv = require("csv-parser");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { timeStampTo_Date } = require("./time");
 const constantObj = require("./config");
 // const { sitYToX, backYToX } = require("./line"); // 旧设备类型已移除
+
+function getWritableBaseDir(isPackaged) {
+  if (!isPackaged) {
+    return path.join(__dirname, '..');
+  }
+
+  if (typeof process.env.userData === 'string' && process.env.userData.trim()) {
+    return process.env.userData.trim();
+  }
+
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', '肌少症评估系统');
+  }
+
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '肌少症评估系统');
+  }
+
+  return path.join(os.homedir(), '.肌少症评估系统');
+}
+
+function getWritableDataDir(isPackaged) {
+  return path.join(getWritableBaseDir(isPackaged), 'data');
+}
 
 /**
  * 输入当前系统名  返回可执行数据库
@@ -33,12 +59,16 @@ const initDb = (fileStr, filePath) => {
  */
 function genDb(file, filePath) {
   let db
+  fs.mkdirSync(filePath, { recursive: true })
   if (fs.existsSync(file)) {
     db = new sqlite3.Database(file);
   } else {
+    const templatePath = `${filePath}/init.db`
     console.log(file, filePath, 'err')
-    let data = fs.readFileSync(`${filePath}/init.db`);
-    fs.writeFileSync(file, data);
+    if (fs.existsSync(templatePath)) {
+      let data = fs.readFileSync(templatePath);
+      fs.writeFileSync(file, data);
+    }
     db = new sqlite3.Database(file);
   }
   // 启用 WAL 模式：提升并发写入性能，减少采集时卡顿
@@ -144,10 +174,8 @@ function dbload(db, param, file, isPackaged, byAssessmentId = false) {
           )
         }
 
-        let csvPath = __dirname + "/../data";
-        if (isPackaged) {
-          csvPath = 'resources/data'
-        }
+        const csvPath = getWritableDataDir(isPackaged);
+        fs.mkdirSync(csvPath, { recursive: true })
 
         const csvWriter1 = createCsvWriter({
           path: `${csvPath}/${file}${str}.csv`,

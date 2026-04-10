@@ -33,12 +33,12 @@ function EChart({ option, height = 280 }) {
 const SECTIONS = [
   { id: 'overview', label: '基本信息与足弓指标' },
   { id: 'arch-zones', label: '足弓区域分布图' },
-  { id: 'pressure', label: '区域压力分布' },
-  { id: 'cop-heatmap', label: 'COP 压力中心轨迹' },
-  { id: 'cop-velocity', label: 'COP 速度时间序列' },
-  { id: 'cop-params', label: 'COP 参数表' },
-  { id: 'annotation', label: '参数说明' },
-  { id: 'summary', label: 'AI综合评估' },
+  { id: 'pressure', label: '压力分布热力图' },
+  { id: 'cop-heatmap', label: 'COP 轨迹与热力图' },
+  { id: 'cop-velocity', label: 'COP 速度与加速度' },
+  { id: 'cop-params', label: 'COP 参数' },
+  { id: 'annotation', label: '医师注释' },
+  { id: 'summary', label: 'AI 报告' },
 ];
 
 const STANDING_SPACING_MM = 14;

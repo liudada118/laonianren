@@ -9,6 +9,17 @@ function generateSessionId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
 }
 
+// 设备类型中文名映射
+const DEVICE_NAME_MAP = {
+  HL: '左手手套',
+  HR: '右手手套',
+  foot1: '脚垫1',
+  foot2: '脚垫2',
+  foot3: '脚垫3',
+  foot4: '脚垫4',
+  sit: '坐垫',
+};
+
 const INITIAL_STATE = {
   // 登录信息
   secretKey: '',
@@ -44,10 +55,31 @@ export function AssessmentProvider({ children }) {
   // MAC 地址信息 { '/dev/ttyXXX': { uniqueId, version }, ... }
   const [macInfo, setMacInfo] = useState({});
 
+  // 设备断开提示消息队列
+  const [deviceAlerts, setDeviceAlerts] = useState([]);
+
+  // 用 ref 跟踪上一次的设备状态，避免闭包问题
+  const prevDeviceStatusRef = useRef({});
+
   // 监听 BackendBridge 的设备状态事件
   useEffect(() => {
     const offStatus = backendBridge.on('deviceStatus', ({ type, status }) => {
       setDeviceOnlineMap(prev => ({ ...prev, [type]: status }));
+
+      // 检测设备从 online 变为 offline（突然断开）
+      const prevStatus = prevDeviceStatusRef.current[type];
+      if (prevStatus === 'online' && status === 'offline') {
+        const deviceName = DEVICE_NAME_MAP[type] || type;
+        const alertMsg = { id: Date.now() + '_' + type, type, deviceName, time: new Date().toLocaleTimeString() };
+        setDeviceAlerts(prev => [...prev, alertMsg]);
+        console.warn(`[设备断开] ${deviceName} 已断开连接`);
+
+        // 5秒后自动移除提示
+        setTimeout(() => {
+          setDeviceAlerts(prev => prev.filter(a => a.id !== alertMsg.id));
+        }, 5000);
+      }
+      prevDeviceStatusRef.current[type] = status;
     });
     const offConnect = backendBridge.on('connect', () => {
       setWsConnected(true);
@@ -65,6 +97,11 @@ export function AssessmentProvider({ children }) {
       offDisconnect();
       offMacInfo();
     };
+  }, []);
+
+  // 清除设备断开提示
+  const dismissDeviceAlert = useCallback((alertId) => {
+    setDeviceAlerts(prev => prev.filter(a => a.id !== alertId));
   }, []);
 
   // ─── 一键连接后端设备 ───
@@ -104,6 +141,11 @@ export function AssessmentProvider({ children }) {
       setRescanLoading(true);
       console.log('[重新扫描] 开始...');
 
+      // 清空设备在线状态，等待后端重新推送
+      setDeviceOnlineMap({});
+      backendBridge.deviceOnline = {};
+      prevDeviceStatusRef.current = {};
+
       // 确保 WebSocket 已连接
       if (!backendBridge.isConnected) {
         backendBridge.connect();
@@ -131,6 +173,7 @@ export function AssessmentProvider({ children }) {
     setDeviceConnStatus('disconnected');
     setDeviceOnlineMap({});
     setWsConnected(false);
+    prevDeviceStatusRef.current = {};
   }, []);
 
   const login = useCallback((secretKey, institution, llmApiKey = '') => {
@@ -278,6 +321,9 @@ export function AssessmentProvider({ children }) {
     rescanDevices,
     rescanLoading,
     backendBridge, // 暴露 backendBridge 实例供各页面使用
+    // 设备断开提示
+    deviceAlerts,
+    dismissDeviceAlert,
   };
 
   return (

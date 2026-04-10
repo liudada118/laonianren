@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AssessmentProvider } from './contexts/AssessmentContext';
 import { ToastProvider } from './components/ui/Toast';
+import DeviceAlertOverlay from './components/ui/DeviceAlertOverlay';
 
 // Pages
 import Login from './pages/Login';
@@ -11,6 +12,7 @@ import AssessmentHistory from './pages/AssessmentHistory';
 import HistoryReportView from './pages/HistoryReportView';
 import HistoryComprehensiveView from './pages/HistoryComprehensiveView';
 import NotFound from './pages/NotFound';
+import UpdateNotification from './components/ui/UpdateNotification';
 
 // Assessment Pages
 import GripAssessment from './pages/assessment/GripAssessment';
@@ -23,6 +25,8 @@ function App() {
     <ThemeProvider defaultTheme="light">
       <AssessmentProvider>
         <ToastProvider>
+          <UpdateNotification />
+          <DeviceAlertOverlay />
           <Routes>
             <Route path="/" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
