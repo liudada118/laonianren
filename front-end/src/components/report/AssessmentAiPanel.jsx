@@ -96,7 +96,7 @@ export default function AssessmentAiPanel({
 
         {visibleSections.map(section => (
           <div key={section.key} className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-            <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+            <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>
               {section.label}
             </h5>
             <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>

@@ -327,7 +327,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
   const chartTextColor = '#6B7B8D';
   const gridLineColor = '#EDF0F4';
   const tooltipStyle = { backgroundColor: '#FFFFFF', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 8px;' };
-  const baseGrid = { top: 50, bottom: 35, left: 55, right: 20 };
+  const baseGrid = { top: 50, bottom: 45, left: 55, right: 15, containLabel: true };
 
   // ─── ECharts 配置 ───
   const forceTimeOption = useMemo(() => {
@@ -338,8 +338,8 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: [...fingerNames, '总力'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      yAxis: { type: 'value', name: '力(N)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
         ...fingerKeys.map((key, i) => ({
           name: fingerNames[i], type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 1.5 },
@@ -356,11 +356,11 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
     const step = Math.max(1, Math.floor(data.times.length / 300));
     const sampledTimes = data.times.filter((_, i) => i % step === 0);
     return {
-      tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
+      tooltip: { trigger: 'axis', confine: true, order: 'seriesDesc', ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: fingerNames, top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      yAxis: { type: 'value', name: '力(N)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: fingerKeys.map((key, i) => ({
         name: fingerNames[i], type: 'line', stack: 'total', areaStyle: { opacity: 0.35 },
         smooth: true, symbol: 'none', lineStyle: { width: 1 },
@@ -375,7 +375,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
       tooltip: { ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       grid: { top: 30, bottom: 35, left: 55, right: 20 },
       xAxis: { type: 'category', data: data.fingers.map(f => f.name), axisLabel: { fontSize: 11, color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } } },
-      yAxis: { type: 'value', name: '力(N)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
+      yAxis: { type: 'value', name: '力(N)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [{
         type: 'bar', barWidth: '45%', itemStyle: { borderRadius: [6, 6, 0, 0] },
         data: data.fingers.map((f, i) => ({ value: typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : f.force, itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: colors[i] }, { offset: 1, color: colors[i] + '30' }]) } })),
@@ -392,8 +392,8 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}°` },
       legend: { data: ['横滚(Roll)', '俯仰(Pitch)', '偏航(Yaw)'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '角度(°)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      yAxis: { type: 'value', name: '角度(°)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
         { name: '横滚(Roll)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.roll || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#DC2626' }, lineStyle: { width: 2 } },
         { name: '俯仰(Pitch)', type: 'line', smooth: true, symbol: 'none', data: (data.eulerData?.pitch || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#0066CC' }, lineStyle: { width: 2 } },
@@ -410,8 +410,8 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}°/s` },
       legend: { data: ['角速度', '检测阈值'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t), name: '时间(s)', nameTextStyle: { color: chartTextColor }, boundaryGap: false, axisLabel: { color: chartTextColor }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '角速度(°/s)', nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      yAxis: { type: 'value', name: '角速度(°/s)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
         { name: '角速度', type: 'line', smooth: true, symbol: 'none', data: (data.angularVelocity || []).filter((_, i) => i % step === 0).map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v), itemStyle: { color: '#9333EA' }, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2 } },
         { name: '检测阈值', type: 'line', symbol: 'none', lineStyle: { type: 'dashed', color: '#DC2626', width: 1.5 }, data: sampledTimes.map(() => 30) }
@@ -568,16 +568,16 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                 <div className="flex-1" style={{ minWidth: 0 }}>
                   <HandPressureMap fingers={data.fingers} totalForce={data.totalForce} hand={data.hand || handLabel} sensorMatrix={data.peakSensorMatrix || data.avgSensorMatrix} />
                 </div>
-                <div className="w-[360px] space-y-2">
+                <div className="w-[420px] space-y-2">
                   {(data.fingers || []).map((f, i) => (
                     <div key={i} className="zeiss-card p-3 flex items-center gap-3 transition-colors hover:shadow-md">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs"
                         style={{ backgroundColor: colors[i] + '15', color: colors[i], border: `1px solid ${colors[i]}30` }}>
                         {f.name?.[0] || '-'}
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1" style={{ minWidth: 0 }}>
                         <div className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>{f.name || '-'}</div>
-                        <div className="flex gap-3 text-[11px]">
+                        <div className="flex gap-3" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>
                           <span><span style={{ color: 'var(--text-muted)' }}>力: </span><span style={{ color: 'var(--text-secondary)' }}>{typeof f.force === 'number' ? parseFloat(f.force.toFixed(2)) : (f.force ?? 0)}N</span></span>
                           <span><span style={{ color: 'var(--text-muted)' }}>面积: </span><span style={{ color: 'var(--text-secondary)' }}>{mm2ToCm2(f.area)}cm²</span></span>
                           <span><span style={{ color: 'var(--text-muted)' }}>点数: </span><span style={{ color: 'var(--text-secondary)' }}>{f.points ?? 0}</span></span>
@@ -758,28 +758,28 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 测试概况 */}
                       {aiReport.overview && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>测试概况</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>测试概况</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.overview}</p>
                         </div>
                       )}
 
                       {aiReport.left_hand_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>左手AI综合评估</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>左手AI综合评估</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.left_hand_analysis}</p>
                         </div>
                       )}
 
                       {aiReport.right_hand_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>右手AI综合评估</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>右手AI综合评估</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.right_hand_analysis}</p>
                         </div>
                       )}
 
                       {aiReport.bilateral_comparison && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>双手对比</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>双手对比</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.bilateral_comparison}</p>
                         </div>
                       )}
@@ -787,7 +787,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 握力水平分析 */}
                       {aiReport.strength_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握力水平分析</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>握力水平分析</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.strength_analysis}</p>
                         </div>
                       )}
@@ -795,7 +795,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 手指力分布分析 */}
                       {aiReport.distribution_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>手指力分布分析</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>手指力分布分析</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.distribution_analysis}</p>
                         </div>
                       )}
@@ -803,7 +803,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 稳定性分析 */}
                       {aiReport.stability_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>手部稳定性分析</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>手部稳定性分析</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.stability_analysis}</p>
                         </div>
                       )}
@@ -811,7 +811,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 姿态分析 */}
                       {aiReport.posture_analysis && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>握持姿态分析</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>握持姿态分析</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.posture_analysis}</p>
                         </div>
                       )}
@@ -819,7 +819,7 @@ export default function GripReport({ patientName, patientInfo, onClose, onSwitch
                       {/* 临床建议 */}
                       {aiReport.clinical_suggestion && (
                         <div className="p-4 rounded-lg" style={{ background: 'var(--bg-hover, #f8f9fa)' }}>
-                          <h5 className="text-xs font-bold mb-2" style={{ color: 'var(--text-primary)' }}>临床建议</h5>
+                          <h5 className="font-bold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>临床建议</h5>
                           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{aiReport.clinical_suggestion}</p>
                         </div>
                       )}

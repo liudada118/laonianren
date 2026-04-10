@@ -333,15 +333,17 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     yAxis: { type: 'value', name: 'N', axisLabel: { fontSize: 10, color: C.text, formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: C.grid } } },
     series: curves.map((c, i) => ({
       name: `S${i + 1}`, type: 'line', smooth: true, symbol: 'none', data: c.data || [],
-      lineStyle: { color: partColors[i % partColors.length], width: 1.5 },
+      color: partColors[i % partColors.length],
+      lineStyle: { width: 1.5 },
+      itemStyle: { color: partColors[i % partColors.length] },
     })),
     tooltip: { trigger: 'axis', ...tip, valueFormatter: v => typeof v === 'number' ? v.toFixed(2) : v },
   });
   const leftPartOpt = useMemo(() => makePartOpt(leftPartCurves), [leftPartCurves]);
   const rightPartOpt = useMemo(() => makePartOpt(rightPartCurves), [rightPartCurves]);
 
-  const thStyle = 'px-3 py-2 text-left text-[11px] font-semibold';
-  const tdStyle = 'px-3 py-2 text-[11px]';
+  const thStyle = 'px-3 py-2 text-left font-semibold text-[14px]';
+  const tdStyle = 'px-3 py-2 text-[14px]';
   const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
 
   useEffect(() => {
@@ -455,15 +457,14 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-spatiotemporal">
           <div className="zeiss-section-title">1. 步态时空参数</div>
           <div className="zeiss-card overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full" style={{ fontSize: '14px' }}>
               <thead><tr className="zeiss-table-header">
-                {['参数', '单位', '测量值'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
+                {['参数', '测量值'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
               </tr></thead>
               <tbody>{gaitParams.map((r, i) => (
                 <tr key={i} className="zeiss-table-row">
                   <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-muted)' }}>{r.unit}</td>
-                  <td className={tdStyle} style={{ color: 'var(--zeiss-blue)', fontWeight: 600 }}>{r.value}</td>
+                  <td className={tdStyle}><span style={{ color: 'var(--text-primary)' }}>{r.value}</span><span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>{r.unit}</span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -473,28 +474,35 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         {/* 2. 足底平衡分析 */}
         <section id="gait-balance">
           <div className="zeiss-section-title">2. 足底平衡分析</div>
-          <div className="zeiss-card overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead><tr className="zeiss-table-header">
-                <th className={thStyle} style={{ color: 'var(--text-tertiary)' }}>类型</th>
-                <th className={thStyle} colSpan={3} style={{ color: C.blue, textAlign: 'center' }}>左脚</th>
-                <th className={thStyle} colSpan={3} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
-              </tr><tr className="zeiss-table-header">
-                <th className={thStyle}></th>
-                {['峰值(N)', '均值(N)', '标准差(N)', '峰值(N)', '均值(N)', '标准差(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)' }}>{h}</th>)}
-              </tr></thead>
-              <tbody>{balanceData.map((r, i) => (
-                <tr key={i} className="zeiss-table-row">
-                  <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.type}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.lPeak}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.lMean}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.lStd}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.rPeak}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.rMean}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.rStd}</td>
-                </tr>
-              ))}</tbody>
-            </table>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[
+              { label: '左足平衡', color: C.blue, getData: (r) => ({ peak: r.lPeak, mean: r.lMean, std: r.lStd }) },
+              { label: '右足平衡', color: C.amber, getData: (r) => ({ peak: r.rPeak, mean: r.rMean, std: r.rStd }) },
+            ].map(({ label, color, getData }) => (
+              <div key={label}>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: color }} /> {label}
+                </h4>
+                <div className="zeiss-card overflow-x-auto p-3">
+                  <table className="w-full" style={{ fontSize: '14px' }}>
+                    <thead><tr className="zeiss-table-header">
+                      {['类型', '峰值(N)', '均值(N)', '标准差(N)'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>{balanceData.map((r, i) => {
+                      const d = getData(r);
+                      return (
+                        <tr key={i} className="zeiss-table-row">
+                          <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.type}</td>
+                          <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{d.peak}</td>
+                          <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{d.mean}</td>
+                          <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{d.std}</td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -502,7 +510,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-evolution">
           <div className="zeiss-section-title">3. 完整足印与平均步态</div>
           <div className="zeiss-card p-4 mb-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>瞬时足底压力演变（落地 → 离地）</h4>
+            <h4 className="font-semibold mb-3" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>瞬时足底压力演变（落地 → 离地）</h4>
             <div className="overflow-x-auto">
               {pressureEvolutionData ? (
                 <PressureEvolutionChart evolutionData={pressureEvolutionData} />
@@ -516,7 +524,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
             </div>
           </div>
           <div className="zeiss-card p-4">
-            <h4 className="text-xs font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>步态平均摘要</h4>
+            <h4 className="font-semibold mb-3" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>步态平均摘要</h4>
             <div>
               {gaitAverageData ? (
                 <GaitAverageChart gaitAvgData={gaitAverageData} innerOnRight={innerOnRight} />
@@ -551,13 +559,13 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-timeseries">
           <div className="zeiss-section-title">5. 时序曲线</div>
           <div className="zeiss-card p-4 mb-4">
-            <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>足偏角 (FPA) 分析</h4>
+            <h4 className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>足偏角 (FPA) 分析</h4>
             <EChart option={fpaOption} height={220} />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>面积 (cm²)</h4><EChart option={areaOption} height={200} /></div>
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>负荷 (N)</h4><EChart option={forceOption} height={200} /></div>
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>压强 (N/cm²)</h4><EChart option={pressureOption} height={200} /></div>
+            <div className="zeiss-card p-4"><h4 className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>面积 (cm²)</h4><EChart option={areaOption} height={200} /></div>
+            <div className="zeiss-card p-4"><h4 className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>负荷 (N)</h4><EChart option={forceOption} height={200} /></div>
+            <div className="zeiss-card p-4"><h4 className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>压强 (N/cm²)</h4><EChart option={pressureOption} height={200} /></div>
           </div>
         </section>
 
@@ -570,8 +578,8 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color }}>
                   <span className="w-2 h-2 rounded-full" style={{ background: color }} /> {label}
                 </h4>
-                <div className="zeiss-card overflow-x-auto">
-                  <table className="w-full text-xs">
+                <div className="zeiss-card overflow-x-auto p-3">
+                  <table className="w-full" style={{ fontSize: '14px' }}>
                     <thead><tr className="zeiss-table-header">
                       {['分区', '压力峰值(N)', '冲量(N·s)', '负载率(N/s)', '峰值时间(%)', '接触时间(%)'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
                     </tr></thead>
@@ -603,70 +611,75 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-partcurves">
           <div className="zeiss-section-title">8. 分区曲线</div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.blue }}>左足分区曲线</h4><EChart option={leftPartOpt} height={200} /></div>
-            <div className="zeiss-card p-4"><h4 className="text-xs font-semibold mb-2" style={{ color: C.amber }}>右足分区曲线</h4><EChart option={rightPartOpt} height={200} /></div>
+            <div className="zeiss-card p-4"><h4 className="font-semibold mb-2" style={{ color: C.blue, fontSize: '14px' }}>左足分区曲线</h4><EChart option={leftPartOpt} height={200} /></div>
+            <div className="zeiss-card p-4"><h4 className="font-semibold mb-2" style={{ color: C.amber, fontSize: '14px' }}>右足分区曲线</h4><EChart option={rightPartOpt} height={200} /></div>
           </div>
         </section>
 
         {/* 9. 单脚支撑相 */}
         <section id="gait-support">
           <div className="zeiss-section-title">9. 单脚支撑相</div>
-          <div className="zeiss-card overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead><tr className="zeiss-table-header">
-                <th className={thStyle} style={{ color: 'var(--text-tertiary)' }}>阶段</th>
-                <th className={thStyle} style={{ color: 'var(--text-tertiary)' }}>范围</th>
-                <th className={thStyle} colSpan={4} style={{ color: C.blue, textAlign: 'center' }}>左脚</th>
-                <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
-              </tr><tr className="zeiss-table-header">
-                <th className={thStyle}></th><th className={thStyle}></th>
-                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
-              </tr></thead>
-              <tbody>{supportPhases.map((r, i) => (
-                <tr key={i} className="zeiss-table-row">
-                  <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-muted)' }}>{r.range}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.duration}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.copSpeed}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.maxArea}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.maxLoad}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.duration}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.copSpeed}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.maxArea}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.maxLoad}</td>
-                </tr>
-              ))}</tbody>
-            </table>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[
+              { label: '左足支撑相', color: C.blue, side: 'left' },
+              { label: '右足支撑相', color: C.amber, side: 'right' },
+            ].map(({ label, color, side }) => (
+              <div key={label}>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: color }} /> {label}
+                </h4>
+                <div className="zeiss-card overflow-x-auto p-3">
+                  <table className="w-full" style={{ fontSize: '14px' }}>
+                    <thead><tr className="zeiss-table-header">
+                      {['阶段', '范围', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>{supportPhases.map((r, i) => (
+                      <tr key={i} className="zeiss-table-row">
+                        <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-muted)' }}>{r.range}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].duration}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].copSpeed}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxArea}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxLoad}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
         {/* 10. 步态周期 */}
         <section id="gait-cycle">
           <div className="zeiss-section-title">10. 步态周期</div>
-          <div className="zeiss-card overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead><tr className="zeiss-table-header">
-                <th className={thStyle} style={{ color: 'var(--text-tertiary)' }}>阶段</th>
-                <th className={thStyle} colSpan={4} style={{ color: C.blue, textAlign: 'center' }}>左脚</th>
-                <th className={thStyle} colSpan={4} style={{ color: C.amber, textAlign: 'center' }}>右脚</th>
-              </tr><tr className="zeiss-table-header">
-                <th className={thStyle}></th>
-                {['时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map((h, i) => <th key={i} className={thStyle} style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{h}</th>)}
-              </tr></thead>
-              <tbody>{cyclePhases.map((r, i) => (
-                <tr key={i} className="zeiss-table-row">
-                  <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.duration}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.copSpeed}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.maxArea}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.left.maxLoad}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.duration}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.copSpeed}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.maxArea}</td>
-                  <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r.right.maxLoad}</td>
-                </tr>
-              ))}</tbody>
-            </table>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[
+              { label: '左足周期', color: C.blue, side: 'left' },
+              { label: '右足周期', color: C.amber, side: 'right' },
+            ].map(({ label, color, side }) => (
+              <div key={label}>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: color }} /> {label}
+                </h4>
+                <div className="zeiss-card overflow-x-auto p-3">
+                  <table className="w-full" style={{ fontSize: '14px' }}>
+                    <thead><tr className="zeiss-table-header">
+                      {['阶段', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>{cyclePhases.map((r, i) => (
+                      <tr key={i} className="zeiss-table-row">
+                        <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].duration}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].copSpeed}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxArea}</td>
+                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxLoad}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
