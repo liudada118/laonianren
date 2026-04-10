@@ -3493,7 +3493,7 @@ function parseData(parserArr, objs) {
       if (data.type === 'HL' || data.type === 'HR') {
         // 仅记录串口在线状态，不使用 data.arr
         const dataStamp = new Date().getTime() - data.stamp
-        if (dataStamp < 1000) {
+        if (dataStamp < 3000) {
           // 标记串口在线，具体数据由 gloveLatestData 提供
         } else {
           // 串口超时，不做处理，由下方 gloveLatestData 判断
@@ -3503,7 +3503,7 @@ function parseData(parserArr, objs) {
         let blueArr = data.arr && data.arr.length ? data.arr : []
         const dataStamp = new Date().getTime() - data.stamp
         json[data.type] = {}
-        if (dataStamp < 1000) {
+        if (dataStamp < 3000) {
           json[data.type].status = 'online'
           json[data.type].arr = blueArr
           json[data.type].rotate = data.rotate
@@ -3537,7 +3537,7 @@ function parseData(parserArr, objs) {
     }
     const dataStamp = new Date().getTime() - cached.stamp
     json[gloveType] = {}
-    if (dataStamp < 1000) {
+    if (dataStamp < 3000) {
       // 应用清零基线：用对应手的基线减去对应手的数据（type/arr 保证一致）
       let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
       if (gripBaseline[gloveType] && arr.length) {
