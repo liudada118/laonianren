@@ -121,12 +121,12 @@ function PatientDialog({ open, onClose, onConfirm }) {
           </div>
         </div>
 
-        <div className="flex gap-3 mt-8">
-          <button onClick={onClose} className="zeiss-btn-secondary flex-1 py-3">取消</button>
+        <div className="grid grid-cols-2 gap-3 mt-8">
+          <button onClick={onClose} className="zeiss-btn-secondary py-3">取消</button>
           <button
             onClick={() => { if (name.trim()) onConfirm({ name: name.trim(), gender, age: +age, weight: +weight }); }}
             disabled={!name.trim()}
-            className="flex-1 py-3 rounded-[10px] font-semibold text-sm transition-all"
+            className="py-3 rounded-[10px] font-semibold text-sm transition-all"
             style={{
               background: name.trim() ? 'var(--zeiss-blue)' : '#E8ECF0',
               color: name.trim() ? 'white' : 'var(--text-muted)',
