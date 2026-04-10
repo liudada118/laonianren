@@ -60,7 +60,7 @@ export function AssessmentProvider({ children }) {
 
   // 用 ref 跟踪上一次的设备状态，避免闭包问题
   const prevDeviceStatusRef = useRef({});
-  // 设备离线防抖定时器：设备必须连续 offline 超过 3 秒才弹提示，避免短暂数据报文延迟导致误报
+  // 设备离线防抖定时器：设备必须连续 offline 超过 5 秒才弹提示，避免报告计算阻塞导致误报
   const offlineTimersRef = useRef({});
 
   // 监听 BackendBridge 的设备状态事件
@@ -71,11 +71,11 @@ export function AssessmentProvider({ children }) {
       const prevStatus = prevDeviceStatusRef.current[type];
 
       if (prevStatus === 'online' && status === 'offline') {
-        // 设备从 online 变为 offline，启动防抖定时器，3秒后若仍然 offline 才弹提示
+        // 设备从 online 变为 offline，启动防抖定时器，5秒后若仍然 offline 才弹提示
         if (!offlineTimersRef.current[type]) {
           offlineTimersRef.current[type] = setTimeout(() => {
             offlineTimersRef.current[type] = null;
-            // 3秒后再次检查设备是否仍然 offline
+            // 5秒后再次检查设备是否仍然 offline
             const currentStatus = backendBridge.deviceOnline[type];
             if (currentStatus === 'offline' || currentStatus === undefined) {
               const deviceName = DEVICE_NAME_MAP[type] || type;
@@ -87,7 +87,7 @@ export function AssessmentProvider({ children }) {
                 setDeviceAlerts(prev => prev.filter(a => a.id !== alertMsg.id));
               }, 5000);
             }
-          }, 3000);
+          }, 5000);
         }
       } else if (status === 'online') {
         // 设备回到 online，取消防抖定时器（避免误报）
