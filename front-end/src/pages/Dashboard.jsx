@@ -595,12 +595,12 @@ export default function Dashboard() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>开始新的评估</h3>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>创建新用户</h3>
             <p className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>
-              当前评估对象：<span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}</span>
+              当前评估对象是<span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}</span>，已评估的数据将自动保存到历史记录中。
             </p>
             <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-              开始新评估将重置所有评估状态并清空患者信息，<br/>当前评估数据已自动保存到历史记录。
+              确认创建新的用户？
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowNewSessionConfirm(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
@@ -608,7 +608,7 @@ export default function Dashboard() {
                 onClick={() => { setShowNewSessionConfirm(false); startNewSession(); }}
                 className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer transition-all"
                 style={{ background: '#059669' }}>
-                确认开始新评估
+                确认创建
               </button>
             </div>
           </div>
