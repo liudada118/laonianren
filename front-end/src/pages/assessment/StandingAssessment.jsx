@@ -31,9 +31,9 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       labelLine: { show: false },
       emphasis: { scale: false, focus: 'none' },
       data: [
-        { value: leftPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.blue } },
-        { value: leftPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
-        { value: leftPressure.hindfoot.toFixed(1), name: '后足', itemStyle: { color: C.amber } }
+        { value: Number(leftPressure.forefoot.toFixed(1)), name: '前足', itemStyle: { color: C.blue } },
+        { value: Number(leftPressure.midfoot.toFixed(1)), name: '中足', itemStyle: { color: C.green } },
+        { value: Number(leftPressure.hindfoot.toFixed(1)), name: '后足', itemStyle: { color: C.amber } }
       ]
     }]
   }), [leftPressure]);
@@ -48,9 +48,9 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       labelLine: { show: false },
       emphasis: { scale: false, focus: 'none' },
       data: [
-        { value: rightPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.red } },
-        { value: rightPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
-        { value: rightPressure.hindfoot.toFixed(1), name: '后足', itemStyle: { color: C.amber } }
+        { value: Number(rightPressure.forefoot.toFixed(1)), name: '前足', itemStyle: { color: C.red } },
+        { value: Number(rightPressure.midfoot.toFixed(1)), name: '中足', itemStyle: { color: C.green } },
+        { value: Number(rightPressure.hindfoot.toFixed(1)), name: '后足', itemStyle: { color: C.amber } }
       ]
     }]
   }), [rightPressure]);
@@ -72,7 +72,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   const Metric = ({ label, value, color }) => (
     <div className="zeiss-data-row">
       <span className="zeiss-data-label text-[11px]">{label}</span>
-      <span className="zeiss-data-value text-xs font-semibold tabular-nums" style={{ color }}>{value}</span>
+      <span className="zeiss-data-value text-xs font-semibold tabular-nums text-right" style={{ color, minWidth: '60px', display: 'inline-block' }}>{value}</span>
     </div>
   );
 
@@ -100,15 +100,15 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
           <div className="flex items-center gap-2 pt-0.5 flex-wrap">
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.blue }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.blue }}>前足 {leftPressure.forefoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.blue, minWidth: '62px', display: 'inline-block' }}>前足 {leftPressure.forefoot.toFixed(1).padStart(5)}%</span>
             </div>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.green }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.green }}>中足 {leftPressure.midfoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.green, minWidth: '62px', display: 'inline-block' }}>中足 {leftPressure.midfoot.toFixed(1).padStart(5)}%</span>
             </div>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.amber }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.amber }}>后足 {leftPressure.hindfoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.amber, minWidth: '62px', display: 'inline-block' }}>后足 {leftPressure.hindfoot.toFixed(1).padStart(5)}%</span>
             </div>
           </div>
         </div>
@@ -127,15 +127,15 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
           <div className="flex items-center gap-2 pt-0.5 flex-wrap">
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.red }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.red }}>前足 {rightPressure.forefoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.red, minWidth: '62px', display: 'inline-block' }}>前足 {rightPressure.forefoot.toFixed(1).padStart(5)}%</span>
             </div>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.green }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.green }}>中足 {rightPressure.midfoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.green, minWidth: '62px', display: 'inline-block' }}>中足 {rightPressure.midfoot.toFixed(1).padStart(5)}%</span>
             </div>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.amber }} />
-              <span className="text-[10px] font-semibold" style={{ color: C.amber }}>后足 {rightPressure.hindfoot.toFixed(1)}%</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: C.amber, minWidth: '62px', display: 'inline-block' }}>后足 {rightPressure.hindfoot.toFixed(1).padStart(5)}%</span>
             </div>
           </div>
         </div>
