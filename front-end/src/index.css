@@ -160,10 +160,10 @@ body {
 .zeiss-badge-green { background: var(--success-light); color: var(--success); }
 
 /* ═══ 数据行 ═══ */
-.zeiss-data-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #F0F2F5; }
+.zeiss-data-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #F0F2F5; }
 .zeiss-data-row:last-child { border-bottom: none; }
-.zeiss-data-label { font-size: 13px; color: var(--text-tertiary); white-space: nowrap; }
-.zeiss-data-value { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zeiss-data-label { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; }
+.zeiss-data-value { font-size: 13px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ═══ 报告导航 ═══ */
 .zeiss-nav-item {
@@ -270,9 +270,16 @@ body {
   min-width: var(--side-panel-width);
   flex-shrink: 0;
   overflow-y: auto;
-  padding: 12px;
+  overflow-x: hidden;
+  padding: 12px 10px 16px 12px;
   transition: width 0.3s ease;
+  scrollbar-width: thin;
+  scrollbar-color: #D1D9E0 transparent;
 }
+.assessment-side-panel::-webkit-scrollbar { width: 4px; }
+.assessment-side-panel::-webkit-scrollbar-track { background: transparent; }
+.assessment-side-panel::-webkit-scrollbar-thumb { background: #D1D9E0; border-radius: 2px; }
+.assessment-side-panel::-webkit-scrollbar-thumb:hover { background: #B0BEC5; }
 
 @media (max-width: 767px) {
   .assessment-side-panel {

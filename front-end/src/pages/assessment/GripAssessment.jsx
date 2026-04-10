@@ -38,42 +38,42 @@ function StepIndicator({ current, steps }) {
   );
 }
 
-/* ─── 左侧统一数据面板 ─── */
+/* ─── 左侧统一数据面板（根据当前手只显示对应数据） ─── */
 function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, timer, fmtTime }) {
-  const isLeftActive = phase.startsWith('left');
-  const isRightActive = phase.startsWith('right');
+  const isLeftPhase = phase.startsWith('left');
+  const isRightPhase = phase.startsWith('right');
   const isRecording = phase.includes('recording');
 
-  const leftLineOpt = useMemo(() => ({
-    animation: false,
-    grid: { top: 8, bottom: 16, left: 32, right: 8 },
-    xAxis: { type: 'category', data: leftData.map((_, i) => i), show: false, boundaryGap: false },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0F2F5' } }, axisLabel: { color: '#8896A6', fontSize: 9 } },
-    series: [{ type: 'line', data: leftData.map(d => d.value), smooth: true, symbol: 'none',
-      lineStyle: { color: '#0066CC', width: 1.5 },
-      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(0,102,204,0.15)' }, { offset: 1, color: 'rgba(0,102,204,0)' }] } }
-    }]
-  }), [leftData]);
+  // 根据当前 phase 决定显示哪只手的数据
+  const showLeft = isLeftPhase;
+  const showRight = isRightPhase || phase === 'processing';
 
-  const rightLineOpt = useMemo(() => ({
-    animation: false,
-    grid: { top: 8, bottom: 16, left: 32, right: 8 },
-    xAxis: { type: 'category', data: rightData.map((_, i) => i), show: false, boundaryGap: false },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0F2F5' } }, axisLabel: { color: '#8896A6', fontSize: 9 } },
-    series: [{ type: 'line', data: rightData.map(d => d.value), smooth: true, symbol: 'none',
-      lineStyle: { color: '#059669', width: 1.5 },
-      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(5,150,105,0.15)' }, { offset: 1, color: 'rgba(5,150,105,0)' }] } }
-    }]
-  }), [rightData]);
+  // 当前显示的数据和统计
+  const activeData = showLeft ? leftData : rightData;
+  const activeStats = showLeft ? leftStats : rightStats;
+  const handLabel = showLeft ? '左手' : '右手';
+  const lineColor = showLeft ? '#0066CC' : '#059669';
+  const lineColorRgba = showLeft ? 'rgba(0,102,204' : 'rgba(5,150,105';
 
-  const leftNormalOpt = useMemo(() => {
-    const mean = parseFloat(leftStats.mean) || 190;
-    const std = leftStats.std || 15;
+  const lineOpt = useMemo(() => ({
+    animation: false,
+    grid: { top: 8, bottom: 20, left: 36, right: 8 },
+    xAxis: { type: 'category', data: activeData.map((_, i) => i), show: false, boundaryGap: false },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0F2F5' } }, axisLabel: { color: '#8896A6', fontSize: 9 } },
+    series: [{ type: 'line', data: activeData.map(d => d.value), smooth: true, symbol: 'none',
+      lineStyle: { color: lineColor, width: 1.5 },
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: `${lineColorRgba},0.15)` }, { offset: 1, color: `${lineColorRgba},0)` }] } }
+    }]
+  }), [activeData, lineColor, lineColorRgba]);
+
+  const normalOpt = useMemo(() => {
+    const mean = parseFloat(activeStats.mean) || 190;
+    const std = activeStats.std || 15;
     const xs = Array.from({ length: 100 }, (_, i) => (mean - 4 * std + i * 8 * std / 100).toFixed(1));
     const ys = xs.map(x => (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / std) ** 2));
     return {
       animation: false,
-      grid: { top: 8, bottom: 16, left: 32, right: 8 },
+      grid: { top: 8, bottom: 20, left: 36, right: 8 },
       xAxis: { type: 'category', data: xs, axisLabel: { color: '#8896A6', fontSize: 8, interval: 24 }, boundaryGap: false },
       yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0F2F5' } }, axisLabel: { color: '#8896A6', fontSize: 9 } },
       series: [{ type: 'line', data: ys, smooth: true, symbol: 'none',
@@ -81,24 +81,7 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(8,145,178,0.12)' }, { offset: 1, color: 'rgba(8,145,178,0)' }] } }
       }]
     };
-  }, [leftStats.mean, leftStats.std]);
-
-  const rightNormalOpt = useMemo(() => {
-    const mean = parseFloat(rightStats.mean) || 190;
-    const std = rightStats.std || 15;
-    const xs = Array.from({ length: 100 }, (_, i) => (mean - 4 * std + i * 8 * std / 100).toFixed(1));
-    const ys = xs.map(x => (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / std) ** 2));
-    return {
-      animation: false,
-      grid: { top: 8, bottom: 16, left: 32, right: 8 },
-      xAxis: { type: 'category', data: xs, axisLabel: { color: '#8896A6', fontSize: 8, interval: 24 }, boundaryGap: false },
-      yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0F2F5' } }, axisLabel: { color: '#8896A6', fontSize: 9 } },
-      series: [{ type: 'line', data: ys, smooth: true, symbol: 'none',
-        lineStyle: { color: '#0891B2', width: 1.5 },
-        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(8,145,178,0.12)' }, { offset: 1, color: 'rgba(8,145,178,0)' }] } }
-      }]
-    };
-  }, [rightStats.mean, rightStats.std]);
+  }, [activeStats.mean, activeStats.std]);
 
   const Metric = ({ label, value, color }) => (
     <div className="zeiss-data-row">
@@ -108,72 +91,41 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
   );
 
   return (
-    <div className="h-full flex flex-col gap-3 overflow-y-auto">
+    <div className="h-full flex flex-col gap-3 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
       {/* 采集状态 */}
       {isRecording && (
-        <div className="zeiss-card p-3 flex items-center gap-3">
+        <div className="zeiss-card p-3 flex items-center gap-3 shrink-0">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: '#DC2626' }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {isLeftActive ? '左手' : '右手'}采集中
+            {handLabel}采集中
           </span>
           <span className="font-mono text-sm font-bold ml-auto" style={{ color: '#0066CC' }}>{fmtTime(timer)}</span>
         </div>
       )}
 
-      {/* 左手数据 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${leftData.length > 0 || isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: leftData.length > 0 || isLeftActive ? '#0066CC' : 'var(--border-light)' }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左手 · 压力曲线</h3>
+      {/* 当前手 - 压力曲线 */}
+      <div className="zeiss-card overflow-hidden shrink-0">
+        <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+          <div className="w-2 h-2 rounded-full" style={{ background: lineColor }} />
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>{handLabel} · 压力曲线</h3>
         </div>
-        <div className="h-[90px] px-1"><EChart option={leftLineOpt} height={90} /></div>
-        <div className="px-4 py-2 space-y-1.5">
-          <Metric label="平均压力" value={leftStats.avg + ' mmHg'} color="#0066CC" />
-          <Metric label="最大压力" value={leftStats.max + ' mmHg'} color="#0066CC" />
-          <Metric label="压力总和" value={leftStats.sum + ' mmHg'} color="#0066CC" />
+        <div className="h-[100px] px-1"><EChart option={lineOpt} height={100} /></div>
+        <div className="px-4 py-2 space-y-1">
+          <Metric label="平均压力" value={activeStats.avg + ' mmHg'} color={lineColor} />
+          <Metric label="最大压力" value={activeStats.max + ' mmHg'} color={lineColor} />
+          <Metric label="压力总和" value={activeStats.sum + ' mmHg'} color={lineColor} />
         </div>
       </div>
 
-      {/* 左手正态分布 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${leftData.length > 0 || isLeftActive ? 'opacity-100' : 'opacity-50'}`}>
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: leftData.length > 0 || isLeftActive ? '#0891B2' : 'var(--border-light)' }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左手 · 正态分布</h3>
+      {/* 当前手 - 正态分布 */}
+      <div className="zeiss-card overflow-hidden shrink-0">
+        <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+          <div className="w-2 h-2 rounded-full" style={{ background: '#0891B2' }} />
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>{handLabel} · 正态分布</h3>
         </div>
-        <div className="h-[80px] px-1"><EChart option={leftNormalOpt} height={80} /></div>
+        <div className="h-[100px] px-1"><EChart option={normalOpt} height={100} /></div>
         <div className="grid grid-cols-4 gap-1 px-3 py-2">
-          {[{ l: '均值', v: leftStats.mean }, { l: '方差', v: leftStats.variance }, { l: '偏度', v: leftStats.skewness }, { l: '峰度', v: leftStats.kurtosis }].map((item, i) => (
-            <div key={i} className="text-center">
-              <div className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
-              <div className="text-[11px] font-bold" style={{ color: '#0891B2' }}>{item.v}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 右手数据 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${rightData.length > 0 || isRightActive ? 'opacity-100' : 'opacity-50'}`}>
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: rightData.length > 0 || isRightActive ? '#059669' : 'var(--border-light)' }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右手 · 压力曲线</h3>
-        </div>
-        <div className="h-[90px] px-1"><EChart option={rightLineOpt} height={90} /></div>
-        <div className="px-4 py-2 space-y-1.5">
-          <Metric label="平均压力" value={rightStats.avg + ' mmHg'} color="#059669" />
-          <Metric label="最大压力" value={rightStats.max + ' mmHg'} color="#059669" />
-          <Metric label="压力总和" value={rightStats.sum + ' mmHg'} color="#059669" />
-        </div>
-      </div>
-
-      {/* 右手正态分布 */}
-      <div className={`zeiss-card overflow-hidden transition-opacity ${rightData.length > 0 || isRightActive ? 'opacity-100' : 'opacity-50'}`}>
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: rightData.length > 0 || isRightActive ? '#0891B2' : 'var(--border-light)' }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右手 · 正态分布</h3>
-        </div>
-        <div className="h-[80px] px-1"><EChart option={rightNormalOpt} height={80} /></div>
-        <div className="grid grid-cols-4 gap-1 px-3 py-2">
-          {[{ l: '均值', v: rightStats.mean }, { l: '方差', v: rightStats.variance }, { l: '偏度', v: rightStats.skewness }, { l: '峰度', v: rightStats.kurtosis }].map((item, i) => (
+          {[{ l: '均值', v: activeStats.mean }, { l: '方差', v: activeStats.variance }, { l: '偏度', v: activeStats.skewness }, { l: '峰度', v: activeStats.kurtosis }].map((item, i) => (
             <div key={i} className="text-center">
               <div className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{item.l}</div>
               <div className="text-[11px] font-bold" style={{ color: '#0891B2' }}>{item.v}</div>
