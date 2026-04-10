@@ -68,7 +68,7 @@ function getTightBounds(allCoords) {
   return { minR, maxR, minC, maxC };
 }
 
-function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, tightBounds, footSide, innerOnRightByFoot) {
+function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, _title, tightBounds, footSide, innerOnRightByFoot) {
   const allCoords = sections.flat();
   if (allCoords.length === 0) {
     ctx.fillStyle = '#999';
@@ -92,11 +92,7 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, title, 
   const cx = offsetX + padX + (drawW - footW) / 2;
   const cy = titleH + padY + (drawH - footH) / 2;
 
-  // 标题
-  ctx.fillStyle = 'var(--text-primary, #333)';
-  ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(title, offsetX + width / 2, 16);
+  // 标题已移至 canvas 外部 HTML 渲染，此处不再绘制
 
   // 绘制散点
   const cellSize = Math.max(scale * 0.88, 2);
@@ -302,7 +298,11 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords, i
           <div className="text-gray-600">采样点: {tooltip.pointCount} 个</div>
         </div>
       )}
-      <div className="flex items-center justify-center gap-3 mt-3 flex-wrap">
+      <div className="flex justify-center gap-0 mt-2 mb-1" style={{ fontSize: '14px', fontWeight: 600 }}>
+        <div className="flex-1 text-center" style={{ color: 'var(--text-primary)' }}>左足</div>
+        <div className="flex-1 text-center" style={{ color: 'var(--text-primary)' }}>右足</div>
+      </div>
+      <div className="flex items-center justify-center gap-3 mt-1 flex-wrap">
         {REGION_NAMES.map((name, i) => (
           <div key={name} className="flex items-center gap-1.5 text-xs text-gray-600">
             <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: REGION_COLORS[i] }} />

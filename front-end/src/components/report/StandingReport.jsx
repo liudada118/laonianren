@@ -919,7 +919,7 @@ function MetricCapsule({ index, label, leftVal, rightVal, leftExtra, rightExtra 
       </div>
       {/* 标签 */}
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{label}</div>
+        <div className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>{label}</div>
         {leftExtra && (
           <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
             L: {leftExtra} {rightExtra ? `/ R: ${rightExtra}` : ''}
@@ -928,13 +928,13 @@ function MetricCapsule({ index, label, leftVal, rightVal, leftExtra, rightExtra 
       </div>
       {/* L/R 数值 */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="text-center">
-          <div className="text-[9px] font-medium px-2 py-0.5 rounded-full mb-0.5" style={{ background: '#0066CC15', color: '#0066CC' }}>L</div>
+        <div className="text-center" style={{ minWidth: '40px' }}>
+          <div className="font-medium rounded-full mb-0.5 flex items-center justify-center" style={{ width: '48px', height: '20px', fontSize: '10px', background: '#0066CC15', color: '#0066CC' }}>L</div>
           <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{leftVal}</div>
         </div>
         <div className="w-px h-8" style={{ background: 'var(--border-light)' }} />
-        <div className="text-center">
-          <div className="text-[9px] font-medium px-2 py-0.5 rounded-full mb-0.5" style={{ background: '#DC262615', color: '#DC2626' }}>R</div>
+        <div className="text-center" style={{ minWidth: '40px' }}>
+          <div className="font-medium rounded-full mb-0.5 flex items-center justify-center" style={{ width: '48px', height: '20px', fontSize: '10px', background: '#DC262615', color: '#DC2626' }}>R</div>
           <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{rightVal}</div>
         </div>
       </div>
