@@ -37,10 +37,9 @@ export default function DeviceAlertOverlay() {
             animation: 'slideInRight 0.3s ease-out',
           }}
         >
-          {/* 警告图标 */}
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
-            <path d="M10 2L18 17H2L10 2Z" stroke="#EF4444" strokeWidth="1.5" fill="#FEE2E2" />
-            <path d="M10 8V11M10 13.5V14" stroke="#EF4444" strokeWidth="1.5" strokeLinecap="round" />
+          {/* 信息图标 */}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
 
           <div style={{ flex: 1 }}>
