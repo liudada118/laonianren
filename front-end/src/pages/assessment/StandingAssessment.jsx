@@ -25,7 +25,8 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
+      label: { show: false },
+      labelLine: { show: false },
       emphasis: { disabled: true },
       silent: true,
       data: [
@@ -40,7 +41,8 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, formatter: '{b}\n{d}%', fontSize: 9, color: chartColors.text },
+      label: { show: false },
+      labelLine: { show: false },
       emphasis: { disabled: true },
       silent: true,
       data: [
