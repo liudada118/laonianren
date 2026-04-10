@@ -522,13 +522,13 @@ export default function Dashboard() {
             <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
               请确保被评估者已<span className="font-semibold" style={{ color: '#0066CC' }}>戴好手套</span>，并保持<span className="font-semibold" style={{ color: '#0066CC' }}>指尖贴合</span>，<span className="font-semibold" style={{ color: '#0066CC' }}>手掌朝上展开五指</span>，以确保数据采集的准确性。
             </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowGripTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowGripTip(false)} className="zeiss-btn-secondary py-3 text-sm">取消</button>
               <button
                 onClick={() => { setShowGripTip(false); navigate(gripTipPath); }}
-                className="flex-1 py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+                className="py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
                 style={{ background: 'var(--zeiss-blue)' }}>
-                已准备好，开始评估
+                开始评估
               </button>
             </div>
           </div>
@@ -549,13 +549,13 @@ export default function Dashboard() {
             <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-tertiary)' }}>
               请被评估者坐在椅子上，<span className="font-semibold" style={{ color: '#059669' }}>双手交叉放于胸前</span>。
             </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowSitStandTip(false)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowSitStandTip(false)} className="zeiss-btn-secondary py-3 text-sm">取消</button>
               <button
                 onClick={() => { setShowSitStandTip(false); navigate(sitStandTipPath); }}
-                className="flex-1 py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+                className="py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
                 style={{ background: '#059669' }}>
-                已准备好，开始评估
+                开始评估
               </button>
             </div>
           </div>
