@@ -61,10 +61,10 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
   );
 
   return (
-    <div className="h-full flex flex-col gap-2 overflow-y-auto">
+    <div className="h-full flex flex-col gap-2">
       {/* 采集状态卡片 */}
       {isRecording && (
-        <div className="zeiss-card p-2 flex items-center gap-3">
+        <div className="zeiss-card p-2 flex items-center gap-3 shrink-0">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: C.red }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>采集中</span>
           <span className="font-mono text-sm font-bold ml-auto" style={{ color: C.blue }}>{fmtTime(timer)}</span>
@@ -72,13 +72,13 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
       )}
 
       {/* 坐垫数据 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.blue }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>坐垫压力 (32×32)</h3>
         </div>
-        <div className="h-[70px] px-1"><EChart option={seatLineOpt} height={70} /></div>
-        <div className="px-3 py-1 space-y-0">
+        <div className="flex-1 min-h-[50px] px-1"><EChart option={seatLineOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="最大压力" value={seatStats ? seatStats.max.toFixed(0) : '---'} color={C.blue} />
           <Metric label="平均压力" value={seatStats ? seatStats.mean.toFixed(1) : '---'} color={C.blue} />
           <Metric label="总压力" value={seatStats ? seatStats.totalPressure.toFixed(0) : '---'} color={C.blue} />
@@ -87,13 +87,13 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
       </div>
 
       {/* 脚垫数据 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.green }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>脚垫压力 (64×64)</h3>
         </div>
-        <div className="h-[70px] px-1"><EChart option={footLineOpt} height={70} /></div>
-        <div className="px-3 py-1 space-y-0">
+        <div className="flex-1 min-h-[50px] px-1"><EChart option={footLineOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="最大压力" value={footpadStats ? footpadStats.max.toFixed(0) : '---'} color={C.green} />
           <Metric label="平均压力" value={footpadStats ? footpadStats.mean.toFixed(1) : '---'} color={C.green} />
           <Metric label="总压力" value={footpadStats ? footpadStats.totalPressure.toFixed(0) : '---'} color={C.green} />
@@ -102,13 +102,13 @@ function LeftDataPanel({ seatStats, footpadStats, seatCoP, footpadCoP, seatHisto
       </div>
 
       {/* CoP 散点图 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex flex-col min-h-0" style={{ flex: '1.2 1 0%' }}>
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.amber }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>压力中心 (CoP)</h3>
         </div>
-        <div className="h-[110px] px-1"><EChart option={copOpt} height={110} /></div>
-        <div className="px-3 py-1 space-y-0">
+        <div className="flex-1 min-h-[60px] px-1"><EChart option={copOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="坐垫 CoP" value={seatCoP ? `(${(seatCoP.x*100).toFixed(1)}, ${(seatCoP.y*100).toFixed(1)})` : '---'} color={C.blue} />
           <Metric label="脚垫 CoP" value={footpadCoP ? `(${(footpadCoP.x*100).toFixed(1)}, ${(footpadCoP.y*100).toFixed(1)})` : '---'} color={C.green} />
         </div>
