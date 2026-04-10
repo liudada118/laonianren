@@ -167,15 +167,16 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
     <div className="flex items-center gap-3">
       {/* 设备状态指示器 */}
       {isConnected && (
-        <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg"
           style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+          <span className="text-[10px] font-medium" style={{ color: 'var(--text-tertiary)' }}>在线设备</span>
           {allDevices.map(d => (
-            <div key={d} className="flex items-center gap-1" title={`${DEVICE_LABELS[d]}: ${deviceOnlineMap[d] === 'online' ? '在线' : '离线'}`}>
+            <div key={d} className="flex items-center gap-0.5" title={`${DEVICE_LABELS[d]}: ${deviceOnlineMap[d] === 'online' ? '在线' : '离线'}`}>
               <div className="w-1.5 h-1.5 rounded-full transition-colors"
                 style={{ background: deviceOnlineMap[d] === 'online' ? '#22c55e' : '#d1d5db' }} />
             </div>
           ))}
-          <span className="text-[10px] ml-1 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+          <span className="text-[10px] ml-0.5 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
             {onlineCount}/{allDevices.length}
           </span>
         </div>
@@ -183,15 +184,18 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
 
       {/* MAC 地址信息显示 */}
       {isConnected && macEntries.length > 0 && (
-        <div className="hidden lg:flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[9px] max-w-[280px]"
-          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', color: 'var(--text-tertiary)' }}>
-          {macEntries.map(([port, info]) => (
-            <div key={port} className="flex items-center gap-1 truncate">
-              <span className="font-mono">{info.uniqueId ? info.uniqueId.slice(-8) : 'N/A'}</span>
-              <span style={{ color: 'var(--zeiss-blue)' }}>{info.type || '未分配'}</span>
-              <span style={{ color: 'var(--text-muted)' }}>{info.version || ''}</span>
-            </div>
-          ))}
+        <div className="hidden lg:flex flex-col gap-0.5 px-2 py-1 text-[9px] max-w-[280px]">
+          {macEntries.map(([port, info]) => {
+            const devType = info.type || '未分配';
+            const isOnline = deviceOnlineMap[devType] === 'online';
+            return (
+              <div key={port} className="flex items-center gap-1 truncate">
+                <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{info.uniqueId ? info.uniqueId.slice(-8) : 'N/A'}</span>
+                <span style={{ color: isOnline ? '#059669' : '#DC2626', fontWeight: 600 }}>{devType}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{info.version || ''}</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -251,7 +255,7 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           )}
-          {rescanLoading ? '扫描中...' : '重新扫描'}
+          {rescanLoading ? '连接中...' : '重新连接'}
         </button>
       )}
     </div>
@@ -373,7 +377,7 @@ export default function Dashboard() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              <span className="hidden sm:inline">新评估</span>
+              <span className="hidden sm:inline">重新评估</span>
             </button>
           )}
           <button onClick={() => navigate('/history')}
