@@ -143,15 +143,15 @@ body {
 
 /* ═══ 步骤 ═══ */
 .zeiss-step-circle {
-  width: 28px; height: 28px; border-radius: 50%; display: flex;
-  align-items: center; justify-content: center; font-size: 12px;
+  width: 22px; height: 22px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 10px;
   font-weight: 600; transition: all var(--transition);
   flex-shrink: 0;
 }
 .zeiss-step-circle.active { background: var(--zeiss-blue); color: white; box-shadow: 0 2px 8px rgba(0,102,204,0.3); }
 .zeiss-step-circle.completed { background: var(--success); color: white; }
 .zeiss-step-circle.pending { background: var(--bg-hover); color: var(--text-muted); border: 1.5px solid var(--border-light); }
-.zeiss-step-line { width: 32px; height: 2px; background: var(--border-light); border-radius: 1px; flex-shrink: 0; }
+.zeiss-step-line { width: 20px; height: 2px; background: var(--border-light); border-radius: 1px; flex-shrink: 0; }
 .zeiss-step-line.completed { background: var(--success); }
 
 /* ═══ 徽章 ═══ */
@@ -231,8 +231,8 @@ body {
   .zeiss-btn-ghost { padding: 6px 10px; font-size: 12px; }
 
   /* 步骤指示器缩小 */
-  .zeiss-step-circle { width: 22px; height: 22px; font-size: 10px; }
-  .zeiss-step-line { width: 16px; }
+  .zeiss-step-circle { width: 18px; height: 18px; font-size: 9px; }
+  .zeiss-step-line { width: 12px; }
 
   /* 数据行紧凑 */
   .zeiss-data-row { padding: 6px 0; }

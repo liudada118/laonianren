@@ -24,12 +24,12 @@ function StepIndicator({ current, steps }) {
             <div className="flex flex-col items-center gap-1">
               <div className={`zeiss-step-circle ${done ? 'completed' : active ? 'active' : 'pending'}`}>
                 {done ? (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : i + 1}
               </div>
-              <span className="text-[10px] font-medium" style={{ color: done || active ? 'var(--zeiss-blue)' : 'var(--text-muted)' }}>{label}</span>
+              <span className="text-[9px] font-medium" style={{ color: done || active ? 'var(--zeiss-blue)' : 'var(--text-muted)' }}>{label}</span>
             </div>
           </React.Fragment>
         );
