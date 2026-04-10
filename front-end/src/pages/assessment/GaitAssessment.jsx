@@ -64,24 +64,6 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }
         </div>
       )}
 
-      {/* 传感器连接状态 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: C.green }} />
-          <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>传感器状态</h3>
-        </div>
-        <div className="px-4 py-2.5 grid grid-cols-2 gap-2">
-          {SENSOR_KEYS.map((key, idx) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full" style={{ background: isConnected ? '#22c55e' : '#d1d5db' }} />
-              <span className="text-[10px]" style={{ color: isConnected ? sensorColors[idx] : 'var(--text-muted)' }}>
-                {sensorLabels[idx]}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* 实时压力曲线 */}
       <div className="zeiss-card overflow-hidden">
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
