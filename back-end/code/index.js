@@ -1,3 +1,6 @@
+const { configureLogging } = require('./util/configureLogging')
+configureLogging('progress')
+
 const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
 const { fork, spawn, spawnSync } = require('child_process')
