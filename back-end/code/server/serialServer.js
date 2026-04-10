@@ -1,4 +1,6 @@
 ﻿
+const { configureLogging } = require('../util/configureLogging')
+configureLogging('progress')
 
 const express = require('express')
 const os = require('os')

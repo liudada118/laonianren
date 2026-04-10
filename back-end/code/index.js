@@ -1,3 +1,6 @@
+const { configureLogging } = require('./util/configureLogging')
+configureLogging('progress')
+
 const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
 const { fork, spawn, spawnSync } = require('child_process')
@@ -504,6 +507,10 @@ function checkPythonAiDeps(pythonBin) {
     'import pydantic',
     'import matplotlib',
     'import pandas',
+    'import cv2',
+    'import scipy',
+    'import skimage',
+    'from PIL import Image',
   ].join('; ')
 
   try {
