@@ -75,10 +75,10 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   );
 
   return (
-    <div className="h-full flex flex-col gap-3 overflow-y-auto">
+    <div className="h-full flex flex-col gap-2 overflow-y-auto">
       {/* 采集状态 */}
       {isRecording && (
-        <div className="zeiss-card p-3 flex items-center gap-3">
+        <div className="zeiss-card p-2 flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: C.red }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>采集中</span>
           <span className="font-mono text-sm font-bold ml-auto" style={{ color: C.blue }}>{fmtTime(timer)}</span>
@@ -87,26 +87,26 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 
       {/* 左脚压力分布 */}
       <div className="zeiss-card overflow-hidden">
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.blue }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左脚压力分布</h3>
         </div>
-        <div className="h-[140px]"><EChart option={leftPieOpt} height={140} notMerge={true} /></div>
-        <div className="px-4 py-2 space-y-1">
+        <div className="h-[100px]"><EChart option={leftPieOpt} height={100} notMerge={true} /></div>
+        <div className="px-3 py-1.5 space-y-0.5">
           <Metric label="总压力" value={realtimeData.leftTotal.toFixed(0)} color={C.blue} />
           <Metric label="面积" value={realtimeData.leftArea?.toFixed(1) + ' cm²' || '---'} color={C.blue} />
-          <div className="flex items-center gap-3 py-1">
+          <div className="flex items-center gap-2 pt-0.5 flex-wrap">
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.blue }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.blue }}>前足 {leftPressure.forefoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.blue }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.blue }}>前足 {leftPressure.forefoot.toFixed(1)}%</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.green }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.green }}>中足 {leftPressure.midfoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.green }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.green }}>中足 {leftPressure.midfoot.toFixed(1)}%</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.amber }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.amber }}>后足 {leftPressure.hindfoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.amber }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.amber }}>后足 {leftPressure.hindfoot.toFixed(1)}%</span>
             </div>
           </div>
         </div>
@@ -114,26 +114,26 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 
       {/* 右脚压力分布 */}
       <div className="zeiss-card overflow-hidden">
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.red }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右脚压力分布</h3>
         </div>
-        <div className="h-[140px]"><EChart option={rightPieOpt} height={140} notMerge={true} /></div>
-        <div className="px-4 py-2 space-y-1">
+        <div className="h-[100px]"><EChart option={rightPieOpt} height={100} notMerge={true} /></div>
+        <div className="px-3 py-1.5 space-y-0.5">
           <Metric label="总压力" value={realtimeData.rightTotal.toFixed(0)} color={C.red} />
           <Metric label="面积" value={realtimeData.rightArea?.toFixed(1) + ' cm²' || '---'} color={C.red} />
-          <div className="flex items-center gap-3 py-1">
+          <div className="flex items-center gap-2 pt-0.5 flex-wrap">
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.red }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.red }}>前足 {rightPressure.forefoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.red }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.red }}>前足 {rightPressure.forefoot.toFixed(1)}%</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.green }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.green }}>中足 {rightPressure.midfoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.green }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.green }}>中足 {rightPressure.midfoot.toFixed(1)}%</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: C.amber }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.amber }}>后足 {rightPressure.hindfoot.toFixed(1)}%</span>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.amber }} />
+              <span className="text-[10px] font-semibold" style={{ color: C.amber }}>后足 {rightPressure.hindfoot.toFixed(1)}%</span>
             </div>
           </div>
         </div>
@@ -141,18 +141,16 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 
       {/* CoP 轨迹 */}
       <div className="zeiss-card overflow-hidden">
-        <div className="px-4 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.amber }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>CoP 轨迹</h3>
         </div>
-        <div className="h-[150px] px-1"><EChart option={copOpt} height={150} /></div>
-        <div className="px-4 py-2 space-y-1">
+        <div className="h-[120px] px-1"><EChart option={copOpt} height={120} /></div>
+        <div className="px-3 py-1.5 space-y-0.5">
           <Metric label="左右平衡" value={realtimeData.balance.toFixed(1) + '%'} color={C.green} />
           <Metric label="轨迹点数" value={copTrajectory.length} color={C.blue} />
         </div>
       </div>
-
-
     </div>
   );
 }
