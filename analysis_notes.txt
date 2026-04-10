@@ -1,0 +1,16 @@
+StandingAssessment.jsx 修改计划:
+
+1. 采集10秒自动停止:
+   - timer 每100ms +1，所以10秒 = timer >= 100
+   - 在 startRecording 中启动 timerRef.current = setInterval(...)
+   - 需要添加 useEffect 监听 timer，当 timer >= 100 时自动调用 stopRecording
+   - 或者在 setInterval 回调中检查
+
+2. 饼图取消tooltip:
+   - leftPieOpt 第25行: tooltip: { trigger: 'item', ...tooltipStyle }  → 删除或设为 show: false
+   - rightPieOpt 第38行: 同上
+   - copOpt 第54行: tooltip: tooltipStyle → 可以保留COP的tooltip
+   - 在下方文字区域加上颜色标识展示饼图数据
+
+3. GaitAssessment.jsx:
+   - 需要查看传感器状态展示的位置并移除
