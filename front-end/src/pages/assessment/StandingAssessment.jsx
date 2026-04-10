@@ -22,13 +22,14 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   const tooltipStyle = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
   const leftPieOpt = useMemo(() => ({
+    animation: true,
+    animationDuration: 300,
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
       labelLine: { show: false },
-      emphasis: { disabled: true },
-      silent: true,
+      emphasis: { scale: false, focus: 'none' },
       data: [
         { value: leftPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.blue } },
         { value: leftPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -38,13 +39,14 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   }), [leftPressure]);
 
   const rightPieOpt = useMemo(() => ({
+    animation: true,
+    animationDuration: 300,
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
       labelLine: { show: false },
-      emphasis: { disabled: true },
-      silent: true,
+      emphasis: { scale: false, focus: 'none' },
       data: [
         { value: rightPressure.forefoot.toFixed(1), name: '前足', itemStyle: { color: C.red } },
         { value: rightPressure.midfoot.toFixed(1), name: '中足', itemStyle: { color: C.green } },
@@ -78,7 +80,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
     <div className="h-full flex flex-col gap-2 overflow-y-auto">
       {/* 采集状态 */}
       {isRecording && (
-        <div className="zeiss-card p-2 flex items-center gap-3">
+        <div className="zeiss-card p-2 flex items-center gap-3 shrink-0">
           <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: C.red }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>采集中</span>
           <span className="font-mono text-sm font-bold ml-auto" style={{ color: C.blue }}>{fmtTime(timer)}</span>
@@ -86,13 +88,13 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       )}
 
       {/* 左脚压力分布 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.blue }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>左脚压力分布</h3>
         </div>
-        <div className="h-[100px]"><EChart option={leftPieOpt} height={100} notMerge={true} /></div>
-        <div className="px-3 py-1.5 space-y-0.5">
+        <div className="flex-1 min-h-[60px]"><EChart option={leftPieOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="总压力" value={realtimeData.leftTotal.toFixed(0)} color={C.blue} />
           <Metric label="面积" value={realtimeData.leftArea?.toFixed(1) + ' cm²' || '---'} color={C.blue} />
           <div className="flex items-center gap-2 pt-0.5 flex-wrap">
@@ -113,13 +115,13 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       </div>
 
       {/* 右脚压力分布 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.red }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>右脚压力分布</h3>
         </div>
-        <div className="h-[100px]"><EChart option={rightPieOpt} height={100} notMerge={true} /></div>
-        <div className="px-3 py-1.5 space-y-0.5">
+        <div className="flex-1 min-h-[60px]"><EChart option={rightPieOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="总压力" value={realtimeData.rightTotal.toFixed(0)} color={C.red} />
           <Metric label="面积" value={realtimeData.rightArea?.toFixed(1) + ' cm²' || '---'} color={C.red} />
           <div className="flex items-center gap-2 pt-0.5 flex-wrap">
@@ -140,13 +142,13 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
       </div>
 
       {/* CoP 轨迹 */}
-      <div className="zeiss-card overflow-hidden">
-        <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
+      <div className="zeiss-card overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="px-3 py-1.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div className="w-2 h-2 rounded-full" style={{ background: C.amber }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>CoP 轨迹</h3>
         </div>
-        <div className="h-[120px] px-1"><EChart option={copOpt} height={120} /></div>
-        <div className="px-3 py-1.5 space-y-0.5">
+        <div className="flex-1 min-h-[60px] px-1"><EChart option={copOpt} height="100%" /></div>
+        <div className="px-3 py-1 space-y-0 shrink-0">
           <Metric label="左右平衡" value={realtimeData.balance.toFixed(1) + '%'} color={C.green} />
           <Metric label="轨迹点数" value={copTrajectory.length} color={C.blue} />
         </div>
