@@ -2260,10 +2260,6 @@ app.post('/clearGripBaseline', (req, res) => {
 app.get('/endCol', async (req, res) => {
   console.log('[endCol] 收到请求: 当前assessmentId=%s', activeAssessmentId)
   colFlag = false
-  // 清除去重缓存，为下次采集做准备
-  for (const key of Object.keys(lastStoredStamps)) {
-    delete lastStoredStamps[key]
-  }
   // 停止采集时立即刷入缓冲区剩余数据
   flushStorageBuffer()
   res.json(new HttpResult(0, 'success', '停止采集'));
@@ -4322,34 +4318,17 @@ const storageBuffer = []
 const STORAGE_FLUSH_INTERVAL = 200  // 每 200ms 批量写入一次
 let storageFlushTimer = null
 
-// 去重：记录每个设备上次存储的 stamp，避免定时器频率高于传感器频率时重复存储相同帧
-const lastStoredStamps = {}
-
 function storageData(data) {
   const timestamp = Date.now()
 
-  // 构建存储数据（去掉 status 字段），同时检查是否有新数据
+  // 构建存储数据（去掉 status 字段）
   const newData = {}
-  let hasNewData = false
   for (const key of Object.keys(data)) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status
-    // 检查该设备的 stamp 是否与上次存储的不同
-    const itemStamp = item.stamp || item.HZ || null
-    if (itemStamp !== null && lastStoredStamps[key] === itemStamp) {
-      // 该设备数据未更新，跳过
-      continue
-    }
-    if (itemStamp !== null) {
-      lastStoredStamps[key] = itemStamp
-    }
     newData[key] = item
-    hasNewData = true
   }
-
-  // 如果所有设备数据都未更新，跳过本次存储
-  if (!hasNewData) return
 
   const assessmentId = activeAssessmentId || null
   const sampleType = activeSampleType || null
