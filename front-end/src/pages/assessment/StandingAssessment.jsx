@@ -22,8 +22,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   const tooltipStyle = { backgroundColor: '#fff', borderColor: '#E5E9EF', textStyle: { color: '#1A2332' }, extraCssText: 'box-shadow:0 4px 20px rgba(0,0,0,0.08);border-radius:8px;' };
 
   const leftPieOpt = useMemo(() => ({
-    animation: true,
-    animationDuration: 300,
+    animation: false,
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
@@ -39,8 +38,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
   }), [leftPressure]);
 
   const rightPieOpt = useMemo(() => ({
-    animation: true,
-    animationDuration: 300,
+    animation: false,
     tooltip: { show: false, trigger: 'none' },
     series: [{ type: 'pie', radius: ['35%', '65%'], center: ['50%', '50%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
