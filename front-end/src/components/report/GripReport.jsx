@@ -338,7 +338,7 @@ export default function GripReport({ patientName, patientInfo, onClose, reportDa
       tooltip: { trigger: 'axis', confine: true, ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: [...fingerNames, '总力'], top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: true }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: [
         ...fingerKeys.map((key, i) => ({
@@ -359,7 +359,7 @@ export default function GripReport({ patientName, patientInfo, onClose, reportDa
       tooltip: { trigger: 'axis', confine: true, order: 'seriesDesc', ...tooltipStyle, valueFormatter: (v) => `${parseFloat(Number(v).toFixed(2))}N` },
       legend: { data: fingerNames, top: 5, textStyle: { fontSize: 11, color: chartTextColor } },
       grid: baseGrid,
-      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: false }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: sampledTimes.map(t => typeof t === 'number' ? t.toFixed(1) : t),  boundaryGap: false, name: '时间(s)', nameLocation: 'center', nameGap: 25, nameTextStyle: { color: chartTextColor, fontSize: 12 }, axisLabel: { color: chartTextColor, interval: Math.max(0, Math.floor(sampledTimes.length / 10) - 1), showMaxLabel: true }, axisLine: { lineStyle: { color: gridLineColor } }, splitLine: { show: false } },
       yAxis: { type: 'value', name: '力(N)', nameLocation: 'center', nameGap: 40, nameTextStyle: { color: chartTextColor }, splitLine: { lineStyle: { color: gridLineColor } }, axisLabel: { color: chartTextColor, formatter: (v) => parseFloat(Number(v).toFixed(2)) } },
       series: fingerKeys.map((key, i) => ({
         name: fingerNames[i], type: 'line', stack: 'total', areaStyle: { opacity: 0.35 },

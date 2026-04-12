@@ -378,13 +378,14 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
         })
         const keyArr = Array.from(keySet)
 
-        let pressValue = {}, areaValue = {} , dataValue = {}, rotateValue = {}
+        let pressValue = {}, areaValue = {} , dataValue = {}, rotateValue = {}, timeValue = {}
         for (let j = 0; j < keyArr.length; j++) {
           const key = keyArr[j]
           pressValue[key] = []
           areaValue[key] = []
           dataValue[key] = []
           rotateValue[key] = []
+          timeValue[key] = []
         }
         for (let i = 0; i < rows.length; i++) {
           const rowObj = parsedRows[i] || {}
@@ -394,6 +395,7 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
             const data = Array.isArray(item) ? item : item?.arr
             if (!Array.isArray(data)) continue
             dataValue[key].push(data)
+            timeValue[key].push(rows[i].timestamp)
             pressValue[key].push(data.reduce((a, b) => a + b, 0))
             areaValue[key].push(data.filter((a) => a > 0).length)
             // 提取 IMU 四元数数据 (rotate)，保持与 dataValue 长度一致
@@ -411,6 +413,7 @@ async function dbGetData({ db, params, byAssessmentId = false }) {
           areaArr: areaValue,
           dataArr : dataValue,
           rotateArr: rotateValue,
+          timeArr: timeValue,
           rows: rows
         })
 
