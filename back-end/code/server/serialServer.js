@@ -4043,8 +4043,6 @@ async function connectPort() {
           if (!dataItem.type) {
             dataItem.type = 'foot'
           }
-          zeroBelowThreshold(pointArr, 8)
-          removeSmallIslands64x64(pointArr, 12)
           // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
           const flippedArr = flipFoot64x64Vertical(pointArr)
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
