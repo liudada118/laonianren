@@ -234,7 +234,7 @@ export default function StandingAssessment() {
   const collectedFrames = useRef([]);
   const prevFrame = useRef(null);
   const isRecordingRef = useRef(false);
-  const autoStopRef = useRef(false);
+
 
   // 报告数据
   const [reportData, setReportData] = useState(
@@ -533,20 +533,7 @@ export default function StandingAssessment() {
     }
 
     timerRef.current = setInterval(() => {
-      setTimer(p => {
-        const next = p + 1;
-        // 10秒自动停止（timer每100ms+1，100 = 10秒）
-        if (next >= 100) {
-          // 使用 setTimeout 避免在 setState 回调中直接调用 stopRecording
-          setTimeout(() => {
-            if (isRecordingRef.current) {
-              autoStopRef.current = true;
-              document.dispatchEvent(new CustomEvent('standing-auto-stop'));
-            }
-          }, 0);
-        }
-        return next;
-      });
+      setTimer(p => p + 1);
     }, 100);
   };
 
@@ -631,16 +618,9 @@ export default function StandingAssessment() {
     updateAssessmentAiReport('standing', aiData, assessmentIdRef.current);
   }, [updateAssessmentAiReport]);
 
-  // 自动停止事件监听
+  // 组件卸载时清理定时器
   useEffect(() => {
-    const handleAutoStop = () => {
-      if (isRecordingRef.current) {
-        stopRecording();
-      }
-    };
-    document.addEventListener('standing-auto-stop', handleAutoStop);
     return () => {
-      document.removeEventListener('standing-auto-stop', handleAutoStop);
       if (timerRef.current) clearInterval(timerRef.current);
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
     };
