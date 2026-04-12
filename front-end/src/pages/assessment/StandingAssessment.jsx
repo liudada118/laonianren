@@ -534,7 +534,21 @@ export default function StandingAssessment() {
     }
 
     timerRef.current = setInterval(() => {
-      setTimer(p => p + 1);
+      setTimer(p => {
+        const next = p + 1;
+        // 10秒自动停止（timer每100ms+1，100 = 10秒）
+        if (next === 100) {
+          // 立即清除定时器，确保只触发一次
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+          setTimeout(() => {
+            if (isRecordingRef.current) {
+              stopRecording();
+            }
+          }, 0);
+        }
+        return next;
+      });
     }, 100);
   };
 
