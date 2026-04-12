@@ -468,9 +468,9 @@ export default function StandingAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 设置脚垫模式，后端只推送 foot1-4 数据
-    backendBridge.setActiveMode(5).then(() => {
-      console.log('[StandingAssessment] 已设置后端模式 mode=5');
+    // 设置静态站立模式，后端只推送 foot1 数据，滤波使用 standing 参数
+    backendBridge.setActiveMode(4).then(() => {
+      console.log('[StandingAssessment] 已设置后端模式 mode=4');
     }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
