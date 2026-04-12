@@ -700,18 +700,16 @@ let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
 
-// ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开） ───
-let footFilterConfig = {
-  // 静态评估 (mode=4, foot1)
+// ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开，修改后自动保存到本地） ───
+const footFilterDefaultConfig = {
   standing: {
-    filterEnabled: true,     // 去噪滤波开关
-    filterThreshold: 12,     // 低压力阈值
-    filterMinArea: 15,       // 最小连通域面积
-    optimizeEnabled: true,   // 坏线补值开关
-    optimizeBad: 40,         // 坏线总和阈值
-    optimizeGood: 100,       // 正常行/列总和阈值
+    filterEnabled: true,
+    filterThreshold: 12,
+    filterMinArea: 15,
+    optimizeEnabled: true,
+    optimizeBad: 40,
+    optimizeGood: 100,
   },
-  // 步道评估 (mode=5, foot1-4)
   gait: {
     filterEnabled: true,
     filterThreshold: 15,
@@ -721,6 +719,32 @@ let footFilterConfig = {
     optimizeGood: 100,
   },
 }
+const footFilterConfigPath = path.join(storageBase, 'footFilterConfig.json')
+function loadFootFilterConfig() {
+  try {
+    if (fs.existsSync(footFilterConfigPath)) {
+      const data = JSON.parse(fs.readFileSync(footFilterConfigPath, 'utf-8'))
+      // 深度合并，确保新增字段有默认值
+      return {
+        standing: { ...footFilterDefaultConfig.standing, ...(data.standing || {}) },
+        gait: { ...footFilterDefaultConfig.gait, ...(data.gait || {}) },
+      }
+    }
+  } catch (e) {
+    console.warn('[footFilterConfig] 读取本地配置失败，使用默认值:', e.message)
+  }
+  return JSON.parse(JSON.stringify(footFilterDefaultConfig))
+}
+function saveFootFilterConfig() {
+  try {
+    ensureDirSync(path.dirname(footFilterConfigPath))
+    fs.writeFileSync(footFilterConfigPath, JSON.stringify(footFilterConfig, null, 2), 'utf-8')
+    console.log('[footFilterConfig] 已保存到:', footFilterConfigPath)
+  } catch (e) {
+    console.warn('[footFilterConfig] 保存失败:', e.message)
+  }
+}
+let footFilterConfig = loadFootFilterConfig()
 
 // ─── 步道传感器缓存（用于合并 64×256 坏线补值） ───
 const gaitFootCache = { foot1: null, foot2: null, foot3: null, foot4: null }
@@ -2159,7 +2183,8 @@ app.post('/setFootFilter', (req, res) => {
     }
     // 合并更新（只更新传入的字段）
     Object.assign(footFilterConfig[mode], config)
-    console.log(`[setFootFilter] ${mode} 参数已更新:`, JSON.stringify(footFilterConfig[mode]))
+    saveFootFilterConfig()
+    console.log(`[setFootFilter] ${mode} 参数已更新并保存:`, JSON.stringify(footFilterConfig[mode]))
     res.json(new HttpResult(0, footFilterConfig[mode], 'success'))
   } catch (e) {
     console.error('[setFootFilter] error:', e)
