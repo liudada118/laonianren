@@ -1836,11 +1836,30 @@ app.post('/getFootPdf', async (req, res) => {
     const t4 = []
 
     const requiredKeys = ['foot1', 'foot2', 'foot3', 'foot4']
+    const gaitSeenStamps = {}  // 步态数据去重用
     rows.forEach((row) => {
       let dataObj = {}
       try {
         dataObj = JSON.parse(row.data || '{}')
       } catch {}
+      // 基于 stamp 去重：检查任一 foot 的 stamp 是否已见过
+      let isDuplicate = false
+      for (const fk of requiredKeys) {
+        const stamp = dataObj[fk]?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!gaitSeenStamps[fk]) gaitSeenStamps[fk] = new Set()
+          if (gaitSeenStamps[fk].has(stamp)) { isDuplicate = true; break }
+        }
+      }
+      if (isDuplicate) return  // 重复帧，跳过
+      // 记录 stamp
+      for (const fk of requiredKeys) {
+        const stamp = dataObj[fk]?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!gaitSeenStamps[fk]) gaitSeenStamps[fk] = new Set()
+          gaitSeenStamps[fk].add(stamp)
+        }
+      }
       const v1 = dataObj.foot1?.arr || dataObj.foot1
       const v2 = dataObj.foot2?.arr || dataObj.foot2
       const v3 = dataObj.foot3?.arr || dataObj.foot3
@@ -2098,6 +2117,8 @@ app.post('/startCol', async (req, res) => {
       JSON.stringify(sensorArr), file, lengthByFile, JSON.stringify(activeSendTypes), lengthBySendTypes, canStart)
     if (canStart) {
       colFlag = true
+      // 清空去重缓存，确保新采集不受上次采集的 stamp 影响
+      Object.keys(lastStoredStamps).forEach(k => delete lastStoredStamps[k])
       colName = (req.body.date || req.body.colName || '')
       colPersonName = req.body.fileName || req.body.name || req.body.collectName || ''
       res.json(new HttpResult(0, port, 'start collection'));
@@ -2622,6 +2643,7 @@ app.post('/getDbHeatmap', async (req, res) => {
     }
 
     const dataArr = {}
+    const seenStamps = {}  // 每个设备已见过的 stamp 集合，用于去重
     rows.forEach((row) => {
       let dataObj = {}
       try {
@@ -2631,6 +2653,13 @@ app.post('/getDbHeatmap', async (req, res) => {
         const item = dataObj[key]
         const arr = Array.isArray(item) ? item : item?.arr
         if (!Array.isArray(arr)) return
+        // 基于 stamp 去重：如果该设备的该 stamp 已存储过，跳过
+        const stamp = item?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!seenStamps[key]) seenStamps[key] = new Set()
+          if (seenStamps[key].has(stamp)) return  // 重复帧，跳过
+          seenStamps[key].add(stamp)
+        }
         if (!dataArr[key]) dataArr[key] = []
         dataArr[key].push(arr)
       })
@@ -4318,17 +4347,33 @@ const storageBuffer = []
 const STORAGE_FLUSH_INTERVAL = 200  // 每 200ms 批量写入一次
 let storageFlushTimer = null
 
+// 去重缓存：记录每个设备上次存储的 stamp，避免同一帧数据被重复存储
+const lastStoredStamps = {}
+
 function storageData(data) {
   const timestamp = Date.now()
 
-  // 构建存储数据（去掉 status 字段）
+  // 基于 stamp 去重：只存储有新数据的设备
   const newData = {}
+  let hasNewData = false
   for (const key of Object.keys(data)) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status
+    // 检查 stamp 是否与上次存储的相同（重复帧跳过）
+    if (item.stamp !== undefined && item.stamp !== null && lastStoredStamps[key] === item.stamp) {
+      continue  // 同一帧数据，跳过
+    }
+    // 更新去重缓存
+    if (item.stamp !== undefined && item.stamp !== null) {
+      lastStoredStamps[key] = item.stamp
+    }
     newData[key] = item
+    hasNewData = true
   }
+
+  // 如果所有设备的数据都是重复的，跳过本次存储
+  if (!hasNewData) return
 
   const assessmentId = activeAssessmentId || null
   const sampleType = activeSampleType || null
