@@ -1259,6 +1259,26 @@ def divide_y_regions(section_coords, foot_side="Left"):
     return s1_coords, s2_coords, s3_coords, s4_coords, s5_coords, s6_coords
 
 
+def extract_region_coords_from_heatmap(smooth_heatmap, foot_side):
+    # smooth_heatmap: 3倍上采样+平滑后的热力图二维数组, foot_side: "Left"/"Right"
+    # 返回: S1-S6 分区坐标字典（坐标已在上采样后的热力图空间中）
+    if not smooth_heatmap:
+        return {}
+    hm = np.array(smooth_heatmap)
+    if hm.size == 0 or np.max(hm) == 0:
+        return {}
+    threshold = np.max(hm) * 0.05
+    coords = np.column_stack(np.where(hm > threshold))
+    if len(coords) == 0:
+        return {}
+    coord_list = coords.tolist()
+    regions = divide_y_regions(divide_x_regions(coord_list), foot_side=foot_side)
+    result = {}
+    for i, zone in enumerate(regions):
+        result[f"S{i+1}"] = [[float(p[0]), float(p[1])] for p in zone]
+    return result
+
+
 def calculatePartitionCurve(front, behind, partitions, total_matrix):
     # front/behind: 区间起止帧, partitions: 分区坐标, total_matrix: 帧矩阵
     # 返回: 六个分区各自的随时间变化的力(N)序列（逐点ADC→N后求和）
@@ -3704,8 +3724,8 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
             "right": format_partition_curves(right_line),
         },
         "regionCoords": {
-            "left": {f"S{i+1}": [[float(p[0]), float(p[1])] for p in zone if not (np.isnan(p[0]) or np.isnan(p[1]))] for i, zone in enumerate(ls)} if ls else {},
-            "right": {f"S{i+1}": [[float(p[0]), float(p[1])] for p in zone if not (np.isnan(p[0]) or np.isnan(p[1]))] for i, zone in enumerate(rs)} if rs else {},
+            "left": extract_region_coords_from_heatmap(gait_avg_data.get("left", {}).get("heatmap"), "Left"),
+            "right": extract_region_coords_from_heatmap(gait_avg_data.get("right", {}).get("heatmap"), "Right"),
         },
         "supportPhases": support_phases_result,
         "cyclePhases": cycle_phases_result,
