@@ -241,6 +241,7 @@ export default function StandingAssessment() {
     viewReportMode ? (assessments.standing?.report?.reportData || null) : null
   );
   const [csvExporting, setCsvExporting] = useState(false);
+  const [processingText, setProcessingText] = useState('正在保存采集数据...');
 
   // 后端模式
   const [isBackendMode, setIsBackendMode] = useState(false);
@@ -555,6 +556,7 @@ export default function StandingAssessment() {
     clearInterval(timerRef.current);
     timerRef.current = null;
     isRecordingRef.current = false;
+    setProcessingText('正在保存采集数据...');
     setPhase('processing');
 
     // 停止模拟
@@ -563,11 +565,12 @@ export default function StandingAssessment() {
       simIntervalRef.current = null;
     }
 
-    // 后端模式：结束数据采集
+    // 后端模式：结束数据采集（后端会等待数据全部写入数据库后才返回）
     if (isBackendMode) {
       try {
         await backendBridge.endCol();
-        console.log('[Standing] endCol 成功');
+        console.log('[Standing] endCol 成功，数据已全部写入');
+        setProcessingText('数据保存完成，正在生成报告...');
       } catch (e) {
         console.warn('[Standing] endCol 失败:', e.message);
       }
@@ -577,7 +580,7 @@ export default function StandingAssessment() {
     const generateReport = async () => {
       try {
         if (isBackendMode) {
-          await new Promise(r => setTimeout(r, 500));
+          setProcessingText('正在分析足底压力数据，请稍候...');
           const resp = await backendBridge.getStandingReport({
             timestamp: Date.now(),
             assessmentId: assessmentIdRef.current,
@@ -845,7 +848,7 @@ export default function StandingAssessment() {
                 <div className="w-64 h-2 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border-light)' }}>
                   <div className="h-full rounded-full progress-animate" style={{ background: 'linear-gradient(to right, var(--zeiss-blue), #0891B2)' }} />
                 </div>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>正在分析足底压力数据，请稍候...</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{processingText}</p>
               </div>
             )}
           </div>

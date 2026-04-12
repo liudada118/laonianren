@@ -2283,6 +2283,19 @@ app.get('/endCol', async (req, res) => {
   colFlag = false
   // 停止采集时立即刷入缓冲区剩余数据
   flushStorageBuffer()
+  // 等待数据完全写入数据库后再返回，避免报告读取到不完整数据
+  const waitFlush = () => new Promise((resolve) => {
+    const check = () => {
+      if (!isFlushingStorage && storageBuffer.length === 0) {
+        resolve()
+      } else {
+        setTimeout(check, 50)
+      }
+    }
+    check()
+  })
+  await waitFlush()
+  console.log('[endCol] 数据已全部写入数据库')
   res.json(new HttpResult(0, 'success', '停止采集'));
 })
 
