@@ -185,6 +185,7 @@ export default function StandingAssessment() {
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [standingOptimizeBad, setStandingOptimizeBad] = useState(40);
   const [standingOptimizeGood, setStandingOptimizeGood] = useState(100);
+  const [filterParamsLoaded, setFilterParamsLoaded] = useState(false);
 
   // 进入页面时从后端读取持久化的滤波参数
   useEffect(() => {
@@ -199,16 +200,20 @@ export default function StandingAssessment() {
         if (typeof cfg.optimizeGood === 'number') setStandingOptimizeGood(cfg.optimizeGood);
         console.log('[StandingAssessment] 已加载持久化滤波参数:', cfg);
       }
-    }).catch(e => console.warn('读取滤波参数失败:', e));
+    }).catch(e => console.warn('读取滤波参数失败:', e)).finally(() => {
+      setFilterParamsLoaded(true);
+    });
   }, []);
 
-  // 同步滤波/优化参数到后端（数据源头处理）
+  // 同步滤波/优化参数到后端（等待持久化参数加载完成后才同步，避免默认值覆盖）
   useEffect(() => {
+    if (!filterParamsLoaded) return;
     backendBridge.setFootFilter('standing', { filterEnabled, filterThreshold: standingFilterThreshold, filterMinArea: standingFilterMinArea }).catch(e => console.warn('设置静态滤波失败:', e));
-  }, [filterEnabled, standingFilterThreshold, standingFilterMinArea]);
+  }, [filterParamsLoaded, filterEnabled, standingFilterThreshold, standingFilterMinArea]);
   useEffect(() => {
+    if (!filterParamsLoaded) return;
     backendBridge.setFootFilter('standing', { optimizeEnabled, optimizeBad: standingOptimizeBad, optimizeGood: standingOptimizeGood }).catch(e => console.warn('设置静态优化失败:', e));
-  }, [optimizeEnabled, standingOptimizeBad, standingOptimizeGood]);
+  }, [filterParamsLoaded, optimizeEnabled, standingOptimizeBad, standingOptimizeGood]);
 
   // 粒子系统共用参数
   const [particleParams, setParticleParams] = useState(() => loadParams('standing'));

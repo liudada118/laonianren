@@ -719,6 +719,7 @@ export default function GaitAssessment() {
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [optimizeBad, setOptimizeBad] = useState(40);
   const [optimizeGood, setOptimizeGood] = useState(100);
+  const [filterParamsLoaded, setFilterParamsLoaded] = useState(false);
 
   // 进入页面时从后端读取持久化的滤波参数
   useEffect(() => {
@@ -733,16 +734,20 @@ export default function GaitAssessment() {
         if (typeof cfg.optimizeGood === 'number') setOptimizeGood(cfg.optimizeGood);
         console.log('[GaitAssessment] 已加载持久化滤波参数:', cfg);
       }
-    }).catch(e => console.warn('读取滤波参数失败:', e));
+    }).catch(e => console.warn('读取滤波参数失败:', e)).finally(() => {
+      setFilterParamsLoaded(true);
+    });
   }, []);
 
-  // 同步滤波/优化参数到后端（数据源头处理）
+  // 同步滤波/优化参数到后端（等待持久化参数加载完成后才同步，避免默认值覆盖）
   useEffect(() => {
+    if (!filterParamsLoaded) return;
     backendBridge.setFootFilter('gait', { filterEnabled, filterThreshold, filterMinArea }).catch(e => console.warn('设置步道滤波失败:', e));
-  }, [filterEnabled, filterThreshold, filterMinArea]);
+  }, [filterParamsLoaded, filterEnabled, filterThreshold, filterMinArea]);
   useEffect(() => {
+    if (!filterParamsLoaded) return;
     backendBridge.setFootFilter('gait', { optimizeEnabled, optimizeBad, optimizeGood }).catch(e => console.warn('设置步道优化失败:', e));
-  }, [optimizeEnabled, optimizeBad, optimizeGood]);
+  }, [filterParamsLoaded, optimizeEnabled, optimizeBad, optimizeGood]);
   const [sensorData, setSensorData] = useState({});
   const sceneRef = useRef(null);
 
