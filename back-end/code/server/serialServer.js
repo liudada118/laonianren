@@ -1412,6 +1412,8 @@ app.post('/getHandPdf' , async (req , res) => {
     let rightArr = null
     let leftImuArr = null
     let rightImuArr = null
+    let leftTimes = null
+    let rightTimes = null
     let bestRow = null
     let matchedDate = null
     let matchedTimestamp = null
@@ -1422,7 +1424,7 @@ app.post('/getHandPdf' , async (req , res) => {
       console.log('[getHandPdf] 使用分离模式: leftId=%s, rightId=%s', leftAssessmentId, rightAssessmentId)
 
       if (leftAssessmentId) {
-        const { dataArr: leftDataArr, rotateArr: leftRotateArr, rows: leftRows } = await dbGetData({
+        const { dataArr: leftDataArr, rotateArr: leftRotateArr, timeArr: leftTimeArr, rows: leftRows } = await dbGetData({
           db: currentDb,
           params: [leftAssessmentId],
           byAssessmentId: true
@@ -1434,10 +1436,16 @@ app.post('/getHandPdf' , async (req , res) => {
           const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
           leftArr = lk ? leftDataArr[lk] : null
           leftImuArr = lk && leftRotateArr ? leftRotateArr[lk] : null
+          const leftRawTimes = lk && leftTimeArr ? leftTimeArr[lk] : null
           // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
           if (!leftArr && leftKeys.length > 0) {
             leftArr = leftDataArr[leftKeys[0]]
             leftImuArr = leftRotateArr ? leftRotateArr[leftKeys[0]] : null
+          }
+          // 将绝对时间戳转为相对秒数
+          if (leftRawTimes && leftRawTimes.length > 0) {
+            const t0 = Number(leftRawTimes[0])
+            leftTimes = leftRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
           }
           if (!bestRow) bestRow = leftRows[0]
           console.log('[getHandPdf] 左手最终: key=%s, frames=%d, imuFrames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0, leftImuArr ? leftImuArr.length : 0)
@@ -1445,7 +1453,7 @@ app.post('/getHandPdf' , async (req , res) => {
       }
 
       if (rightAssessmentId) {
-        const { dataArr: rightDataArr, rotateArr: rightRotateArr, rows: rightRows } = await dbGetData({
+        const { dataArr: rightDataArr, rotateArr: rightRotateArr, timeArr: rightTimeArr, rows: rightRows } = await dbGetData({
           db: currentDb,
           params: [rightAssessmentId],
           byAssessmentId: true
@@ -1457,10 +1465,16 @@ app.post('/getHandPdf' , async (req , res) => {
           const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
           rightArr = rk ? rightDataArr[rk] : null
           rightImuArr = rk && rightRotateArr ? rightRotateArr[rk] : null
+          const rightRawTimes = rk && rightTimeArr ? rightTimeArr[rk] : null
           // 如果 HR 没找到，尝试取第一个可用的数据
           if (!rightArr && rightKeys.length > 0) {
             rightArr = rightDataArr[rightKeys[0]]
             rightImuArr = rightRotateArr ? rightRotateArr[rightKeys[0]] : null
+          }
+          // 将绝对时间戳转为相对秒数
+          if (rightRawTimes && rightRawTimes.length > 0) {
+            const t0 = Number(rightRawTimes[0])
+            rightTimes = rightRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
           }
           if (!bestRow) bestRow = rightRows[0]
           console.log('[getHandPdf] 右手最终: key=%s, frames=%d, imuFrames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0, rightImuArr ? rightImuArr.length : 0)
@@ -1482,7 +1496,7 @@ app.post('/getHandPdf' , async (req , res) => {
         return
       }
 
-      const { dataArr, rotateArr, rows } = await dbGetData({
+      const { dataArr, rotateArr, timeArr, rows } = await dbGetData({
         db: currentDb,
         params: [assessmentId],
         byAssessmentId: true
@@ -1512,6 +1526,17 @@ app.post('/getHandPdf' , async (req , res) => {
       rightArr = rightKey ? dataArr[rightKey] : null
       leftImuArr = leftKey && rotateArr ? rotateArr[leftKey] : null
       rightImuArr = rightKey && rotateArr ? rotateArr[rightKey] : null
+      // 提取每只手对齐的时间戳，转为相对秒数
+      const leftRawTimes = leftKey && timeArr ? timeArr[leftKey] : null
+      if (leftRawTimes && leftRawTimes.length > 0) {
+        const t0 = Number(leftRawTimes[0])
+        leftTimes = leftRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
+      }
+      const rightRawTimes = rightKey && timeArr ? timeArr[rightKey] : null
+      if (rightRawTimes && rightRawTimes.length > 0) {
+        const t0 = Number(rightRawTimes[0])
+        rightTimes = rightRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
+      }
     }
 
     if (!leftArr && !rightArr) {
@@ -1553,6 +1578,7 @@ app.post('/getHandPdf' , async (req , res) => {
             sensor_data: leftArr,
             hand_type: '左手',
             imu_data: leftImuCleaned,
+            times: leftTimes,
           })
         : null
       rightRenderResult = rightArr
@@ -1560,6 +1586,7 @@ app.post('/getHandPdf' , async (req , res) => {
             sensor_data: rightArr,
             hand_type: '右手',
             imu_data: rightImuCleaned,
+            times: rightTimes,
           })
         : null
     } catch (e) {
