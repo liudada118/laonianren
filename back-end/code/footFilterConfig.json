@@ -1,0 +1,18 @@
+{
+  "standing": {
+    "filterEnabled": true,
+    "filterThreshold": 10,
+    "filterMinArea": 6,
+    "optimizeEnabled": true,
+    "optimizeBad": 40,
+    "optimizeGood": 100
+  },
+  "gait": {
+    "filterEnabled": true,
+    "filterThreshold": 10,
+    "filterMinArea": 10,
+    "optimizeEnabled": true,
+    "optimizeBad": 40,
+    "optimizeGood": 100
+  }
+}
