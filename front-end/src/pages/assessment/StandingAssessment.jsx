@@ -186,6 +186,22 @@ export default function StandingAssessment() {
   const [standingOptimizeBad, setStandingOptimizeBad] = useState(40);
   const [standingOptimizeGood, setStandingOptimizeGood] = useState(100);
 
+  // 进入页面时从后端读取持久化的滤波参数
+  useEffect(() => {
+    backendBridge.getFootFilter().then(res => {
+      if (res && res.code === 0 && res.data && res.data.standing) {
+        const cfg = res.data.standing;
+        if (typeof cfg.filterEnabled === 'boolean') setFilterEnabled(cfg.filterEnabled);
+        if (typeof cfg.filterThreshold === 'number') setStandingFilterThreshold(cfg.filterThreshold);
+        if (typeof cfg.filterMinArea === 'number') setStandingFilterMinArea(cfg.filterMinArea);
+        if (typeof cfg.optimizeEnabled === 'boolean') setOptimizeEnabled(cfg.optimizeEnabled);
+        if (typeof cfg.optimizeBad === 'number') setStandingOptimizeBad(cfg.optimizeBad);
+        if (typeof cfg.optimizeGood === 'number') setStandingOptimizeGood(cfg.optimizeGood);
+        console.log('[StandingAssessment] 已加载持久化滤波参数:', cfg);
+      }
+    }).catch(e => console.warn('读取滤波参数失败:', e));
+  }, []);
+
   // 同步滤波/优化参数到后端（数据源头处理）
   useEffect(() => {
     backendBridge.setFootFilter('standing', { filterEnabled, filterThreshold: standingFilterThreshold, filterMinArea: standingFilterMinArea }).catch(e => console.warn('设置静态滤波失败:', e));

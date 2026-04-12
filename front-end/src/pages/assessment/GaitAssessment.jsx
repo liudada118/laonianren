@@ -720,6 +720,22 @@ export default function GaitAssessment() {
   const [optimizeBad, setOptimizeBad] = useState(40);
   const [optimizeGood, setOptimizeGood] = useState(100);
 
+  // 进入页面时从后端读取持久化的滤波参数
+  useEffect(() => {
+    backendBridge.getFootFilter().then(res => {
+      if (res && res.code === 0 && res.data && res.data.gait) {
+        const cfg = res.data.gait;
+        if (typeof cfg.filterEnabled === 'boolean') setFilterEnabled(cfg.filterEnabled);
+        if (typeof cfg.filterThreshold === 'number') setFilterThreshold(cfg.filterThreshold);
+        if (typeof cfg.filterMinArea === 'number') setFilterMinArea(cfg.filterMinArea);
+        if (typeof cfg.optimizeEnabled === 'boolean') setOptimizeEnabled(cfg.optimizeEnabled);
+        if (typeof cfg.optimizeBad === 'number') setOptimizeBad(cfg.optimizeBad);
+        if (typeof cfg.optimizeGood === 'number') setOptimizeGood(cfg.optimizeGood);
+        console.log('[GaitAssessment] 已加载持久化滤波参数:', cfg);
+      }
+    }).catch(e => console.warn('读取滤波参数失败:', e));
+  }, []);
+
   // 同步滤波/优化参数到后端（数据源头处理）
   useEffect(() => {
     backendBridge.setFootFilter('gait', { filterEnabled, filterThreshold, filterMinArea }).catch(e => console.warn('设置步道滤波失败:', e));

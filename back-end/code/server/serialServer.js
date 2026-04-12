@@ -3654,7 +3654,14 @@ function parseData(parserArr, objs) {
 var sendMacNum = 0, successNum = 0, sendDataLength = 0
 const oldTimeObj = {}
 async function connectPort() {
+  // 只清空已断开端口的 macInfo，保留已连接设备的 MAC 信息
+  const oldMacInfo = { ...macInfo }
   macInfo = {}
+  for (const p of Object.keys(oldMacInfo)) {
+    if (parserArr[p] && parserArr[p].port && parserArr[p].port.isOpen) {
+      macInfo[p] = oldMacInfo[p]
+    }
+  }
   let ports
   if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
     // 测试模式：使用虚拟串口列表
@@ -3679,6 +3686,12 @@ async function connectPort() {
   console.log('[phase1] Starting baud rate detection for', ports.length, 'ports')
   for (let i = 0; i < ports.length; i++) {
     const { path } = ports[i]
+    // 跳过已连接且端口打开的设备，避免重复探测干扰已有连接
+    if (parserArr[path] && parserArr[path].port && parserArr[path].port.isOpen) {
+      baudDetectResults[path] = parserArr[path].baudRate || null
+      console.log('[phase1]', path, '=> skipped (already connected, baud:', baudDetectResults[path], ')')
+      continue
+    }
     let detectedBaud = null
     if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
       try {
