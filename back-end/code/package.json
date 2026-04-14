@@ -29,6 +29,13 @@
   },
   "build": {
     "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/sqlite3/**",
+      "node_modules/@mapbox/**",
+      "node_modules/@serialport/**",
+      "node_modules/node-gyp-build/**"
+    ],
     "npmRebuild": false,
     "extraResources": [
       {
@@ -53,6 +60,10 @@
       {
         "from": "db/init.db",
         "to": "db/init.db"
+      },
+      {
+        "from": "serial.txt",
+        "to": "serial.txt"
       },
       {
         "from": "build",
@@ -80,6 +91,11 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     }
   },
   "devDependencies": {

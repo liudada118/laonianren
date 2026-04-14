@@ -62,11 +62,13 @@ function ensureSeedFile(src, dest) {
 ensureDirSync(storageBase)
 
 const bundledConfigPath = path.join(bundledBase, 'config.txt')
+const bundledSerialPath = path.join(bundledBase, 'serial.txt')
 const dbPath = path.join(storageBase, 'db')
 const csvPath = path.join(storageBase, 'data')
 const pdfPath = path.join(storageBase, 'OneStep')
 const imgPath = path.join(storageBase, 'img')
 const userConfigPath = path.join(storageBase, 'config.txt')
+const userSerialPath = path.join(storageBase, 'serial.txt')
 const packagedResourcesDir = process.env.resourcesPath || process.resourcesPath || bundledBase
 
 function getPackagedAppRootDir() {
@@ -89,16 +91,22 @@ function getPackagedAppRootDir() {
 }
 
 const packagedAppRootDir = getPackagedAppRootDir()
+const packagedResourcesSerialPath = path.join(packagedResourcesDir, 'serial.txt')
 const serialPathCandidates = (() => {
   if (!isPackaged) {
-    return [path.join(bundledBase, 'serial.txt')]
+    return [bundledSerialPath]
   }
   return [
+    userSerialPath,
     path.join(packagedAppRootDir, 'serial.txt'),
-    path.join(packagedResourcesDir, 'serial.txt'),
-    path.join(storageBase, 'serial.txt'),
+    packagedResourcesSerialPath,
+    bundledSerialPath,
   ]
 })()
+
+function dedupeSerialPaths(paths) {
+  return Array.from(new Set((paths || []).filter(Boolean)))
+}
 
 ensureDirSync(dbPath)
 ensureDirSync(csvPath)
@@ -107,6 +115,8 @@ ensureDirSync(imgPath)
 
 if (isPackaged) {
   ensureSeedFile(bundledConfigPath, userConfigPath)
+  ensureSeedFile(packagedResourcesSerialPath, userSerialPath)
+  ensureSeedFile(bundledSerialPath, userSerialPath)
 }
 
 let pdfDir = pdfPath
@@ -491,38 +501,102 @@ function parseSerialTypeMap(raw) {
   return map
 }
 
+function stringifySerialTypeMap(raw) {
+  if (!raw) return ''
+  if (typeof raw === 'string') return raw.trim()
+  const map = parseSerialTypeMap(raw)
+  const entries = Object.entries(map || {})
+  if (!entries.length) return ''
+  return entries.map(([rawKey, type]) => `${rawKey}:${type}`).join('\n')
+}
+
+function hasSerialTypeMap(raw) {
+  return Object.keys(parseSerialTypeMap(raw) || {}).length > 0
+}
+
+function getSerialTypeMapText(data) {
+  if (!data || typeof data !== 'object') return ''
+
+  const preferredFields = ['serialMap', 'serialMappings', 'deviceMap', 'typeMap']
+  for (const fieldName of preferredFields) {
+    const text = stringifySerialTypeMap(data[fieldName])
+    if (text) return text
+  }
+
+  const legacyKeyText = stringifySerialTypeMap(data.key)
+  if (legacyKeyText && hasSerialTypeMap(legacyKeyText)) {
+    return legacyKeyText
+  }
+
+  return ''
+}
+
 function normalizeSerialIdentifier(value) {
   if (!value) return ''
-  let text = String(value).trim().toUpperCase()
-  const taggedMatch = text.match(/UNIQUE\s+ID:\s*([A-Z0-9]+)/i)
+  let text = String(value).trim()
+  const taggedMatch = text.match(/UNIQUE\s*ID\s*[:=]\s*([^\r\n]+)/i)
   if (taggedMatch && taggedMatch[1]) {
-    return taggedMatch[1].trim().toUpperCase()
+    text = taggedMatch[1].trim()
   }
-  text = text.replace(/^UNIQUE\s+ID:\s*/i, '')
-  text = text.split(/--|VERSIONS\s*:|COMPANY\s*:|\r|\n/i)[0] || text
-  const idMatch = text.match(/[A-Z0-9]+/)
-  return idMatch ? idMatch[0].trim().toUpperCase() : ''
+  text = text.replace(/^UNIQUE\s*ID\s*[:=]?\s*/i, '')
+  text = text.split(/--|VERSIONS\s*[:=]|COMPANY\s*[:=]|\r|\n/i)[0] || text
+  text = text.replace(/^\s*(?:MAC(?:\s+ADDRESS)?|BLE\s*MAC|ADDR(?:ESS)?)\s*[:=]?\s*/i, '')
+  text = text.replace(/^\s*0X/i, '')
+  return text
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+}
+
+function getSerialCacheEntries() {
+  const { data, serialPath } = getSerialCacheStatus()
+  const serialMap = getSerialTypeMapText(data)
+  const map = parseSerialTypeMap(serialMap)
+  const entries = Object.keys(map || {})
+    .map((rawKey) => ({
+      rawKey,
+      normalizedKey: normalizeSerialIdentifier(rawKey),
+      type: map[rawKey],
+    }))
+    .filter((item) => item.normalizedKey && item.type)
+  return { serialPath, serialMap, entries }
+}
+
+function findTypeFromSerialCache(uniqueId) {
+  const target = normalizeSerialIdentifier(uniqueId)
+  const { serialPath, entries } = getSerialCacheEntries()
+  if (!target) {
+    return { type: null, strategy: 'empty', target, serialPath, entries }
+  }
+
+  const exact = entries.find((item) => item.normalizedKey === target)
+  if (exact) {
+    return { ...exact, strategy: 'exact', target, serialPath, entries }
+  }
+
+  const partial = entries.filter(
+    (item) => target.includes(item.normalizedKey) || item.normalizedKey.includes(target)
+  )
+  if (partial.length === 1) {
+    return { ...partial[0], strategy: 'partial', target, serialPath, entries }
+  }
+
+  return { type: null, strategy: 'none', target, serialPath, entries }
 }
 
 function getTypeFromSerialCache(uniqueId) {
-  if (!uniqueId) return null
-  const cache = readSerialCache()
-  const map = parseSerialTypeMap(cache && cache.key)
-  const target = normalizeSerialIdentifier(uniqueId)
-  if (!target) return null
-  for (const key of Object.keys(map || {})) {
-    if (normalizeSerialIdentifier(key) === target) {
-      return map[key]
-    }
-  }
-  return null
+  return findTypeFromSerialCache(uniqueId).type || null
 }
 
-function syncMacInfoType(pathKey, typeValue, permissionValue) {
+function syncMacInfoType(pathKey, typeValue, permissionValue, meta = {}) {
   if (!pathKey) return
   if (!macInfo[pathKey]) macInfo[pathKey] = {}
   if (typeValue) macInfo[pathKey].type = typeValue
   if (permissionValue !== undefined) macInfo[pathKey].premission = permissionValue
+  if (meta.typeSource !== undefined) macInfo[pathKey].typeSource = meta.typeSource
+  if (meta.matchStrategy !== undefined) macInfo[pathKey].matchStrategy = meta.matchStrategy
+  if (meta.serialPath !== undefined) macInfo[pathKey].serialPath = meta.serialPath
+  if (meta.serialKey !== undefined) macInfo[pathKey].serialKey = meta.serialKey
 }
 
 function pushMacInfoUpdate() {
@@ -541,14 +615,20 @@ function reapplySerialTypeMappings() {
     const uniqueId = info.uniqueId || info.mac
     if (!uniqueId || !dataItem) continue
 
-    const mappedType = getTypeFromSerialCache(uniqueId)
+    const serialMatch = findTypeFromSerialCache(uniqueId)
+    const mappedType = serialMatch.type
     if (!mappedType) continue
 
     const normalizedType = String(mappedType).trim()
     if (dataItem.type !== normalizedType || dataItem.premission !== true || info.type !== normalizedType) {
       dataItem.type = normalizedType
       dataItem.premission = true
-      syncMacInfoType(pathKey, normalizedType, true)
+      syncMacInfoType(pathKey, normalizedType, true, {
+        typeSource: 'serial.txt',
+        matchStrategy: `reapply:${serialMatch.strategy}`,
+        serialPath: serialMatch.serialPath,
+        serialKey: serialMatch.rawKey || null,
+      })
       changed = true
       console.log(`[serialCache] reapplied type ${normalizedType} for ${pathKey} (${uniqueId})`)
     }
@@ -620,7 +700,7 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 // serial.txt cache
 function resolveSerialPath(preferExisting = true) {
   if (preferExisting) {
-    for (const candidate of serialPathCandidates) {
+    for (const candidate of dedupeSerialPaths(serialPathCandidates)) {
       try {
         if (fs.existsSync(candidate)) return candidate
       } catch {}
@@ -629,19 +709,25 @@ function resolveSerialPath(preferExisting = true) {
   return serialPathCandidates[0]
 }
 
-function resolveWritableSerialPath() {
-  for (const candidate of serialPathCandidates) {
+function getWritableSerialPaths() {
+  const writablePaths = []
+  for (const candidate of dedupeSerialPaths(serialPathCandidates)) {
     try {
+      if (candidate.includes('.asar')) continue
       ensureDirSync(path.dirname(candidate))
       fs.accessSync(path.dirname(candidate), fs.constants.W_OK)
-      return candidate
+      writablePaths.push(candidate)
     } catch {}
   }
-  return serialPathCandidates[0]
+  return writablePaths
 }
 
-function readSerialCache() {
-  const serialPath = resolveSerialPath(true)
+function resolveWritableSerialPath() {
+  return getWritableSerialPaths()[0] || serialPathCandidates[0]
+}
+
+function readSerialCacheFile(serialPath) {
+  if (!serialPath) return null
   try {
     if (!fs.existsSync(serialPath)) return null
     const raw = fs.readFileSync(serialPath, 'utf-8').trim()
@@ -656,16 +742,144 @@ function readSerialCache() {
   }
 }
 
+function getExistingSerialCacheSources() {
+  return dedupeSerialPaths(serialPathCandidates)
+    .map((serialPath) => ({
+      serialPath,
+      data: readSerialCacheFile(serialPath),
+    }))
+    .filter((item) => item.data && typeof item.data === 'object')
+}
+
+function mergeSerialCacheData(sources) {
+  if (!Array.isArray(sources) || !sources.length) return null
+
+  const merged = {}
+  let serialMap = ''
+
+  for (const source of sources) {
+    const data = source?.data
+    if (!data || typeof data !== 'object') continue
+
+    const keyText = typeof data.key === 'string' ? data.key.trim() : ''
+    if (!merged.key && keyText && !hasSerialTypeMap(keyText)) {
+      merged.key = data.key
+    }
+    if (!merged.orgName && typeof data.orgName === 'string' && data.orgName.trim()) {
+      merged.orgName = data.orgName
+    }
+    if (!merged.llmApiKey && typeof data.llmApiKey === 'string' && data.llmApiKey.trim()) {
+      merged.llmApiKey = data.llmApiKey
+    }
+    if (!merged.updatedAt && data.updatedAt) {
+      merged.updatedAt = data.updatedAt
+    }
+
+    if (!serialMap) {
+      serialMap = getSerialTypeMapText(data)
+    }
+  }
+
+  if (serialMap) {
+    merged.serialMap = serialMap
+  }
+
+  return Object.keys(merged).length ? merged : null
+}
+
+function readSerialCache() {
+  return mergeSerialCacheData(getExistingSerialCacheSources())
+}
+
+function hasSerialCacheData(data) {
+  if (!data || typeof data !== 'object') return false
+  const serialMap = getSerialTypeMapText(data)
+  const values = [
+    data.key,
+    data.orgName,
+    data.llmApiKey,
+    serialMap,
+  ]
+  return values.some((value) => {
+    if (typeof value === 'string') return Boolean(value.trim())
+    if (value && typeof value === 'object') return Boolean(Object.keys(value).length)
+    return Boolean(value)
+  })
+}
+
+function buildSerialCacheResponseData(data) {
+  if (!data || typeof data !== 'object') return {}
+  const serialMap = getSerialTypeMapText(data)
+  const serialEntries = Object.entries(parseSerialTypeMap(serialMap) || {})
+    .map(([rawKey, type]) => ({
+      rawKey,
+      normalizedKey: normalizeSerialIdentifier(rawKey),
+      type,
+    }))
+    .filter((item) => item.normalizedKey && item.type)
+
+  return {
+    ...data,
+    serialMap,
+    hasSerialMap: serialEntries.length > 0,
+    serialEntries,
+  }
+}
+
+function getSerialCacheStatus() {
+  const data = readSerialCache()
+  const serialPath = resolveSerialPath(true)
+  const candidates = serialPathCandidates.slice()
+  return {
+    serialPath,
+    candidates,
+    data,
+  }
+}
+
 function writeSerialCache(payload) {
-  const serialPath = resolveWritableSerialPath()
+  const writablePaths = getWritableSerialPaths()
+  const serialPath = writablePaths[0] || resolveWritableSerialPath()
+  const previous = readSerialCache() || {}
+  const serialMap = getSerialTypeMapText(previous)
   const data = {
+    ...previous,
     key: payload.key || '',
     orgName: payload.orgName || '',
     llmApiKey: payload.llmApiKey || '',
     updatedAt: new Date().toISOString(),
   }
-  fs.writeFileSync(serialPath, JSON.stringify(data, null, 2), 'utf-8')
-  return data
+  if (serialMap) {
+    data.serialMap = serialMap
+  }
+  const serialized = JSON.stringify(data, null, 2)
+  const writtenPaths = []
+  const failedPaths = []
+
+  for (const targetPath of dedupeSerialPaths(writablePaths.length ? writablePaths : [serialPath])) {
+    try {
+      ensureDirSync(path.dirname(targetPath))
+      fs.writeFileSync(targetPath, serialized, 'utf-8')
+      writtenPaths.push(targetPath)
+    } catch (err) {
+      failedPaths.push({
+        serialPath: targetPath,
+        message: err?.message || 'write failed',
+      })
+    }
+  }
+
+  if (!writtenPaths.length) {
+    const error = new Error(failedPaths[0]?.message || 'write failed')
+    error.failedPaths = failedPaths
+    throw error
+  }
+
+  return {
+    ...data,
+    writtenPaths,
+    failedPaths,
+  }
 }
 
 console.log(isPackaged, appPath, 'app.isPackaged')
@@ -1338,12 +1552,13 @@ app.post('/bindKey', (req, res) => {
 
 // serial.txt cache APIs
 app.get('/serialCache', (req, res) => {
-  const data = readSerialCache()
-  if (data && data.key) {
-    res.json(new HttpResult(0, { hasCache: true, ...data }, 'success'))
+  const { data, serialPath, candidates } = getSerialCacheStatus()
+  const responseData = buildSerialCacheResponseData(data)
+  if (hasSerialCacheData(data)) {
+    res.json(new HttpResult(0, { hasCache: true, serialPath, candidates, ...responseData }, 'success'))
     return
   }
-  res.json(new HttpResult(0, { hasCache: false }, 'empty'))
+  res.json(new HttpResult(0, { hasCache: false, serialPath, candidates }, 'empty'))
 })
 
 app.post('/serialCache', (req, res) => {
@@ -1354,8 +1569,9 @@ app.post('/serialCache', (req, res) => {
       return
     }
     const saved = writeSerialCache({ key, orgName, llmApiKey })
+    const { serialPath, candidates } = getSerialCacheStatus()
     const reapplied = reapplySerialTypeMappings()
-    res.json(new HttpResult(0, { ...saved, reapplied }, 'success'))
+    res.json(new HttpResult(0, { ...buildSerialCacheResponseData(saved), serialPath, candidates, reapplied }, 'success'))
   } catch (err) {
     res.json(new HttpResult(1, {}, 'save failed'))
   }
@@ -3820,14 +4036,26 @@ async function connectPort() {
           successNum++;
           parserItem.macReady = true;
           macInfo[path] = { uniqueId, version };
-          const mappedType = getTypeFromSerialCache(uniqueId);
+          const serialMatch = findTypeFromSerialCache(uniqueId);
+          const mappedType = serialMatch.type;
           if (mappedType) {
             dataItem.type = String(mappedType).trim();
             dataItem.premission = true;
-            syncMacInfoType(path, dataItem.type, true);
-            console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path}`);
+            syncMacInfoType(path, dataItem.type, true, {
+              typeSource: 'serial.txt',
+              matchStrategy: `test:${serialMatch.strategy}`,
+              serialPath: serialMatch.serialPath,
+              serialKey: serialMatch.rawKey || null,
+            });
+            console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path} via ${serialMatch.strategy} match (${serialMatch.rawKey} @ ${serialMatch.serialPath})`);
           } else {
-            console.log(`[TEST] No serial type match for ${path}: raw=${uniqueId}, normalized=${normalizeSerialIdentifier(uniqueId)}`);
+            syncMacInfoType(path, dataItem.type, false, {
+              typeSource: 'unmatched',
+              matchStrategy: 'test:none',
+              serialPath: serialMatch.serialPath,
+              serialKey: null,
+            });
+            console.log(`[TEST] No serial type match for ${path}: raw=${uniqueId}, normalized=${serialMatch.target}, serialPath=${serialMatch.serialPath}, keys=${serialMatch.entries.map((item) => item.normalizedKey).join(',')}`);
           }
           pushMacInfoUpdate()
         }
@@ -3865,13 +4093,17 @@ async function connectPort() {
           const str = buffer.toString()
           if (str.includes('Unique ID')) {
 
-            const uniqueIdMatch = str.match(/Unique ID:\s*([A-Za-z0-9]+)/i);
+            const uniqueIdMatch = str.match(/Unique ID\s*[:=]\s*([^\r\n]+)/i);
             const versionMatch = str.match(/Versions:\s*([A-Za-z0-9._-]+)/i);
 
-            const uniqueId = uniqueIdMatch ? uniqueIdMatch[1].trim() : null;
+            const uniqueIdRaw = uniqueIdMatch ? uniqueIdMatch[1].trim() : null;
+            const uniqueId = uniqueIdRaw ? normalizeSerialIdentifier(uniqueIdRaw) : null;
             const version = versionMatch ? versionMatch[1].trim() : null;
 
-            console.log("Unique ID:", uniqueId);  // 34463730155032138F
+            console.log("Unique ID:", uniqueIdRaw || uniqueId);  // 34463730155032138F
+            if (uniqueIdRaw && uniqueIdRaw !== uniqueId) {
+              console.log("Normalized Unique ID:", uniqueId);
+            }
             console.log("Versions:", version);    // C40510
             console.log(`[mac] ${path} ${uniqueId || 'n/a'}`)
             successNum++
@@ -3884,6 +4116,7 @@ async function connectPort() {
             console.log('sendTotal:', sendMacNum, '-----', 'success:', successNum)
             macInfo[path] = {
               uniqueId,
+              uniqueIdRaw,
               version
             }
 
@@ -3892,17 +4125,32 @@ async function connectPort() {
             if (deviceCat === 'hand' || deviceCat === 'sit') {
               // 手套和起坐垫：获取到 MAC 即确认授权
               dataItem.premission = true
-              syncMacInfoType(path, dataItem.type, true)
+              syncMacInfoType(path, dataItem.type, true, {
+                typeSource: 'detected',
+                matchStrategy: 'baud-category',
+              })
             } else if (deviceCat === 'foot') {
               // 脚垫：通过 MAC 地址查映射表确定 foot1-4
-              const mappedType = getTypeFromSerialCache(uniqueId)
+              const serialMatch = findTypeFromSerialCache(uniqueId)
+              const mappedType = serialMatch.type
               if (mappedType) {
                 dataItem.type = String(mappedType).trim()
                 dataItem.premission = true
-                syncMacInfoType(path, dataItem.type, true)
-                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type}`)
+                syncMacInfoType(path, dataItem.type, true, {
+                  typeSource: 'serial.txt',
+                  matchStrategy: serialMatch.strategy,
+                  serialPath: serialMatch.serialPath,
+                  serialKey: serialMatch.rawKey || null,
+                })
+                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type} via ${serialMatch.strategy} match (${serialMatch.rawKey} @ ${serialMatch.serialPath})`)
               } else {
-                console.log(`[foot] no local serial match for ${path}: raw=${uniqueId}, normalized=${normalizeSerialIdentifier(uniqueId)}`)
+                console.log(`[foot] no local serial match for ${path}: raw=${uniqueId}, normalized=${serialMatch.target}, serialPath=${serialMatch.serialPath}, keys=${serialMatch.entries.map((item) => item.normalizedKey).join(',')}`)
+                syncMacInfoType(path, dataItem.type, false, {
+                  typeSource: 'unmatched',
+                  matchStrategy: 'none',
+                  serialPath: serialMatch.serialPath,
+                  serialKey: null,
+                })
                 // MAC 未在本地缓存中，尝试从服务器查询
                 try {
                   const response = await fetch(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
@@ -3913,20 +4161,38 @@ async function connectPort() {
                   if (result.data) {
                     dataItem.type = JSON.parse(result.data.typeInfo)[0]
                     dataItem.premission = true
-                    syncMacInfoType(path, dataItem.type, true)
+                    syncMacInfoType(path, dataItem.type, true, {
+                      typeSource: 'server',
+                      matchStrategy: 'remote',
+                      serialPath: serialMatch.serialPath,
+                      serialKey: null,
+                    })
                   } else {
                     dataItem.premission = false
-                    syncMacInfoType(path, dataItem.type, false)
+                    syncMacInfoType(path, dataItem.type, false, {
+                      typeSource: 'unmatched',
+                      matchStrategy: 'remote-empty',
+                      serialPath: serialMatch.serialPath,
+                      serialKey: null,
+                    })
                   }
                 } catch (err) {
                   console.log('[foot] 服务器查询失败:', err.message)
                   dataItem.premission = false
-                  syncMacInfoType(path, dataItem.type, false)
+                  syncMacInfoType(path, dataItem.type, false, {
+                    typeSource: 'unmatched',
+                    matchStrategy: 'remote-error',
+                    serialPath: serialMatch.serialPath,
+                    serialKey: null,
+                  })
                 }
               }
             } else {
               dataItem.premission = true
-              syncMacInfoType(path, dataItem.type, true)
+              syncMacInfoType(path, dataItem.type, true, {
+                typeSource: 'detected',
+                matchStrategy: 'default',
+              })
             }
             pushMacInfoUpdate()
           }

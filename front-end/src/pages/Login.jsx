@@ -9,6 +9,8 @@ export default function Login() {
   const [institution, setInstitution] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { login } = useAssessment();
   const navigate = useNavigate();
   const location = useLocation();
@@ -94,21 +96,29 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isValid) return;
+    if (!isValid || submitting) return;
 
     const trimmedKey = secretKey.trim();
     const trimmedOrg = institution.trim();
     const trimmedLlm = llmApiKey.trim();
+    setSubmitError('');
+    setSubmitting(true);
 
     // 保存到 serial.txt
     try {
-      await fetch(`${backendBridge.httpUrl}/serialCache`, {
+      const response = await fetch(`${backendBridge.httpUrl}/serialCache`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: trimmedKey, orgName: trimmedOrg, llmApiKey: trimmedLlm }),
       });
-    } catch {
-      // 保存失败不阻塞登录
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result || result.code !== 0) {
+        throw new Error(result?.message || '保存 serial.txt 失败');
+      }
+    } catch (err) {
+      setSubmitError(err?.message || '保存 serial.txt 失败，请检查文件权限后重试');
+      setSubmitting(false);
+      return;
     }
 
     login(trimmedKey, trimmedOrg, trimmedLlm);
@@ -237,15 +247,28 @@ export default function Login() {
               </div>
             </div>
 
+            {submitError && (
+              <div
+                className="rounded-lg px-3 py-2 text-sm"
+                style={{
+                  color: '#B42318',
+                  background: '#FEF3F2',
+                  border: '1px solid #FECACA',
+                }}
+              >
+                {submitError}
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={!isValid}
+              disabled={!isValid || submitting}
               className="w-full py-3.5 rounded-[10px] font-semibold text-[15px] transition-all duration-200 mt-2"
               style={{
-                background: isValid ? 'var(--zeiss-blue)' : '#E8ECF0',
-                color: isValid ? 'white' : 'var(--text-muted)',
-                cursor: isValid ? 'pointer' : 'not-allowed',
-                boxShadow: isValid ? '0 4px 14px rgba(0,102,204,0.25)' : 'none',
+                background: isValid && !submitting ? 'var(--zeiss-blue)' : '#E8ECF0',
+                color: isValid && !submitting ? 'white' : 'var(--text-muted)',
+                cursor: isValid && !submitting ? 'pointer' : 'not-allowed',
+                boxShadow: isValid && !submitting ? '0 4px 14px rgba(0,102,204,0.25)' : 'none',
                 border: 'none',
               }}
             >
