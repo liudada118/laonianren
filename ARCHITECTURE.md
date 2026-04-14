@@ -1,13 +1,14 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-14 17:21
+**最后更新**: 2026-04-14 19:30
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
-| 2026-04-14 17:21 | main | 修复缺陷 | 修复设置页“保存并返回”后 `serial.txt` 未同步更新的问题。后端现在会合并读取多个 `serial.txt` 来源，避免旧版把 MAC 映射写在 `key` 字段时污染登录密钥；保存时会把同一份 JSON 同步写入所有可写的运行时 `serial.txt` 候选路径，并在响应中返回 `writtenPaths`/`failedPaths` 便于排查。前端设置页同时改为校验 `/serialCache` 返回结果，保存失败时停留当前页并显示错误提示。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`。 |
+| 2026-04-14 19:30 | main | 重构 | 简化 MAC 映射格式为 `MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4`（逗号分隔，无引号）。后端 `parseSerialTypeMap` 改为新格式优先解析，兼容旧 JSON 和 `serialMap` 格式；`getSerialTypeMapText` 优先从 `key` 字段读取映射；`writeSerialCache` 不再单独写 `serialMap` 字段；`serial.txt` 去掉 `serialMap` 字段，`key` 字段直接存储新格式。前端 Login.jsx 将「系统密钥」改为「设备映射」，placeholder 改为格式示例。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`、`back-end/code/serial.txt`。 |
+| 2026-04-14 17:21 | main | 修复缺陷 | 修复设置页"保存并返回"后 `serial.txt` 未同步更新的问题。后端现在会合并读取多个 `serial.txt` 来源，避免旧版把 MAC 映射写在 `key` 字段时污染登录密钥；保存时会把同一份 JSON 同步写入所有可写的运行时 `serial.txt` 候选路径，并在响应中返回 `writtenPaths`/`failedPaths` 便于排查。前端设置页同时改为校验 `/serialCache` 返回结果，保存失败时停留当前页并显示错误提示。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`。 |
 | 2026-04-14 17:10 | main | 修复缺陷 | 修复 `serial.txt` 同时承载登录缓存与脚垫 MAC 映射时的覆盖问题。后端现在会在保存登录配置时保留已有的 `serialMap`/旧版 `key` 映射，并通过 `/serialCache` 额外返回解析后的 `serialMap`、`serialEntries`；同时 `macInfo` 推送增加 `typeSource`、`matchStrategy`、`serialPath`、`serialKey`，用于区分型号来自本地 `serial.txt` 还是服务器兜底。修改文件：`back-end/code/server/serialServer.js`。 |
 | 2026-04-14 16:22 | main | 修复缺陷 | 增强打包版脚垫 MAC/Unique ID 匹配容错。后端现在额外兼容 `Unique ID=`、`MAC Address:`、`0x...` 等前缀格式，并在精确匹配失败时尝试唯一的包含式匹配；同时在未命中时输出实际读取的 `serial.txt` 路径和归一化后的候选 key，便于定位设备回传格式与本地映射不一致的问题。修改文件：`back-end/code/server/serialServer.js`。 |
 | 2026-04-14 16:03 | main | 配置变更 | 调整 Windows 安装包的 NSIS 配置，关闭 `oneClick` 并启用 `allowToChangeInstallationDirectory`，使安装器改为向导模式，用户安装时可以手动选择安装目录。修改文件：`back-end/code/package.json`。 |

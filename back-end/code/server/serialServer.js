@@ -455,27 +455,25 @@ function parseSerialTypeMap(raw) {
   let text = raw.trim()
   if (!text) return {}
 
-  if (text.includes('"key"') && text.includes('"orgName"')) {
-    const keyIdx = text.indexOf('"key"')
-    if (keyIdx !== -1) {
-      const afterKey = text.slice(keyIdx)
-      const colonIdx = afterKey.indexOf(':')
-      if (colonIdx !== -1) {
-        let rest = afterKey.slice(colonIdx + 1)
-        const orgIdx = rest.indexOf('"orgName"')
-        if (orgIdx !== -1) rest = rest.slice(0, orgIdx)
-        rest = rest.replace(/^[\s,]+/, '').replace(/[\s,]+$/, '')
-        if (
-          (rest.startsWith('"') && rest.endsWith('"')) ||
-          (rest.startsWith("'") && rest.endsWith("'"))
-        ) {
-          rest = rest.slice(1, -1)
-        }
-        text = rest.trim()
-      }
+  // 新格式（优先）: MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4
+  // 支持逗号、分号、换行分隔，冒号或等号作为键值分隔符，去掉所有引号兼容旧格式
+  const map = {}
+  const cleaned = text.replace(/["']/g, '')
+  cleaned.split(/[,;\n]+/).forEach((part) => {
+    const trimmed = part.trim()
+    if (!trimmed) return
+    const sepIdx = trimmed.indexOf(':')
+    const eqIdx = trimmed.indexOf('=')
+    const idx = sepIdx !== -1 ? (eqIdx !== -1 ? Math.min(sepIdx, eqIdx) : sepIdx) : eqIdx
+    if (idx > 0) {
+      const k = trimmed.slice(0, idx).trim()
+      const v = trimmed.slice(idx + 1).trim()
+      if (k && v) map[k] = v
     }
-  }
+  })
+  if (Object.keys(map).length) return map
 
+  // 兼容旧 JSON 格式
   const tryParse = (value) => {
     try {
       const obj = JSON.parse(value)
@@ -491,14 +489,7 @@ function parseSerialTypeMap(raw) {
   obj = tryParse(normalized)
   if (obj) return obj
 
-  const map = {}
-  normalized.split(/[,;\n]+/).forEach((part) => {
-    const m = part.match(/^\s*"?([^":=]+)"?\s*[:=]\s*"?([^"]+)"?\s*$/)
-    if (m) {
-      map[m[1].trim()] = m[2].trim()
-    }
-  })
-  return map
+  return {}
 }
 
 function stringifySerialTypeMap(raw) {
@@ -517,15 +508,17 @@ function hasSerialTypeMap(raw) {
 function getSerialTypeMapText(data) {
   if (!data || typeof data !== 'object') return ''
 
+  // 新格式优先：key 字段直接存储 MAC:foot 映射
+  const keyText = stringifySerialTypeMap(data.key)
+  if (keyText && hasSerialTypeMap(keyText)) {
+    return keyText
+  }
+
+  // 兼容旧格式：从 serialMap 等字段读取
   const preferredFields = ['serialMap', 'serialMappings', 'deviceMap', 'typeMap']
   for (const fieldName of preferredFields) {
     const text = stringifySerialTypeMap(data[fieldName])
     if (text) return text
-  }
-
-  const legacyKeyText = stringifySerialTypeMap(data.key)
-  if (legacyKeyText && hasSerialTypeMap(legacyKeyText)) {
-    return legacyKeyText
   }
 
   return ''
@@ -755,14 +748,13 @@ function mergeSerialCacheData(sources) {
   if (!Array.isArray(sources) || !sources.length) return null
 
   const merged = {}
-  let serialMap = ''
 
   for (const source of sources) {
     const data = source?.data
     if (!data || typeof data !== 'object') continue
 
-    const keyText = typeof data.key === 'string' ? data.key.trim() : ''
-    if (!merged.key && keyText && !hasSerialTypeMap(keyText)) {
+    // key 字段现在直接存储 MAC:foot 映射
+    if (!merged.key && typeof data.key === 'string' && data.key.trim()) {
       merged.key = data.key
     }
     if (!merged.orgName && typeof data.orgName === 'string' && data.orgName.trim()) {
@@ -774,14 +766,11 @@ function mergeSerialCacheData(sources) {
     if (!merged.updatedAt && data.updatedAt) {
       merged.updatedAt = data.updatedAt
     }
-
-    if (!serialMap) {
-      serialMap = getSerialTypeMapText(data)
+    // 兼容旧格式：如果 key 中没有映射，从 serialMap 等字段补充
+    if (!merged.serialMap) {
+      const legacyMap = getSerialTypeMapText(data)
+      if (legacyMap) merged.serialMap = legacyMap
     }
-  }
-
-  if (serialMap) {
-    merged.serialMap = serialMap
   }
 
   return Object.keys(merged).length ? merged : null
@@ -841,16 +830,11 @@ function writeSerialCache(payload) {
   const writablePaths = getWritableSerialPaths()
   const serialPath = writablePaths[0] || resolveWritableSerialPath()
   const previous = readSerialCache() || {}
-  const serialMap = getSerialTypeMapText(previous)
   const data = {
-    ...previous,
     key: payload.key || '',
     orgName: payload.orgName || '',
-    llmApiKey: payload.llmApiKey || '',
+    llmApiKey: payload.llmApiKey || previous.llmApiKey || '',
     updatedAt: new Date().toISOString(),
-  }
-  if (serialMap) {
-    data.serialMap = serialMap
   }
   const serialized = JSON.stringify(data, null, 2)
   const writtenPaths = []

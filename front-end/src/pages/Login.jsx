@@ -5,7 +5,7 @@ import { fetchLlmConfig } from '../lib/gripPythonApi';
 import { backendBridge } from '../lib/BackendBridge';
 
 export default function Login() {
-  const [secretKey, setSecretKey] = useState('');
+  const [deviceMapping, setDeviceMapping] = useState('');
   const [institution, setInstitution] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
@@ -61,7 +61,7 @@ export default function Login() {
           const cachedOrg = cached.orgName || '';
           const cachedLlm = cached.llmApiKey || serverApiKey || '';
 
-          setSecretKey(cachedKey);
+          setDeviceMapping(cachedKey);
           setInstitution(cachedOrg);
           setLlmApiKey(cachedLlm);
 
@@ -92,13 +92,13 @@ export default function Login() {
     return () => { cancelled = true; };
   }, [login, navigate, editMode]);
 
-  const isValid = secretKey.trim().length > 0;
+  const isValid = deviceMapping.trim().length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isValid || submitting) return;
 
-    const trimmedKey = secretKey.trim();
+    const trimmedKey = deviceMapping.trim();
     const trimmedOrg = institution.trim();
     const trimmedLlm = llmApiKey.trim();
     setSubmitError('');
@@ -184,13 +184,13 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                系统密钥
+                设备映射
               </label>
               <input
                 type="text"
-                value={secretKey}
-                onChange={(e) => setSecretKey(e.target.value)}
-                placeholder="请输入系统登录密钥"
+                value={deviceMapping}
+                onChange={(e) => setDeviceMapping(e.target.value)}
+                placeholder="MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4"
                 className="zeiss-input"
                 style={{ padding: '12px 16px' }}
               />
