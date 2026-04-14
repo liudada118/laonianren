@@ -9,6 +9,10 @@ const LOG_LEVELS = {
 const PROGRESS_PATTERNS = [
   /^\[(getFootPdf|getSitAndFootPdf|getHandPdf)\]/,
   /^\[(Python|pyai|backend|window|vite|updater|start|rescanPort|cleanup)\]/,
+  /^\[(phase1|phase2|baud|device|port|mac|foot|sendAT|TEST)\]/,
+  /Unique ID:/,
+  /^Versions:/,
+  /^sendTotal:/,
   /^API child exited:/,
 ]
 

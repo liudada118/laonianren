@@ -5,8 +5,10 @@ const localArch = process.arch === 'arm64' ? 'arm64' : 'x64'
 
 module.exports = {
   ...baseBuild,
+  productName: baseBuild.productName || '肌少症评估系统',
   mac: {
     ...(baseBuild.mac || {}),
+    icon: 'renderer-build/logo.png',
     identity: null,
     hardenedRuntime: false,
     target: [
