@@ -1,13 +1,48 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-03-09 17:40
+**最后更新**: 2026-04-15 10:30
 **作者**: Manus AI
 
 ## 更新日志
-
-| 日期 | 类型 | 描述 |
-|---|---|---|
+| 日期 | 分支 | 类型 | 描述 |
+|---|---|---|---|
+| 2026-04-15 10:30 | main | 新增功能 | 完善版本管理和自动更新流程。新增 `release-notes/` 目录结构（windows/mac 分平台存放版本更新说明）；新增 `inject-release-notes.js` 打包后自动将 release-notes 注入 `latest.yml` 的 `releaseNotes` 字段；更新服务器地址改为 `http://sensor.bodyta.com/shroom1`；前端新增 `VersionHistory.jsx`（紫色历史按钮 + 弹窗展示硬编码版本记录）；`UpdateNotification.jsx` 改造为右下角更新按钮 + 弹窗显示服务器 `releaseNotes`；Login.jsx 去掉检查更新按钮。修改文件：`back-end/code/updater.js`、`back-end/code/package.json`、`back-end/code/scripts/inject-release-notes.js`、`back-end/code/release-notes/`、`front-end/src/components/ui/UpdateNotification.jsx`、`front-end/src/components/ui/VersionHistory.jsx`、`front-end/src/App.jsx`、`front-end/src/pages/Login.jsx`。 |
+| 2026-04-14 | main | 配置变更 | 调整 Windows 打包链路为“完整 Python runtime 随包携带”。构建前新增 `prepare-python-runtime.js`，从构建机基础 Python 复制标准库、DLL 与运行时文件到 `back-end/code/python/runtime`，再覆盖项目 `venv` 的 `site-packages`，生成可移植的 `python/runtime/python.exe`；`electron-builder` 现改为携带 `python/runtime`，而不再直接打包 `venv`。修改文件：`back-end/code/scripts/prepare-python-runtime.js`、`back-end/code/package.json`、`back-end/code/.gitignore`。 |
+| 2026-04-14 | main | 配置变更 | 调整打包版 Python 调用路径。主进程 AI 服务与报告算法桥接在打包模式下统一从 `resources/python/runtime` 启动解释器，并显式注入 `PYTHONHOME`/`PYTHONNOUSERSITE`；同时将 `algorithms/python/bridge.py` 作为 `extraResources` 真实文件打入安装包，避免 `app.asar` 内脚本路径无法被外部 Python 进程直接访问。修改文件：`back-end/code/index.js`、`back-end/code/algorithms/python/pythonBridge.js`、`back-end/code/package.json`。 |
+| 2026-04-14 | main | 配置变更 | 收紧打包版 Python 运行时来源。Electron 安装包运行时现在只允许使用 `resources/python/venv` 中随包携带的解释器启动 AI 服务，不再回退到用户机器上的 `python` / `py` 命令；开发环境仍保留本地回退，便于未打包调试。修改文件：`back-end/code/index.js`。 |
+| 2026-04-14 | main | 修复缺陷 | 修复打包版 `serial.txt` 主读取路径错误优先落到 `AppData\\Roaming\\jqtools2\\serial.txt` 的问题。后端现在不再简单采用“第一个存在的文件”，而是对多个 `serial.txt` 候选按内容去重、按更新时间与路径优先级选主源；当安装目录、`resources` 与 `userData` 中存在相同内容时，会优先使用安装目录侧文件，避免自动同步出的 `userData` 副本抢占主路径。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-14 | main | 配置变更 | 修复 Windows 环境下 `pip install -r back-end/code/python/requirements-electron.txt` 读取依赖文件时报 `UnicodeDecodeError: 'gbk' codec can't decode byte` 的问题。根因是 `requirements-electron.txt` 含 UTF-8 中文注释而本地 `pip` 按 GBK 解码；现已将该文件改为 ASCII 注释，并保持 Electron 运行所需的 `fastapi`、`python-multipart` 等依赖可正常安装。 |
+| 2026-04-14 | main | 修复缺陷 | 修复本地 Electron 启动时前端反复请求 `http://localhost:5173/` 导致 `ERR_CONNECTION_REFUSED` 的问题。主进程在未打包模式下若存在 `renderer-build/index.html`，现在默认直接加载本地静态构建，不再强依赖 Vite dev server；若显式设置 `FORCE_VITE_DEV_SERVER=1` 才继续走热更新链路，而当 Vite 不可用时也会自动回退到静态页。修改文件：`back-end/code/index.js`、`back-end/code/renderer-build/*`。 |
+| 2026-04-14 19:30 | main | 重构 | 简化 MAC 映射格式为 `MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4`（逗号分隔，无引号）。后端 `parseSerialTypeMap` 改为新格式优先解析，兼容旧 JSON 和 `serialMap` 格式；`getSerialTypeMapText` 优先从 `key` 字段读取映射；`writeSerialCache` 不再单独写 `serialMap` 字段；`serial.txt` 去掉 `serialMap` 字段，`key` 字段直接存储新格式。前端 Login.jsx 将「系统密钥」改为「设备映射」，placeholder 改为格式示例。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`、`back-end/code/serial.txt`。 |
+| 2026-04-14 17:21 | main | 修复缺陷 | 修复设置页"保存并返回"后 `serial.txt` 未同步更新的问题。后端现在会合并读取多个 `serial.txt` 来源，避免旧版把 MAC 映射写在 `key` 字段时污染登录密钥；保存时会把同一份 JSON 同步写入所有可写的运行时 `serial.txt` 候选路径，并在响应中返回 `writtenPaths`/`failedPaths` 便于排查。前端设置页同时改为校验 `/serialCache` 返回结果，保存失败时停留当前页并显示错误提示。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`。 |
+| 2026-04-14 17:10 | main | 修复缺陷 | 修复 `serial.txt` 同时承载登录缓存与脚垫 MAC 映射时的覆盖问题。后端现在会在保存登录配置时保留已有的 `serialMap`/旧版 `key` 映射，并通过 `/serialCache` 额外返回解析后的 `serialMap`、`serialEntries`；同时 `macInfo` 推送增加 `typeSource`、`matchStrategy`、`serialPath`、`serialKey`，用于区分型号来自本地 `serial.txt` 还是服务器兜底。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-14 16:22 | main | 修复缺陷 | 增强打包版脚垫 MAC/Unique ID 匹配容错。后端现在额外兼容 `Unique ID=`、`MAC Address:`、`0x...` 等前缀格式，并在精确匹配失败时尝试唯一的包含式匹配；同时在未命中时输出实际读取的 `serial.txt` 路径和归一化后的候选 key，便于定位设备回传格式与本地映射不一致的问题。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-14 16:03 | main | 配置变更 | 调整 Windows 安装包的 NSIS 配置，关闭 `oneClick` 并启用 `allowToChangeInstallationDirectory`，使安装器改为向导模式，用户安装时可以手动选择安装目录。修改文件：`back-end/code/package.json`。 |
+| 2026-04-14 15:48 | main | 修复缺陷 | 修复脚垫 MAC 映射与 `serial.txt` 识别链路。后端现在会将 `Unique ID`/MAC 中的 `:`、`-`、空格统一归一化后再与 `serial.txt` 比对，避免设备返回分隔格式时匹配失败；打包版启动时会优先读取用户目录 `serial.txt`，并在首次启动时自动将包内 `serial.txt` 落到用户目录，同时 `/serialCache` 接口返回实际命中的文件路径与候选路径，便于排查“已读出 MAC 但未分配 foot1~foot4”的问题。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-14 02:32 | main | 修复缺陷 | 修复 Windows 打包后运行时报 Cannot find module '@mapbox/node-pre-gyp' 错误。根因：package.json build 配置中缺少 asarUnpack，导致 sqlite3、@mapbox/node-pre-gyp、@serialport 等原生模块被打包进 app.asar，运行时无法加载 .node 二进制文件。修复：在 build 配置中添加 asarUnpack 字段，将所有原生模块（sqlite3、@mapbox、@serialport、node-gyp-build）及 .node 文件解包到 app.asar.unpacked 目录。修改文件：back-end/code/package.json。 |
+| 2026-03-24 07:04 | update | 新增功能 | 添加在线自动更新功能。新增 electron-updater 依赖，配置 generic provider（更新服务器 http://sensor.bodyta.com/evaluate）；创建 updater.js 自动更新模块；修改 preload.js 暴露更新 IPC API；修改 index.js 集成更新初始化和清理；配置 package.json build.publish；新增 UpdateNotification.jsx 前端更新弹窗组件（含进度条）；修改 Login.jsx 添加检查更新按钮和动态版本号。 |
+| 2026-03-12 12:40 | ld | 修复缺陷 | 彻底修复串口 Cannot lock port 问题。根因确认：CH340 USB转串口芯片在 macOS 上，当一个端口被打开后会锁住同一总线上的其他端口。重构 connectPort 为两阶段架构：阶段一“探测”——通过分隔符+帧长度双重验证逐个串行探测波特率，每个探测完关闭端口后等 500ms 再探测下一个；阶段二“连接”——全部探测完成后等 1s 确保端口锁彻底释放，再通过 newSerialPortLinkWithRetry 逐个打开连接。修改文件：serialServer.js。 |
+| 2026-03-12 12:22 | ld | 修复缺陷 | 修复串口设备连接时 Cannot lock port 端口锁定问题及波特率误检问题。(1) detectBaudRate 新增双重验证：先检测分隔符 AA 55 03 99，再验证帧长度是否匹配该波特率对应的设备类型（921600→1​30/146/18，1000000→1024，3000000→4096），防止脚垫被误识为坐垫；(2) 每次波特率探测后加 300ms 延时等待端口锁释放，探测失败时最多重试 2 次；(3) 新增 newSerialPortLinkWithRetry 函数，端口打开失败时自动重试最多 3 次，每次间隔 500ms。修改文件：serialServer.js、config.js。 |
+| 2026-03-12 20:00 | hand | 修复缺陷 | 彻底修复右手清零失效。根因确认：HR的Packet1在硬件层面系统性丢失（sensorType=2的Packet1几乎每次都丢失），导致HR永远只有128字节数据。修复策略从“要求256字节完整帧”改为“接受128字节也能正确工作”：(1)后端 gloveLatestData接受128或256字节；(2)tareGrip接受>=128字节的基线；(3)前端 BackendBridge._normalizeGloveArr()将128字节补零到256给热力图使用；(4)前端增加清零重试机制。修改文件：serialServer.js、BackendBridge.js、GripAssessment.jsx。 |
+| 2026-03-12 19:00 | hand | 修复缺陷 | 中间版本：尝试通过要求256字节完整帧来修复右手清零，但经日志确认HR的Packet1硬件层面系统性丢失，该方案不可行。已被20:00版本替代。 |
+| 2026-03-12 18:00 | hand | 修复缺陷 | 彻底修复右手清零偶发失效。根因：左右手共用串口，Packet1(130字节)到达时覆盖dataItem.type但不更新dataItem.arr，导致type/arr不匹配，清零基线被错误应用到另一只手的数据。修复：(1)parseData中手套数据统一从gloveLatestData获取，不再使用dataMap[path]的arr；(2)Packet1处理时不再覆盖dataItem.type/stamp，仅缓存前半数据等待Packet2合并。修改文件：serialServer.js。 |
+| 2026-03-12 17:00 | hand | 性能优化 | 优化手部模型热力图渲染性能。(1)heatmap.js：预分配Float32Array缓冲区避免GC压力，预计算高斯核，blur pass从3次减为2次；(2)HandModel.jsx：按需渲染(dirty flag)替代60fps全速渲染，通过轮询HeatmapCanvas._version替代React setState驱动，pixelRatio上限2x；(3)GripAssessment.jsx：去掉setHeatmapVersion的setState调用，消除每帧React re-render。修改文件：heatmap.js、HandModel.jsx、GripAssessment.jsx。 |
+| 2026-03-12 16:00 | hand | 修复缺陷 | 修复第二次进入握力评估时清零失效。根因：clearGripBaseline未清除gloveLatestData缓存，导致第二次进入时用旧数据作为基线。修复：(1)clearGripBaseline同时清除gloveLatestData；(2)tareGrip增加时间戳新鲜度检查(2s)，拒绝过期数据；(3)异步重试机制等待新鲜数据到达。修改文件：serialServer.js。 |
+| 2026-03-12 15:30 | hand | 修复缺陷 | 修复右手(HR)清零基线无法记录的问题。新增 gloveLatestData 缓存按HL/HR分别存储最新帧数据，修改 tareGrip 优先从缓存读取基线，修改 parseData 补充被覆盖的另一只手数据。修改文件：serialServer.js。 |
+| 2026-03-09 10:06 | ld | 修复缺陷 | 修正主页Dashboard评估卡片设备数量提示：起坐50→2（坐垫+脚垫1）、静态站立4→1（脚垫1）。修改文件：Dashboard.jsx。 |
+| 2026-03-09 10:05 | ld | 新增功能 | 三个评估模式（起坐/静态站立/步态）3D场景启用缩放控制并扩大缩放范围（PressureScene3D.js、FootpadScene.js、InsoleScene.jsx）。 |
+| 2026-03-09 10:04 | ld | 新增功能 | 起坐和静态站立前端展示增加脚垫数据左右对调（usePressureScene.js增加flipLR、FootAnalysis.js的parseFrameData增加额外flipLR）。 |
+| 2026-03-09 10:03 | ld | 修复缺陷 | 修正后端脚垫翻转方向为上下翻转（flipFoot64x64Vertical，行顺序反转）实现左右对调。修改文件：serialServer.js。 |
+| 2026-03-09 10:02 | ld | 新增功能 | 后端对所有脚垫(foot1-4)的64×64矩阵数据做水平镜像翻转（左右对调）。修改文件：serialServer.js。 |
+| 2026-03-09 10:01 | ld | 修复缺陷 | 修复起坐评估中foot1脚垫只渲染左上区域的问题（跨模式footBuffers污染），增加模式感知的脚垫过滤。修改文件：usePressureScene.js。 |
+| 2026-03-09 09:58 | ld | 修复缺陷 | 起坐评估坐垫脚垫帧率修复：去除重复帧并使用真实时间戳。修改文件：serialServer.js。 |
+| 2026-03-09 09:55 | ld | 修复缺陷 | 修复同名患者同日评估历史记录被覆盖的问题。修改文件：historyService.js。 |
+| 2026-03-09 09:52 | ld | 修复缺陷 | 修复rescanPort关闭已断开串口时Port is not open崩溃。修改文件：serialServer.js。 |
+| 2026-03-09 09:50 | ld | 修复缺陷 | 修复步态分析analyze_gait_cycle中cycle_start为None导致的TypeError。修改文件：generate_gait_report.py。 |
+| 2026-03-09 09:48 | ld | 修复缺陷 | 修复searchHistory/getRecord非Promise导致.then is not a function错误。修改文件：BackendBridge.js。 |
+| 2026-03-09 09:45 | ld | 新增功能 | 重写PDF导出：使用html2canvas+jsPDF生成真实PDF文件，支持单报告和整体报告导出。修改文件：pdfExport.jsx。 |
+| 2026-03-09 09:40 | ld | 新增功能 | 实现5个功能：设备掉线重连、单报告PDF导出、整体报告PDF导出、历史一键删除、步态评估报告优化。 |
 | 2026-03-09 17:40 | test | 新增功能+优化重构 | 静态站立评估3项改进：(1) 进入评估后弹窗提示“请踩上，10秒后自动结束”；(2) COP轨迹与置信椭圆坐标自适应（根据散点+椭圆范围动态计算坐标轴，图表高度从380/400增大到520，椭圆图改为全宽布局）；(3) 综合评估移到报告最前面；额外修复评估时间持续增加bug。修改文件：StandingAssessment.jsx、StandingReport.jsx。 |
 | 2026-03-09 17:20 | test | 新增功能+修复缺陷 | 起坐能力评估4项改进：(1) Dashboard和SitStandAssessment新增“请起坐 5 次”弹窗提示；(2) 修正报告测试时间持续增加Bug（用useMemo缓存fallbackDate）；(3) 取消站立帧数/坐姿帧数展示，仅保留采样率小字；(4) 力时间曲线合并为单图并添加足底/坐垫图例标识。修改文件：Dashboard.jsx、SitStandAssessment.jsx、SitStandReport.jsx。 |
 | 2026-03-09 16:46 | test | 优化重构 | 握力评估左侧可视化区域实时更新：设备连接后无论是否在采集，左侧面板的压力曲线、统计数据、正态分布图均实时变化。修改文件：GripAssessment.jsx。 |
@@ -49,7 +84,7 @@
 
 | 层次 | 技术 | 主要库/框架 | 职责 |
 |---|---|---|---|
-| **桌面应用容器** | Electron | `electron`, `electron-builder` | 提供跨平台（Windows, macOS）的桌面应用外壳，管理窗口和主进程。 |
+| **桌面应用容器** | Electron | `electron`, `electron-builder`, `electron-updater` | 提供跨平台（Windows, macOS）的桌面应用外壳，管理窗口和主进程，支持在线自动更新。 |
 | **前端/UI** | React | `react`, `vite`, `tailwindcss`, `echarts`, `three.js` | 构建用户界面，包括数据可视化（图表、3D模型）、设备连接、评估流程控制。 |
 | **后端/主服务** | Node.js | `express`, `ws`, `serialport`, `sqlite3` | 核心业务逻辑，包括：HTTP API 服务、WebSocket 实时通信、串口设备数据采集、数据库管理。 |
 | **算法/数据处理** | JavaScript (Node.js) & Python | `numpy`, `scipy`, `matplotlib` | 执行核心算法，包括信号处理、峰值检测、COP计算、报告数据生成等。 |
@@ -61,6 +96,8 @@
 
 - **`back-end/code`**: Electron 主进程和后端 Node.js 服务代码。
   - `index.js`: Electron 主进程入口。
+  - `updater.js`: 自动更新模块，基于 electron-updater 实现在线更新。
+  - `dev-app-update.yml`: 开发环境更新配置文件。
   - `server/serialServer.js`: 核心后端服务，处理硬件通信和 API 请求。
   - `algorithms/`: 算法模块，包含 JS 实现和 Python 桥接。
   - `python/`: Python 算法的原始脚本。
@@ -91,7 +128,8 @@
 3.  **子进程管理**: 
     - 在开发模式下，启动 Vite 开发服务器。
     - 启动核心后端服务 `serialServer.js` 作为一个独立的 Node.js 子进程 (`child_process.fork`)。这种隔离可以防止后端服务的崩溃影响到整个应用的稳定性。
-4.  **预加载脚本 (`preload.js`)**: 通过 `contextBridge` 安全地向渲染进程暴露 Node.js API（目前较少使用）。
+4.  **预加载脚本 (`preload.js`)**: 通过 `contextBridge` 安全地向渲染进程暴露 Node.js API，包括自动更新相关接口（checkForUpdate、downloadUpdate、installUpdate、getAppVersion、onUpdateStatus）。
+5.  **自动更新 (`updater.js`)**: 使用 `electron-updater` 实现应用在线自动更新，配置 generic provider 指向 `http://sensor.bodyta.com/evaluate`。启动后 5 秒自动检查更新，之后每 30 分钟定时检查。支持手动检查、下载进度通知、安装重启等完整更新流程。
 
 ### 2.2. 前端架构 (`front-end`)
 
@@ -133,6 +171,9 @@
 - **`ECharts`**: 用于绘制 2D 图表，如压力曲线、柱状图等 (`components/ui/EChart.jsx`)。
 - **`Three.js` / `@react-three/fiber`**: 用于渲染 3D 模型，如手部模型、足底压力热力图等 (`components/three/`)。
   - **热力图渲染 (`lib/heatmap.js`)**: 一个核心的自定义模块，实现了将离散的压力点数据通过高斯模糊、颜色映射等技术渲染成平滑的热力图纹理，并应用到 3D 模型上。
+  - **脚垫数据前端处理 (`hooks/usePressureScene.js`)**: 起坐/步态评估的脚垫数据处理 hook，包含模式感知的 footBuffers 过滤（防止跨模式数据污染）、`rotateCCW90` 旋转、`flipLR` 水平镜像等变换。
+  - **足底分析 (`lib/FootAnalysis.js`)**: 静态站立评估的数据处理模块，`parseFrameData` 对 64×64 矩阵执行 `rot90 → flipLR → flipUD → flipLR` 变换链，`splitLeftRight` 按列 0-31/32-63 划分左右脚。
+  - **3D 场景缩放控制**: 三个评估模式的 3D 场景（`PressureScene3D.js`、`FootpadScene.js`、`InsoleScene.jsx`）均启用 `OrbitControls.enableZoom`，支持鼠标滚轮/触控板双指缩放。
 
 ### 2.3. 后端服务 (`back-end/code/server/serialServer.js`)
 
@@ -159,9 +200,19 @@
 - 使用 `serialport` 库扫描和连接所有可用的串口设备。
 - **设备识别**：统一通过波特率探测（`detectBaudRate`）识别设备类型，不再依赖 CH340 芯片标记。
 - **波特率 → 设备映射**（`BAUD_DEVICE_MAP`）：
-  - `921600` → 手套（HL/HR），通过 130/146 字节帧内类型位区分左右手
+  - `921600` → 手套（HL/HR），通过 130/146 字节帧内类型位区分左右手。**注意：左右手共用同一串口**，通过 `gloveLatestData` 缓存按 HL/HR 分别存储最新帧数据，解决 `dataMap[path]` 被交替覆盖的问题
   - `1000000` → 起坐垫（sit），1024 字节帧
   - `3000000` → 脚垫（foot1-4），4096 字节帧，通过 AT 指令获取 MAC 地址查映射表细分
+- **脚垫 MAC 归一化与映射**：`normalizeSerialIdentifier()` 会去掉 `Unique ID` 文本中的 `:`、`-`、空格和其他非字母数字字符，再与 `serial.txt` 中的 key 做归一化比对，因此设备返回 `27:00:30:...` 与 `270030...` 会命中同一条映射
+- **脚垫 MAC 格式容错**：除常规 `Unique ID: ...` 外，后端还兼容 `Unique ID=...`、`MAC Address: ...`、`0x...` 等前缀格式；若精确匹配失败，会在仅存在唯一候选时做包含式匹配，降低设备固件文本格式差异导致的映射失败
+- **`serial.txt` 读取顺序**：开发模式直接读取 `back-end/code/serial.txt`；打包模式优先读取用户目录 `AppData/Roaming/肌少症评估系统/serial.txt`，其次读取安装目录/`resources` 下的 `serial.txt`，最后回退到包内 `app.asar` 自带的 `serial.txt`，首次启动时会自动把包内文件落到用户目录，便于后续修改
+- **`serial.txt` 字段兼容**：后端优先从 `serialMap`/`serialMappings`/`deviceMap` 字段读取 MAC→型号映射；若老版本文件仍把映射写在 `key` 字段，也会继续兼容。登录页保存配置时只更新登录缓存字段，保留已有映射，避免系统设置页保存后把脚垫分配表覆盖掉
+- **`serial.txt` 多来源合并与同步写回**：读取缓存时会按候选路径顺序合并多个现存 `serial.txt`，优先取登录字段，同时从后续文件补齐 `serialMap`；保存设置页配置时会把结果同步写入所有可写候选路径，避免用户目录、安装目录、`resources` 目录里的 `serial.txt` 出现新旧不一致
+- **本地前端加载策略**：未打包模式下，如果仓库里已有 `back-end/code/renderer-build/index.html`，Electron 主进程默认直接加载本地静态构建，避免因为 `localhost:5173` 未启动而白屏或在控制台持续刷 `ERR_CONNECTION_REFUSED`；只有显式设置环境变量 `FORCE_VITE_DEV_SERVER=1` 时才优先连接 Vite 开发服务器
+- **Python AI 服务依赖要求**：AI FastAPI 服务除 `fastapi`、`uvicorn`、`numpy` 等基础依赖外，还要求 `python-multipart` 才能注册 `UploadFile`/`Form` 路由；本地 Electron 启动脚本现已统一以 `back-end/code/python/requirements-electron.txt` 为准自举 venv，避免只安装算法子集依赖导致 8765 端口服务启动即崩溃
+- **静态前端下的 AI API 回退**：当桌面端加载本地 `renderer-build` 时，`/pyapi/*` 可能被静态服务器回退成 `index.html`；前端 `gripPythonApi` 现会把这类 HTML/404 视为无效代理并自动回退到直连 `http://127.0.0.1:8765`
+- **MAC 型号来源标记**：WebSocket 推送的 `macInfo[path]` 现在除 `uniqueId`、`version`、`type` 外，还会附带 `typeSource`（如 `serial.txt`、`server`、`unmatched`）、`matchStrategy`、`serialPath`、`serialKey`，便于前端或现场排查页面明确展示“当前型号到底来自哪一份映射”
+- **脚垫数据预处理流程**：对每个 64×64 脚垫帧依次执行 `zeroBelowThreshold(8)` → `removeSmallIslands64x64(12)` → `flipFoot64x64Vertical`（行顺序反转，实现左右对调），确保前端显示方向与实际脚垫物理方向一致。
 - 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
 - 对原始数据进行解析、分包、校验，转换为数字矩阵。
 - **支持的帧类型**：18 字节（陀螺仪）、130 字节（手套分包矩阵）、146 字节（手套分包+四元数）、1024 字节（起坐垫 32×32）、4096 字节（脚垫 64×64）。
@@ -266,6 +317,30 @@
 | 2026-03-09 16:34 | test | 握力评估操作提示弹窗 | 新增两个用户引导弹窗：Dashboard入口提示"带好手套并手指平铺"、评估页面提示"用最大握力握3次"，提升操作规范性。 |
 | 2026-03-09 16:50 | test | 握力报告布局优化 | 先图后数据、总帧数移出显眼位置、时间范围简化为总时长、面积单位改cm²、删除末尾重复图。 |
 | 2026-03-09 16:46 | test | 握力评估左侧实时可视化 | 设备连接后左侧面板始终实时显示传感器数据，无需等待采集开始。 |
+| 2026-03-09 09:40 | ld | 设备掉线重连与PDF导出 | 实现设备掉线自动重连、单报告PDF导出、整体报告PDF导出（html2canvas+jsPDF）、历史一键删除、步态评估报告优化。 |
+| 2026-03-09 09:45 | ld | BackendBridge Promise修复 | 修复searchHistory/getRecord返回值非Promise导致前端.then调用失败。 |
+| 2026-03-09 09:48 | ld | 步态分析算法修复 | 修复analyze_gait_cycle中cycle_start为None时的TypeError崩溃。 |
+| 2026-03-09 09:50 | ld | 串口重连稳定性 | 修复rescanPort关闭已断开串口时Port is not open崩溃问题。 |
+| 2026-03-09 09:52 | ld | 历史记录唯一性 | 修复同名患者同日评估历史记录被覆盖的问题，使用更精确的ID生成策略。 |
+| 2026-03-09 09:55 | ld | 起坐帧率修复 | 去除重复帧并使用真实时间戳，修复起坐评估坐垫脚垫帧率异常。 |
+| 2026-03-09 09:58 | ld | 起坐脚垫渲染修复 | 修复跨模式footBuffers污染导致起坐评估foot1只渲染左上区域的问题，增加模式感知过滤。 |
+| 2026-03-09 10:02 | ld | 脚垫数据左右对调 | 后端对所有脚垫64×64矩阵做flipFoot64x64Vertical翻转，前端起坐/静态站立增加flipLR，实现脚垫数据左右对调。 |
+| 2026-03-09 10:05 | ld | 3D场景缩放控制 | 三个评估模式3D场景启用OrbitControls缩放，扩大minDistance/maxDistance范围。 |
+| 2026-03-09 10:06 | ld | 主页设备数量修正 | 修正Dashboard评估卡片设备提示：起坐2个（坐垫+脚垫1）、静态站立1个（脚垫1）。 |
+| 2026-03-12 15:30 | hand | 右手清零基线修复 | 修复左右手共用串口导致 tareGrip 只能记录一只手基线的问题，新增 gloveLatestData 缓存确保 HL/HR 都能被清零。 |
+| 2026-03-12 16:00 | hand | 第二次进入清零失效修复 | 修复退出后重新进入握力评估时清零基线不正确的问题，clearGripBaseline同时清除缓存，tareGrip增加时间戳新鲜度检查和异步重试。 |
+| 2026-03-24 07:04 | update | 在线自动更新功能 | 集成 electron-updater，配置 generic provider 指向 http://sensor.bodyta.com/evaluate。后端新增 updater.js 模块处理更新检查/下载/安装，preload.js 暴露 IPC API，前端新增 UpdateNotification.jsx 弹窗组件（含进度条、版本对比、安装提示），Login.jsx 添加检查更新按钮和动态版本号。 |
+| 2026-04-14 02:32 | main | Windows 打包原生模块修复 | 修复 package.json build 配置，添加 asarUnpack 字段将 sqlite3、@mapbox/node-pre-gyp、@serialport、node-gyp-build 等原生模块解包到 app.asar.unpacked，解决 Windows 打包后 Cannot find module '@mapbox/node-pre-gyp' 崩溃问题。 |
+| 2026-04-14 15:48 | main | 脚垫 MAC 映射修复 | 修复 `serial.txt` 与脚垫 `Unique ID`/MAC 的匹配链路，兼容带分隔符的 MAC 格式；打包版现在会自动把包内 `serial.txt` 落到用户目录并优先读取该文件，同时 `/serialCache` 可返回实际命中的配置路径，便于排查设备已读出 MAC 但未分配 `foot1~foot4` 的问题。 |
+| 2026-04-14 16:03 | main | 安装包支持自选目录 | 调整 NSIS 安装器配置为向导模式，关闭一键安装并开启安装目录选择，Windows 安装包现在允许用户在安装时手动指定安装路径。 |
+| 2026-04-14 16:22 | main | 脚垫 MAC 匹配容错增强 | 扩展 `serialServer.js` 的脚垫 MAC/Unique ID 归一化规则，兼容 `Unique ID=`、`MAC Address:`、`0x...` 等格式，并在精确匹配失败时执行唯一候选的包含式匹配；同时在未命中时记录 `serial.txt` 实际路径和归一化候选 key，便于现场排查。 |
+| 2026-04-14 17:10 | main | `serial.txt` 配置与映射分离兼容 | 修复 `serial.txt` 登录缓存覆盖脚垫 MAC 映射的问题；保存登录配置时保留旧版 `key`/新版 `serialMap` 中的 MAC→型号表，并通过 `/serialCache` 与 `macInfo` 暴露映射条目和来源元数据，便于系统设置页与现场排查统一显示同一份映射真相。 |
+| 2026-04-14 17:21 | main | 设置页 `serial.txt` 同步修复 | 修复设置页保存配置后只更新单一路径、导致用户看到的安装目录 `serial.txt` 未同步变化的问题；现在读取时会合并多个候选 `serial.txt`，保存时同步写回所有可写运行时路径，前端也会在保存失败时阻止返回并提示错误。 |
+| 2026-04-14 | main | 本地启动静态前端回退 | 修复未打包模式下 Electron 前端强依赖 `localhost:5173` 的问题；现在如果 `renderer-build` 存在则默认直接加载静态构建，只有设置 `FORCE_VITE_DEV_SERVER=1` 才使用 Vite 开发服务器，且 Vite 不可达时会自动回退。 |
+| 2026-04-14 | main | Python AI 服务启动修复 | 修复 AI 分析提示 “Python AI service is not running on 127.0.0.1:8765” 的问题；根因是本地 venv 自举使用了算法子目录 `requirements.txt`，缺少 `python-multipart`，导致 FastAPI 在注册 `UploadFile`/`Form` 路由时直接崩溃。现已将 Electron 启动脚本切换到 `requirements-electron.txt`，算法 requirements 也补齐该依赖，同时前端在静态桌面模式下会把失效的 `/pyapi` 代理自动回退到直连 `127.0.0.1:8765`。 |
+| 2026-04-14 | main | Windows pip GBK 兼容修复 | 统一 Electron 启动链路使用 `back-end/code/python/requirements-electron.txt` 作为依赖入口，并将其改为 ASCII 注释，避免 Windows 中文系统中 `pip` 读取 requirements 文件时因默认 GBK 解码而失败；修复后本地 venv 已可正常安装依赖并拉起 8765 AI 服务。 |
+| 2026-04-14 | main | 打包版 `serial.txt` 主路径选择修复 | 修复打包运行时 `serial.txt` 会优先命中 `userData` 目录旧副本的问题；新增按内容去重、按更新时间和路径优先级选主源的规则，相同内容下优先使用安装目录或 `resources` 中的文件，同时保留设置页对多路径同步写回的兼容性。 |
+| 2026-04-14 | main | 打包版脱离系统 Python | 调整 AI 服务 Python 解释器解析策略：安装包运行时只从 `resources/python/venv` 查找随包解释器，不再回退系统 `python`/`py`；若包内运行时损坏，错误信息也改为提示安装包资源缺失，而不是要求终端用户自行安装 Python。 |
 
 ## 6. 未来维护与更新
 

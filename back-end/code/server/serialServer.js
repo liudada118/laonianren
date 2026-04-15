@@ -1,4 +1,6 @@
 ﻿
+const { configureLogging } = require('../util/configureLogging')
+configureLogging('progress')
 
 const express = require('express')
 const os = require('os')
@@ -17,7 +19,6 @@ const { hand } = require('../util/line');
 // const { callPy } = require('../pyWorker');  // [已迁移到JS算法] Python子进程不再需要
 const { callAlgorithm } = require('../algorithms');
 const { decryptStr } = require('../util/aes_ecb');
-const { default: axios } = require('axios');
 const module2 = require('../util/aes_ecb')
 const multer = require('multer')
 
@@ -31,20 +32,108 @@ const userDataDir =
   typeof process.env.userData === 'string' && process.env.userData.trim()
     ? process.env.userData.trim()
     : null
-const resourcesBase =
-  process.env.resourcesPath ||
-  process.resourcesPath ||
-  (appPath ? path.dirname(appPath) : __dirname)
-const storageBase = isPackaged ? (userDataDir || resourcesBase) : path.join(__dirname, '..')
+const bundledBase = path.join(__dirname, '..')
+const fallbackUserDataDir = (() => {
+  if (!isPackaged) return null
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', '肌少症评估系统')
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '肌少症评估系统')
+  }
+  return path.join(os.homedir(), '.肌少症评估系统')
+})()
+const storageBase = isPackaged ? (userDataDir || fallbackUserDataDir) : bundledBase
 
-let pdfDir = path.join(storageBase, 'OneStep')
-let uploadDir = path.join(storageBase, 'img')
-if (!fs.existsSync(pdfDir)) {
-  fs.mkdirSync(pdfDir, { recursive: true })
+function ensureDirSync(dir) {
+  fs.mkdirSync(dir, { recursive: true })
 }
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true })
+
+function ensureSeedFile(src, dest) {
+  try {
+    if (!src || !fs.existsSync(src) || fs.existsSync(dest)) return
+    ensureDirSync(path.dirname(dest))
+    fs.copyFileSync(src, dest)
+  } catch (err) {
+    console.warn('[storage] failed to seed file:', src, '->', dest, err.message)
+  }
 }
+
+ensureDirSync(storageBase)
+
+const bundledConfigPath = path.join(bundledBase, 'config.txt')
+const bundledSerialPath = path.join(bundledBase, 'serial.txt')
+const dbPath = path.join(storageBase, 'db')
+const csvPath = path.join(storageBase, 'data')
+const pdfPath = path.join(storageBase, 'OneStep')
+const imgPath = path.join(storageBase, 'img')
+const userConfigPath = path.join(storageBase, 'config.txt')
+const userSerialPath = path.join(storageBase, 'serial.txt')
+const packagedResourcesDir = process.env.resourcesPath || process.resourcesPath || bundledBase
+
+function getPackagedAppRootDir() {
+  if (!isPackaged) return bundledBase
+
+  if (process.platform === 'darwin') {
+    const resourcesDir =
+      process.env.resourcesPath ||
+      process.resourcesPath ||
+      (appPath ? path.dirname(appPath) : __dirname)
+    const appBundleDir = path.resolve(resourcesDir, '..', '..')
+    return path.dirname(appBundleDir)
+  }
+
+  if (process.execPath) {
+    return path.dirname(process.execPath)
+  }
+
+  return storageBase
+}
+
+const packagedAppRootDir = getPackagedAppRootDir()
+const packagedResourcesSerialPath = path.join(packagedResourcesDir, 'serial.txt')
+const serialPathCandidates = (() => {
+  if (!isPackaged) {
+    return [bundledSerialPath]
+  }
+  return [
+    userSerialPath,
+    path.join(packagedAppRootDir, 'serial.txt'),
+    packagedResourcesSerialPath,
+    bundledSerialPath,
+  ]
+})()
+
+function dedupeSerialPaths(paths) {
+  return Array.from(new Set((paths || []).filter(Boolean)))
+}
+
+function getSerialPathPriority(serialPath) {
+  if (!serialPath) return 0
+  const normalized = path.resolve(serialPath)
+  const priorityPaths = [
+    path.join(packagedAppRootDir, 'serial.txt'),
+    packagedResourcesSerialPath,
+    userSerialPath,
+    bundledSerialPath,
+  ]
+  const index = priorityPaths.findIndex((candidate) => candidate && path.resolve(candidate) === normalized)
+  return index === -1 ? 0 : priorityPaths.length - index
+}
+
+ensureDirSync(dbPath)
+ensureDirSync(csvPath)
+ensureDirSync(pdfPath)
+ensureDirSync(imgPath)
+
+if (isPackaged) {
+  ensureSeedFile(bundledConfigPath, userConfigPath)
+  ensureSeedFile(packagedResourcesSerialPath, userSerialPath)
+  ensureSeedFile(bundledSerialPath, userSerialPath)
+}
+
+let pdfDir = pdfPath
+let uploadDir = imgPath
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -242,6 +331,136 @@ function removeSmallIslands64x64(arr, minSize = 9) {
 }
 
 
+/**
+ * 对 64x64 脚垫数据进行去噪滤波（低压力置零 + 小连通域移除）
+ * 与前端 denoiseMatrix 逻辑一致，但操作一维数组
+ */
+function denoiseFootData(arr, threshold, minArea) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  // 步骤1：低压力置零
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] < threshold) arr[i] = 0
+  }
+  // 步骤2：BFS 连通域分析，移除小区域
+  const visited = new Array(arr.length).fill(false)
+  const dirs = [-1, 0, 1]
+  for (let idx = 0; idx < arr.length; idx++) {
+    if (visited[idx] || arr[idx] <= 0) continue
+    const stack = [idx]
+    const component = []
+    visited[idx] = true
+    while (stack.length) {
+      const cur = stack.pop()
+      component.push(cur)
+      const r = Math.floor(cur / size)
+      const c = cur - r * size
+      for (const dr of dirs) {
+        const nr = r + dr
+        if (nr < 0 || nr >= size) continue
+        for (const dc of dirs) {
+          const nc = c + dc
+          if (nc < 0 || nc >= size) continue
+          if (dr === 0 && dc === 0) continue
+          const ni = nr * size + nc
+          if (!visited[ni] && arr[ni] > 0) {
+            visited[ni] = true
+            stack.push(ni)
+          }
+        }
+      }
+    }
+    if (component.length < minArea) {
+      for (const ci of component) arr[ci] = 0
+    }
+  }
+  return arr
+}
+
+/**
+ * 对 64x64 脚垫数据进行坏线补值（检测异常低值行/列，用相邻行/列插值修复）
+ * 支持连续 1~2 行/列坏线
+ */
+function zeroLineRepair64x64(arr, badThresh, goodThresh) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const ROWS = 64, COLS = 64
+
+  // 计算每行和每列的总和
+  const rowSums = new Float32Array(ROWS)
+  const colSums = new Float32Array(COLS)
+  for (let r = 0; r < ROWS; r++) {
+    let total = 0
+    for (let c = 0; c < COLS; c++) total += arr[r * COLS + c]
+    rowSums[r] = total
+  }
+  for (let c = 0; c < COLS; c++) {
+    let total = 0
+    for (let r = 0; r < ROWS; r++) total += arr[r * COLS + c]
+    colSums[c] = total
+  }
+
+  // 修复坏行
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (rowSums[r] >= badThresh) continue
+    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        arr[r * COLS + c] = (arr[(r - 1) * COLS + c] + arr[(r + 1) * COLS + c]) / 2
+      }
+    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
+               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        const vPrev = arr[(r - 1) * COLS + c]
+        const vNext = arr[(r + 2) * COLS + c]
+        arr[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        arr[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      r++
+    }
+  }
+
+  // 修复坏列
+  for (let c = 1; c < COLS - 1; c++) {
+    if (colSums[c] >= badThresh) continue
+    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        arr[r * COLS + c] = (arr[r * COLS + (c - 1)] + arr[r * COLS + (c + 1)]) / 2
+      }
+    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        const vPrev = arr[r * COLS + (c - 1)]
+        const vNext = arr[r * COLS + (c + 2)]
+        arr[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        arr[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      c++
+    }
+  }
+  return arr
+}
+
+/**
+ * 根据当前评估模式对脚垫数据应用滤波和坏线补值
+ * @param {number[]} arr - 4096 长度一维数组
+ * @param {string} mode - 'standing' 或 'gait'
+ */
+function applyFootFilter(arr, mode, footType) {
+  const cfg = footFilterConfig[mode]
+  if (!cfg) { console.log('[applyFootFilter] no cfg for mode:', mode); return arr }
+  if (cfg.filterEnabled) {
+    denoiseFootData(arr, cfg.filterThreshold, cfg.filterMinArea)
+  }
+  if (cfg.optimizeEnabled) {
+    if (mode === 'gait') {
+      // 步道模式：坏线补值由前端 GaitCanvas 在合并后处理
+    } else {
+      // 静态模式：单个 64×64 做坏线补值
+      zeroLineRepair64x64(arr, cfg.optimizeBad, cfg.optimizeGood)
+    }
+  }
+  return arr
+}
+
 function parseSerialTypeMap(raw) {
   if (!raw) return {}
   if (typeof raw === 'object' && !Array.isArray(raw)) return raw
@@ -249,27 +468,25 @@ function parseSerialTypeMap(raw) {
   let text = raw.trim()
   if (!text) return {}
 
-  if (text.includes('"key"') && text.includes('"orgName"')) {
-    const keyIdx = text.indexOf('"key"')
-    if (keyIdx !== -1) {
-      const afterKey = text.slice(keyIdx)
-      const colonIdx = afterKey.indexOf(':')
-      if (colonIdx !== -1) {
-        let rest = afterKey.slice(colonIdx + 1)
-        const orgIdx = rest.indexOf('"orgName"')
-        if (orgIdx !== -1) rest = rest.slice(0, orgIdx)
-        rest = rest.replace(/^[\s,]+/, '').replace(/[\s,]+$/, '')
-        if (
-          (rest.startsWith('"') && rest.endsWith('"')) ||
-          (rest.startsWith("'") && rest.endsWith("'"))
-        ) {
-          rest = rest.slice(1, -1)
-        }
-        text = rest.trim()
-      }
+  // 新格式（优先）: MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4
+  // 支持逗号、分号、换行分隔，冒号或等号作为键值分隔符，去掉所有引号兼容旧格式
+  const map = {}
+  const cleaned = text.replace(/["']/g, '')
+  cleaned.split(/[,;\n]+/).forEach((part) => {
+    const trimmed = part.trim()
+    if (!trimmed) return
+    const sepIdx = trimmed.indexOf(':')
+    const eqIdx = trimmed.indexOf('=')
+    const idx = sepIdx !== -1 ? (eqIdx !== -1 ? Math.min(sepIdx, eqIdx) : sepIdx) : eqIdx
+    if (idx > 0) {
+      const k = trimmed.slice(0, idx).trim()
+      const v = trimmed.slice(idx + 1).trim()
+      if (k && v) map[k] = v
     }
-  }
+  })
+  if (Object.keys(map).length) return map
 
+  // 兼容旧 JSON 格式
   const tryParse = (value) => {
     try {
       const obj = JSON.parse(value)
@@ -285,27 +502,149 @@ function parseSerialTypeMap(raw) {
   obj = tryParse(normalized)
   if (obj) return obj
 
-  const map = {}
-  normalized.split(/[,;\n]+/).forEach((part) => {
-    const m = part.match(/^\s*"?([^":=]+)"?\s*[:=]\s*"?([^"]+)"?\s*$/)
-    if (m) {
-      map[m[1].trim()] = m[2].trim()
-    }
-  })
-  return map
+  return {}
+}
+
+function stringifySerialTypeMap(raw) {
+  if (!raw) return ''
+  if (typeof raw === 'string') return raw.trim()
+  const map = parseSerialTypeMap(raw)
+  const entries = Object.entries(map || {})
+  if (!entries.length) return ''
+  return entries.map(([rawKey, type]) => `${rawKey}:${type}`).join('\n')
+}
+
+function hasSerialTypeMap(raw) {
+  return Object.keys(parseSerialTypeMap(raw) || {}).length > 0
+}
+
+function getSerialTypeMapText(data) {
+  if (!data || typeof data !== 'object') return ''
+
+  // 新格式优先：key 字段直接存储 MAC:foot 映射
+  const keyText = stringifySerialTypeMap(data.key)
+  if (keyText && hasSerialTypeMap(keyText)) {
+    return keyText
+  }
+
+  // 兼容旧格式：从 serialMap 等字段读取
+  const preferredFields = ['serialMap', 'serialMappings', 'deviceMap', 'typeMap']
+  for (const fieldName of preferredFields) {
+    const text = stringifySerialTypeMap(data[fieldName])
+    if (text) return text
+  }
+
+  return ''
+}
+
+function normalizeSerialIdentifier(value) {
+  if (!value) return ''
+  let text = String(value).trim()
+  const taggedMatch = text.match(/UNIQUE\s*ID\s*[:=]\s*([^\r\n]+)/i)
+  if (taggedMatch && taggedMatch[1]) {
+    text = taggedMatch[1].trim()
+  }
+  text = text.replace(/^UNIQUE\s*ID\s*[:=]?\s*/i, '')
+  text = text.split(/--|VERSIONS\s*[:=]|COMPANY\s*[:=]|\r|\n/i)[0] || text
+  text = text.replace(/^\s*(?:MAC(?:\s+ADDRESS)?|BLE\s*MAC|ADDR(?:ESS)?)\s*[:=]?\s*/i, '')
+  text = text.replace(/^\s*0X/i, '')
+  return text
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+}
+
+function getSerialCacheEntries() {
+  const { data, serialPath } = getSerialCacheStatus()
+  const serialMap = getSerialTypeMapText(data)
+  const map = parseSerialTypeMap(serialMap)
+  const entries = Object.keys(map || {})
+    .map((rawKey) => ({
+      rawKey,
+      normalizedKey: normalizeSerialIdentifier(rawKey),
+      type: map[rawKey],
+    }))
+    .filter((item) => item.normalizedKey && item.type)
+  return { serialPath, serialMap, entries }
+}
+
+function findTypeFromSerialCache(uniqueId) {
+  const target = normalizeSerialIdentifier(uniqueId)
+  const { serialPath, entries } = getSerialCacheEntries()
+  if (!target) {
+    return { type: null, strategy: 'empty', target, serialPath, entries }
+  }
+
+  const exact = entries.find((item) => item.normalizedKey === target)
+  if (exact) {
+    return { ...exact, strategy: 'exact', target, serialPath, entries }
+  }
+
+  const partial = entries.filter(
+    (item) => target.includes(item.normalizedKey) || item.normalizedKey.includes(target)
+  )
+  if (partial.length === 1) {
+    return { ...partial[0], strategy: 'partial', target, serialPath, entries }
+  }
+
+  return { type: null, strategy: 'none', target, serialPath, entries }
 }
 
 function getTypeFromSerialCache(uniqueId) {
-  if (!uniqueId) return null
-  const cache = readSerialCache()
-  const map = parseSerialTypeMap(cache && cache.key)
-  const target = String(uniqueId).trim().toUpperCase()
-  for (const key of Object.keys(map || {})) {
-    if (String(key).trim().toUpperCase() === target) {
-      return map[key]
+  return findTypeFromSerialCache(uniqueId).type || null
+}
+
+function syncMacInfoType(pathKey, typeValue, permissionValue, meta = {}) {
+  if (!pathKey) return
+  if (!macInfo[pathKey]) macInfo[pathKey] = {}
+  if (typeValue) macInfo[pathKey].type = typeValue
+  if (permissionValue !== undefined) macInfo[pathKey].premission = permissionValue
+  if (meta.typeSource !== undefined) macInfo[pathKey].typeSource = meta.typeSource
+  if (meta.matchStrategy !== undefined) macInfo[pathKey].matchStrategy = meta.matchStrategy
+  if (meta.serialPath !== undefined) macInfo[pathKey].serialPath = meta.serialPath
+  if (meta.serialKey !== undefined) macInfo[pathKey].serialKey = meta.serialKey
+}
+
+function pushMacInfoUpdate() {
+  try {
+    if (macInfo && Object.keys(macInfo).length) {
+      socketSendData(server, JSON.stringify({ macInfo }))
+    }
+  } catch {}
+}
+
+function reapplySerialTypeMappings() {
+  let changed = false
+  for (const pathKey of Object.keys(macInfo || {})) {
+    const info = macInfo[pathKey] || {}
+    const dataItem = dataMap[pathKey]
+    const uniqueId = info.uniqueId || info.mac
+    if (!uniqueId || !dataItem) continue
+
+    const serialMatch = findTypeFromSerialCache(uniqueId)
+    const mappedType = serialMatch.type
+    if (!mappedType) continue
+
+    const normalizedType = String(mappedType).trim()
+    if (dataItem.type !== normalizedType || dataItem.premission !== true || info.type !== normalizedType) {
+      dataItem.type = normalizedType
+      dataItem.premission = true
+      syncMacInfoType(pathKey, normalizedType, true, {
+        typeSource: 'serial.txt',
+        matchStrategy: `reapply:${serialMatch.strategy}`,
+        serialPath: serialMatch.serialPath,
+        serialKey: serialMatch.rawKey || null,
+      })
+      changed = true
+      console.log(`[serialCache] reapplied type ${normalizedType} for ${pathKey} (${uniqueId})`)
     }
   }
-  return null
+
+  if (changed) {
+    pushMacInfoUpdate()
+  }
+
+  return changed
 }
 
 function normalizeActiveTypes(value) {
@@ -365,15 +704,33 @@ app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
 // serial.txt cache
-const serialPath = (() => {
-  if (isPackaged) {
-    const base = appPath ? path.dirname(appPath) : (process.resourcesPath || __dirname)
-    return path.join(base, 'serial.txt')
+function resolveSerialPath(preferExisting = true) {
+  if (preferExisting) {
+    const primarySource = getPrimarySerialCacheSource(getExistingSerialCacheSources())
+    if (primarySource?.serialPath) return primarySource.serialPath
   }
-  return path.join(__dirname, '../serial.txt')
-})()
+  return serialPathCandidates[0]
+}
 
-function readSerialCache() {
+function getWritableSerialPaths() {
+  const writablePaths = []
+  for (const candidate of dedupeSerialPaths(serialPathCandidates)) {
+    try {
+      if (candidate.includes('.asar')) continue
+      ensureDirSync(path.dirname(candidate))
+      fs.accessSync(path.dirname(candidate), fs.constants.W_OK)
+      writablePaths.push(candidate)
+    } catch {}
+  }
+  return writablePaths
+}
+
+function resolveWritableSerialPath() {
+  return getWritableSerialPaths()[0] || serialPathCandidates[0]
+}
+
+function readSerialCacheFile(serialPath) {
+  if (!serialPath) return null
   try {
     if (!fs.existsSync(serialPath)) return null
     const raw = fs.readFileSync(serialPath, 'utf-8').trim()
@@ -388,53 +745,233 @@ function readSerialCache() {
   }
 }
 
+function getSerialSourceTimestamp(source) {
+  const updatedAtMs =
+    source?.data?.updatedAt && Number.isFinite(Date.parse(source.data.updatedAt))
+      ? Date.parse(source.data.updatedAt)
+      : 0
+  const mtimeMs = Number.isFinite(source?.mtimeMs) ? source.mtimeMs : 0
+  return Math.max(updatedAtMs, mtimeMs, 0)
+}
+
+function getComparableSerialCacheKey(data) {
+  if (!data || typeof data !== 'object') return ''
+  return JSON.stringify({
+    key: typeof data.key === 'string' ? data.key.trim() : '',
+    orgName: typeof data.orgName === 'string' ? data.orgName.trim() : '',
+    llmApiKey: typeof data.llmApiKey === 'string' ? data.llmApiKey.trim() : '',
+    serialMap: getSerialTypeMapText(data) || '',
+  })
+}
+
+function compareSerialSources(a, b) {
+  const timeDiff = getSerialSourceTimestamp(b) - getSerialSourceTimestamp(a)
+  if (timeDiff !== 0) return timeDiff
+
+  const priorityDiff = (b?.priority || 0) - (a?.priority || 0)
+  if (priorityDiff !== 0) return priorityDiff
+
+  const orderA = serialPathCandidates.indexOf(a?.serialPath)
+  const orderB = serialPathCandidates.indexOf(b?.serialPath)
+  return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB)
+}
+
+function compareSerialSourceRepresentation(a, b) {
+  const priorityDiff = (b?.priority || 0) - (a?.priority || 0)
+  if (priorityDiff !== 0) return priorityDiff
+
+  const timeDiff = getSerialSourceTimestamp(b) - getSerialSourceTimestamp(a)
+  if (timeDiff !== 0) return timeDiff
+
+  const orderA = serialPathCandidates.indexOf(a?.serialPath)
+  const orderB = serialPathCandidates.indexOf(b?.serialPath)
+  return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB)
+}
+
+function getExistingSerialCacheSources() {
+  return dedupeSerialPaths(serialPathCandidates)
+    .map((serialPath) => ({
+      serialPath,
+      data: readSerialCacheFile(serialPath),
+      mtimeMs: (() => {
+        try {
+          return fs.statSync(serialPath).mtimeMs || 0
+        } catch {
+          return 0
+        }
+      })(),
+      priority: getSerialPathPriority(serialPath),
+    }))
+    .filter((item) => item.data && typeof item.data === 'object')
+}
+
+function getPrimarySerialCacheSource(sources) {
+  if (!Array.isArray(sources) || !sources.length) return null
+
+  const groupedSources = new Map()
+  for (const source of sources) {
+    const groupKey = getComparableSerialCacheKey(source.data) || `__path__:${source.serialPath}`
+    const existing = groupedSources.get(groupKey)
+    if (!existing) {
+      groupedSources.set(groupKey, {
+        representative: source,
+        freshestTimestamp: getSerialSourceTimestamp(source),
+      })
+      continue
+    }
+
+    existing.freshestTimestamp = Math.max(existing.freshestTimestamp, getSerialSourceTimestamp(source))
+    if (compareSerialSourceRepresentation(source, existing.representative) < 0) {
+      existing.representative = source
+    }
+  }
+
+  return Array.from(groupedSources.values())
+    .sort((a, b) => {
+      const timeDiff = b.freshestTimestamp - a.freshestTimestamp
+      if (timeDiff !== 0) return timeDiff
+      return compareSerialSourceRepresentation(a.representative, b.representative)
+    })
+    .map((item) => item.representative)[0] || null
+}
+
+function orderSerialCacheSources(sources) {
+  if (!Array.isArray(sources) || !sources.length) return []
+  const primary = getPrimarySerialCacheSource(sources)
+  const rest = sources.filter((source) => source !== primary).sort(compareSerialSources)
+  return primary ? [primary, ...rest] : rest
+}
+
+function mergeSerialCacheData(sources) {
+  if (!Array.isArray(sources) || !sources.length) return null
+
+  const merged = {}
+
+  for (const source of orderSerialCacheSources(sources)) {
+    const data = source?.data
+    if (!data || typeof data !== 'object') continue
+
+    // key 字段现在直接存储 MAC:foot 映射
+    if (!merged.key && typeof data.key === 'string' && data.key.trim()) {
+      merged.key = data.key
+    }
+    if (!merged.orgName && typeof data.orgName === 'string' && data.orgName.trim()) {
+      merged.orgName = data.orgName
+    }
+    if (!merged.llmApiKey && typeof data.llmApiKey === 'string' && data.llmApiKey.trim()) {
+      merged.llmApiKey = data.llmApiKey
+    }
+    if (!merged.updatedAt && data.updatedAt) {
+      merged.updatedAt = data.updatedAt
+    }
+    // 兼容旧格式：如果 key 中没有映射，从 serialMap 等字段补充
+    if (!merged.serialMap) {
+      const legacyMap = getSerialTypeMapText(data)
+      if (legacyMap) merged.serialMap = legacyMap
+    }
+  }
+
+  return Object.keys(merged).length ? merged : null
+}
+
+function readSerialCache() {
+  return mergeSerialCacheData(getExistingSerialCacheSources())
+}
+
+function hasSerialCacheData(data) {
+  if (!data || typeof data !== 'object') return false
+  const serialMap = getSerialTypeMapText(data)
+  const values = [
+    data.key,
+    data.orgName,
+    data.llmApiKey,
+    serialMap,
+  ]
+  return values.some((value) => {
+    if (typeof value === 'string') return Boolean(value.trim())
+    if (value && typeof value === 'object') return Boolean(Object.keys(value).length)
+    return Boolean(value)
+  })
+}
+
+function buildSerialCacheResponseData(data) {
+  if (!data || typeof data !== 'object') return {}
+  const serialMap = getSerialTypeMapText(data)
+  const serialEntries = Object.entries(parseSerialTypeMap(serialMap) || {})
+    .map(([rawKey, type]) => ({
+      rawKey,
+      normalizedKey: normalizeSerialIdentifier(rawKey),
+      type,
+    }))
+    .filter((item) => item.normalizedKey && item.type)
+
+  return {
+    ...data,
+    serialMap,
+    hasSerialMap: serialEntries.length > 0,
+    serialEntries,
+  }
+}
+
+function getSerialCacheStatus() {
+  const data = readSerialCache()
+  const serialPath = resolveSerialPath(true)
+  const candidates = serialPathCandidates.slice()
+  return {
+    serialPath,
+    candidates,
+    data,
+  }
+}
+
 function writeSerialCache(payload) {
+  const writablePaths = getWritableSerialPaths()
+  const serialPath = writablePaths[0] || resolveWritableSerialPath()
+  const previous = readSerialCache() || {}
   const data = {
     key: payload.key || '',
     orgName: payload.orgName || '',
+    llmApiKey: payload.llmApiKey || previous.llmApiKey || '',
     updatedAt: new Date().toISOString(),
   }
-  fs.writeFileSync(serialPath, JSON.stringify(data, null, 2), 'utf-8')
-  return data
-}
+  const serialized = JSON.stringify(data, null, 2)
+  const writtenPaths = []
+  const failedPaths = []
 
-
-let dbPath = path.join(__dirname, '../db')
-let pdfPath = path.join(__dirname, "../OneStep");
-let imgPath = path.join(__dirname, '../img')
-
-console.log(isPackaged, appPath, 'app.isPackaged')
-
-if (isPackaged) {
-  if (os.platform() == 'darwin') {
-    // filePath = '../..' + '/db'
-    // filePath = path.join(app.getAppPath(), 'Resources/db',);
-    dbPath = path.join(__dirname, '../../db')
-    csvPath = path.join(__dirname, '../../data')
-    nameTxt = path.join(__dirname, '../../config.txt')
-    console.log(dbPath, path.join(appPath, 'Resources/db',))
-    // nameTxt = 
-    // csvPath = '../..' + '/data'
-    // nameTxt = '../..' + "/config.txt";
-  } else {
-
-    dbPath = 'resources' + '/db'
-    csvPath = 'resources' + '/data'
-    pdfPath = 'resources' + "/OneStep";
-    imgPath = 'resources' + '/img'
-    nameTxt = 'resources' + "/config.txt";
-
-    console.log(dbPath, path.join(appPath, 'Resources/db',))
+  for (const targetPath of dedupeSerialPaths(writablePaths.length ? writablePaths : [serialPath])) {
+    try {
+      ensureDirSync(path.dirname(targetPath))
+      fs.writeFileSync(targetPath, serialized, 'utf-8')
+      writtenPaths.push(targetPath)
+    } catch (err) {
+      failedPaths.push({
+        serialPath: targetPath,
+        message: err?.message || 'write failed',
+      })
+    }
   }
 
+  if (!writtenPaths.length) {
+    const error = new Error(failedPaths[0]?.message || 'write failed')
+    error.failedPaths = failedPaths
+    throw error
+  }
+
+  return {
+    ...data,
+    writtenPaths,
+    failedPaths,
+  }
 }
+
+console.log(isPackaged, appPath, 'app.isPackaged')
 
 const port = 19245
 
 function resolveConfigPath() {
   const candidates = [
-    path.join(dbPath, 'config.txt'),
-    path.join(__dirname, '../config.txt'),
+    userConfigPath,
+    bundledConfigPath,
     path.join(process.cwd(), 'config.txt'),
   ]
   for (const p of candidates) {
@@ -459,8 +996,195 @@ let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
 
+// ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开，修改后自动保存到本地） ───
+const footFilterDefaultConfig = {
+  standing: {
+    filterEnabled: true,
+    filterThreshold: 12,
+    filterMinArea: 15,
+    optimizeEnabled: true,
+    optimizeBad: 40,
+    optimizeGood: 100,
+  },
+  gait: {
+    filterEnabled: true,
+    filterThreshold: 15,
+    filterMinArea: 20,
+    optimizeEnabled: true,
+    optimizeBad: 40,
+    optimizeGood: 100,
+  },
+}
+const footFilterConfigPath = path.join(storageBase, 'footFilterConfig.json')
+function loadFootFilterConfig() {
+  try {
+    if (fs.existsSync(footFilterConfigPath)) {
+      const data = JSON.parse(fs.readFileSync(footFilterConfigPath, 'utf-8'))
+      // 深度合并，确保新增字段有默认值
+      return {
+        standing: { ...footFilterDefaultConfig.standing, ...(data.standing || {}) },
+        gait: { ...footFilterDefaultConfig.gait, ...(data.gait || {}) },
+      }
+    }
+  } catch (e) {
+    console.warn('[footFilterConfig] 读取本地配置失败，使用默认值:', e.message)
+  }
+  return JSON.parse(JSON.stringify(footFilterDefaultConfig))
+}
+function saveFootFilterConfig() {
+  try {
+    ensureDirSync(path.dirname(footFilterConfigPath))
+    fs.writeFileSync(footFilterConfigPath, JSON.stringify(footFilterConfig, null, 2), 'utf-8')
+    console.log('[footFilterConfig] 已保存到:', footFilterConfigPath)
+  } catch (e) {
+    console.warn('[footFilterConfig] 保存失败:', e.message)
+  }
+}
+let footFilterConfig = loadFootFilterConfig()
+
+// ─── 步道传感器缓存（用于合并 64×256 坏线补值） ───
+const gaitFootCache = { foot1: null, foot2: null, foot3: null, foot4: null }
+
+/**
+ * 将 4 个 64×64 传感器合并为 64×256，做坏线补值，再拆回 4 个 64×64
+ */
+function zeroLineRepairMerged(badThresh, goodThresh) {
+  const ZERO = new Array(4096).fill(0)
+  const f1 = gaitFootCache.foot1 || ZERO
+  const f2 = gaitFootCache.foot2 || ZERO
+  const f3 = gaitFootCache.foot3 || ZERO
+  const f4 = gaitFootCache.foot4 || ZERO
+  
+  const ROWS = 64, COLS = 256
+  // 合并为 64×256：每个 64×64 传感器先顺时针旋转 90 度（与前端一致），再按列拼接
+  // 顺时针旋转 90°：newRow = col, newCol = 63 - row
+  const merged = new Array(ROWS * COLS).fill(0)
+  const parts = [f1, f2, f3, f4]
+  for (let p = 0; p < 4; p++) {
+    const colOffset = p * 64
+    for (let row = 0; row < 64; row++) {
+      for (let col = 0; col < 64; col++) {
+        const newRow = col
+        const newCol = 63 - row
+        merged[newRow * COLS + colOffset + newCol] = parts[p][row * 64 + col]
+      }
+    }
+  }
+  
+  // 确定有数据的传感器列范围（用于行总和计算，避免全0传感器拉低行总和）
+  const activeParts = []
+  if (gaitFootCache.foot1) activeParts.push(0)
+  if (gaitFootCache.foot2) activeParts.push(1)
+  if (gaitFootCache.foot3) activeParts.push(2)
+  if (gaitFootCache.foot4) activeParts.push(3)
+  
+  // 计算每行总和：只累加有数据的传感器列范围
+  const rowSums = new Float32Array(ROWS)
+  for (let r = 0; r < ROWS; r++) {
+    let total = 0
+    for (const p of activeParts) {
+      const colStart = p * 64
+      const colEnd = colStart + 64
+      for (let c = colStart; c < colEnd; c++) total += merged[r * COLS + c]
+    }
+    rowSums[r] = total
+  }
+  
+  // 计算每列总和（正常计算，跨所有行）
+  const colSums = new Float32Array(COLS)
+  for (let c = 0; c < COLS; c++) {
+    let total = 0
+    for (let r = 0; r < ROWS; r++) total += merged[r * COLS + c]
+    colSums[c] = total
+  }
+  
+  let repairedRows = 0, repairedCols = 0
+  
+  // 修复坏行（只补 1~2 行）
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (rowSums[r] >= badThresh) continue
+    if (rowSums[r - 1] > goodThresh && rowSums[r + 1] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        merged[r * COLS + c] = (merged[(r - 1) * COLS + c] + merged[(r + 1) * COLS + c]) / 2
+      }
+      repairedRows++
+    } else if (r + 2 < ROWS && rowSums[r + 1] < badThresh &&
+               rowSums[r - 1] > goodThresh && rowSums[r + 2] > goodThresh) {
+      for (let c = 0; c < COLS; c++) {
+        const vPrev = merged[(r - 1) * COLS + c]
+        const vNext = merged[(r + 2) * COLS + c]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[(r + 1) * COLS + c] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      repairedRows += 2
+      r++
+    }
+  }
+  
+  // 修复坏列（只补 1~2 列，不跳过边界，与前端完全一致）
+  for (let c = 1; c < COLS - 1; c++) {
+    if (colSums[c] >= badThresh) continue
+    if (colSums[c - 1] > goodThresh && colSums[c + 1] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        merged[r * COLS + c] = (merged[r * COLS + (c - 1)] + merged[r * COLS + (c + 1)]) / 2
+      }
+      repairedCols++
+    } else if (c + 2 < COLS && colSums[c + 1] < badThresh &&
+               colSums[c - 1] > goodThresh && colSums[c + 2] > goodThresh) {
+      for (let r = 0; r < ROWS; r++) {
+        const vPrev = merged[r * COLS + (c - 1)]
+        const vNext = merged[r * COLS + (c + 2)]
+        merged[r * COLS + c]       = vPrev * 2 / 3 + vNext * 1 / 3
+        merged[r * COLS + (c + 1)] = vPrev * 1 / 3 + vNext * 2 / 3
+      }
+      repairedCols += 2
+      c++
+    }
+  }
+  
+  // 诊断日志：只打印有值的行和列
+  if (!global._colDiagCount) global._colDiagCount = 0
+  if (global._colDiagCount < 3) {
+    global._colDiagCount++
+    const nonZeroRows = []
+    for (let r = 0; r < ROWS; r++) if (rowSums[r] > 0) nonZeroRows.push(`r${r}=${rowSums[r].toFixed(0)}`)
+    const nonZeroCols = []
+    for (let c = 0; c < COLS; c++) if (colSums[c] > 0) nonZeroCols.push(`c${c}=${colSums[c].toFixed(0)}`)
+    console.log('[rowSums>0] %s', nonZeroRows.join(', '))
+    console.log('[colSums>0] %s', nonZeroCols.join(', '))
+  }
+  if (repairedRows || repairedCols) {
+    console.log('[zeroLineRepairMerged] 修复了 %d 行, %d 列', repairedRows, repairedCols)
+  }
+  
+  // 逆时针旋转 90° 拆回 4 个 64×64，只写回有真实缓存的传感器
+  // 逆时针 90°（顺时针的逆操作）：origRow = 63 - newCol, origCol = newRow
+  const cacheKeys = ['foot1', 'foot2', 'foot3', 'foot4']
+  for (let p = 0; p < 4; p++) {
+    if (!gaitFootCache[cacheKeys[p]]) continue
+    const target = parts[p]
+    const colOffset = p * 64
+    for (let newRow = 0; newRow < 64; newRow++) {
+      for (let newCol = 0; newCol < 64; newCol++) {
+        const origRow = 63 - newCol
+        const origCol = newRow
+        target[origRow * 64 + origCol] = merged[newRow * COLS + colOffset + newCol]
+      }
+    }
+  }
+}
+
+
+
 // 手套分包缓存：按 sensorType 缓存 packet1 数据（参考 serial_parser_two.py）
 const glovePacket1Cache = {}
+
+// 手套最新数据缓存：按 HL/HR 分别存储最新完整帧数据
+// 解决左右手共用同一串口 path 导致 dataMap[path] 的 type/arr 被交替覆盖的问题
+let gloveLatestData = { HL: null, HR: null }
+
+// 握力清零基线：记录清零时刻的传感器值，后续数据减去基线（负值归零）
+let gripBaseline = { HL: null, HR: null }
 
 /**
  * 校验四元数合法性（参考 serial_parser_two.py 的 quaternion 属性）
@@ -666,6 +1390,14 @@ function applyActiveMode(mode) {
 
 const BAUD_CANDIDATES = [921600, 1000000, 3000000]
 
+// 波特率 → 期望的帧长度集合（分隔符切割后的数据帧字节数）
+// 用于波特率检测时双重验证：先检测分隔符，再验证帧长度是否匹配
+const BAUD_EXPECTED_FRAME_LENGTHS = {
+  921600:  [130, 146, 18],  // 手套: 130/146字节帧 + 18字节IMU帧
+  1000000: [1024],          // 起坐垫: 1024字节帧
+  3000000: [4096],          // 脚垫: 4096字节帧
+}
+
 function bufferContainsSequence(buffer, sequence) {
   if (!buffer || buffer.length < sequence.length) return false
   for (let i = 0; i <= buffer.length - sequence.length; i++) {
@@ -681,52 +1413,127 @@ function bufferContainsSequence(buffer, sequence) {
   return false
 }
 
-async function detectBaudRate(path, timeoutMs = 800) {
-  for (let i = 0; i < BAUD_CANDIDATES.length; i++) {
-    const baudRate = BAUD_CANDIDATES[i]
-    const ok = await new Promise((resolve) => {
-      let cache = Buffer.alloc(0)
-      let timer = null
-      let port = null
+/**
+ * 从 buffer 中提取分隔符切割后的第一个完整帧的长度
+ * 返回帧长度，或 -1 表示未找到完整帧
+ */
+function extractFrameLength(buffer, sequence) {
+  if (!buffer || buffer.length < sequence.length) return -1
+  // 找到第一个分隔符的位置
+  let firstDelim = -1
+  for (let i = 0; i <= buffer.length - sequence.length; i++) {
+    let match = true
+    for (let j = 0; j < sequence.length; j++) {
+      if (buffer[i + j] !== sequence[j]) { match = false; break }
+    }
+    if (match) { firstDelim = i; break }
+  }
+  if (firstDelim < 0) return -1
+  // 从第一个分隔符后找第二个分隔符
+  const dataStart = firstDelim + sequence.length
+  for (let i = dataStart; i <= buffer.length - sequence.length; i++) {
+    let match = true
+    for (let j = 0; j < sequence.length; j++) {
+      if (buffer[i + j] !== sequence[j]) { match = false; break }
+    }
+    if (match) {
+      return i - dataStart  // 两个分隔符之间的数据长度就是帧长度
+    }
+  }
+  return -1  // 只找到一个分隔符，没有完整帧
+}
 
-      const cleanup = (result) => {
-        if (timer) clearTimeout(timer)
-        if (port) {
-          port.off('data', onData)
-          port.off('error', onError)
-          if (port.isOpen) {
-            port.close(() => resolve(result))
-            return
+async function detectBaudRate(path, timeoutMs = 1500, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[baud] ${path} retry #${attempt}`)
+      await new Promise(r => setTimeout(r, 500))
+    }
+    for (let i = 0; i < BAUD_CANDIDATES.length; i++) {
+      const baudRate = BAUD_CANDIDATES[i]
+      const expectedLengths = BAUD_EXPECTED_FRAME_LENGTHS[baudRate] || []
+
+      const result = await new Promise((resolve) => {
+        let cache = Buffer.alloc(0)
+        let timer = null
+        let port = null
+        let resolved = false
+        let delimiterFound = false
+
+        const cleanup = (result) => {
+          if (resolved) return
+          resolved = true
+          if (timer) clearTimeout(timer)
+          if (port) {
+            port.off('data', onData)
+            port.off('error', onError)
+            if (port.isOpen) {
+              port.close(() => resolve(result))
+              return
+            }
+          }
+          resolve(result)
+        }
+
+        const onData = (data) => {
+          cache = Buffer.concat([cache, Buffer.from(data)])
+          // 限制缓存大小，保留足够的数据用于帧长度检测（最大帧 4096 + 分隔符开销）
+          if (cache.length > 12288) {
+            cache = cache.slice(-12288)
+          }
+          // 第一步：检测分隔符
+          if (!delimiterFound && bufferContainsSequence(cache, splitArr)) {
+            delimiterFound = true
+            console.log(`[baud] ${path} @${baudRate} delimiter found, checking frame length...`)
+          }
+          // 第二步：检测帧长度是否匹配
+          if (delimiterFound) {
+            const frameLen = extractFrameLength(cache, splitArr)
+            if (frameLen > 0) {
+              if (expectedLengths.includes(frameLen)) {
+                console.log(`[baud] ${path} @${baudRate} frame length ${frameLen} matches!`)
+                cleanup('match')
+              } else {
+                console.log(`[baud] ${path} @${baudRate} frame length ${frameLen} does NOT match expected ${JSON.stringify(expectedLengths)}`)
+                cleanup('mismatch')
+              }
+            }
+            // 帧长度还没提取到，继续等待更多数据
           }
         }
-        resolve(result)
-      }
 
-      const onData = (data) => {
-        cache = Buffer.concat([cache, Buffer.from(data)])
-        if (cache.length > 1024) {
-          cache = cache.slice(-1024)
+        const onError = (err) => {
+          console.log(`[baud] ${path} @${baudRate} error:`, err?.message || err)
+          cleanup('error')
         }
-        if (bufferContainsSequence(cache, splitArr)) {
-          cleanup(true)
+
+        try {
+          port = new SerialPort({ path, baudRate, autoOpen: true })
+          port.on('data', onData)
+          port.on('error', onError)
+        } catch (e) {
+          console.log(`[baud] ${path} @${baudRate} open failed:`, e?.message || e)
+          cleanup('error')
+          return
         }
-      }
 
-      const onError = () => cleanup(false)
+        timer = setTimeout(() => {
+          if (delimiterFound) {
+            // 找到了分隔符但没来得及验证帧长度，也算通过（兼容旧逻辑）
+            console.log(`[baud] ${path} @${baudRate} delimiter found but frame length not verified (timeout), accepting`)
+            cleanup('match')
+          } else {
+            cleanup('timeout')
+          }
+        }, timeoutMs)
+      })
 
-      try {
-        port = new SerialPort({ path, baudRate, autoOpen: true })
-        port.on('data', onData)
-        port.on('error', onError)
-      } catch (e) {
-        cleanup(false)
-        return
-      }
+      // 每次尝试后等待端口锁释放（macOS 需要时间释放文件锁）
+      await new Promise(r => setTimeout(r, 300))
 
-      timer = setTimeout(() => cleanup(false), timeoutMs)
-    })
-
-    if (ok) return baudRate
+      if (result === 'match') return baudRate
+      // mismatch/error/timeout 继续尝试下一个波特率
+    }
   }
   return null
 }
@@ -827,23 +1634,26 @@ app.post('/bindKey', (req, res) => {
 
 // serial.txt cache APIs
 app.get('/serialCache', (req, res) => {
-  const data = readSerialCache()
-  if (data && data.key && data.orgName) {
-    res.json(new HttpResult(0, { hasCache: true, ...data }, 'success'))
+  const { data, serialPath, candidates } = getSerialCacheStatus()
+  const responseData = buildSerialCacheResponseData(data)
+  if (hasSerialCacheData(data)) {
+    res.json(new HttpResult(0, { hasCache: true, serialPath, candidates, ...responseData }, 'success'))
     return
   }
-  res.json(new HttpResult(0, { hasCache: false }, 'empty'))
+  res.json(new HttpResult(0, { hasCache: false, serialPath, candidates }, 'empty'))
 })
 
 app.post('/serialCache', (req, res) => {
   try {
-    const { key, orgName } = req.body || {}
-    if (!key || !orgName) {
-      res.json(new HttpResult(1, {}, 'missing key or orgName'))
+    const { key, orgName, llmApiKey } = req.body || {}
+    if (!key) {
+      res.json(new HttpResult(1, {}, 'missing key'))
       return
     }
-    const saved = writeSerialCache({ key, orgName })
-    res.json(new HttpResult(0, saved, 'success'))
+    const saved = writeSerialCache({ key, orgName, llmApiKey })
+    const { serialPath, candidates } = getSerialCacheStatus()
+    const reapplied = reapplySerialTypeMappings()
+    res.json(new HttpResult(0, { ...buildSerialCacheResponseData(saved), serialPath, candidates, reapplied }, 'success'))
   } catch (err) {
     res.json(new HttpResult(1, {}, 'save failed'))
   }
@@ -924,6 +1734,8 @@ app.post('/getHandPdf' , async (req , res) => {
     let rightArr = null
     let leftImuArr = null
     let rightImuArr = null
+    let leftTimes = null
+    let rightTimes = null
     let bestRow = null
     let matchedDate = null
     let matchedTimestamp = null
@@ -934,7 +1746,7 @@ app.post('/getHandPdf' , async (req , res) => {
       console.log('[getHandPdf] 使用分离模式: leftId=%s, rightId=%s', leftAssessmentId, rightAssessmentId)
 
       if (leftAssessmentId) {
-        const { dataArr: leftDataArr, rotateArr: leftRotateArr, rows: leftRows } = await dbGetData({
+        const { dataArr: leftDataArr, rotateArr: leftRotateArr, timeArr: leftTimeArr, rows: leftRows } = await dbGetData({
           db: currentDb,
           params: [leftAssessmentId],
           byAssessmentId: true
@@ -946,10 +1758,16 @@ app.post('/getHandPdf' , async (req , res) => {
           const lk = leftKeys.find((k) => k === 'HL' || /left|lhand|handl/i.test(k))
           leftArr = lk ? leftDataArr[lk] : null
           leftImuArr = lk && leftRotateArr ? leftRotateArr[lk] : null
+          const leftRawTimes = lk && leftTimeArr ? leftTimeArr[lk] : null
           // 如果 HL 没找到，尝试取第一个可用的数据（可能只有一种设备类型）
           if (!leftArr && leftKeys.length > 0) {
             leftArr = leftDataArr[leftKeys[0]]
             leftImuArr = leftRotateArr ? leftRotateArr[leftKeys[0]] : null
+          }
+          // 将绝对时间戳转为相对秒数
+          if (leftRawTimes && leftRawTimes.length > 0) {
+            const t0 = Number(leftRawTimes[0])
+            leftTimes = leftRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
           }
           if (!bestRow) bestRow = leftRows[0]
           console.log('[getHandPdf] 左手最终: key=%s, frames=%d, imuFrames=%d', lk || leftKeys[0], leftArr ? leftArr.length : 0, leftImuArr ? leftImuArr.length : 0)
@@ -957,7 +1775,7 @@ app.post('/getHandPdf' , async (req , res) => {
       }
 
       if (rightAssessmentId) {
-        const { dataArr: rightDataArr, rotateArr: rightRotateArr, rows: rightRows } = await dbGetData({
+        const { dataArr: rightDataArr, rotateArr: rightRotateArr, timeArr: rightTimeArr, rows: rightRows } = await dbGetData({
           db: currentDb,
           params: [rightAssessmentId],
           byAssessmentId: true
@@ -969,10 +1787,16 @@ app.post('/getHandPdf' , async (req , res) => {
           const rk = rightKeys.find((k) => k === 'HR' || /right|rhand|handr/i.test(k))
           rightArr = rk ? rightDataArr[rk] : null
           rightImuArr = rk && rightRotateArr ? rightRotateArr[rk] : null
+          const rightRawTimes = rk && rightTimeArr ? rightTimeArr[rk] : null
           // 如果 HR 没找到，尝试取第一个可用的数据
           if (!rightArr && rightKeys.length > 0) {
             rightArr = rightDataArr[rightKeys[0]]
             rightImuArr = rightRotateArr ? rightRotateArr[rightKeys[0]] : null
+          }
+          // 将绝对时间戳转为相对秒数
+          if (rightRawTimes && rightRawTimes.length > 0) {
+            const t0 = Number(rightRawTimes[0])
+            rightTimes = rightRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
           }
           if (!bestRow) bestRow = rightRows[0]
           console.log('[getHandPdf] 右手最终: key=%s, frames=%d, imuFrames=%d', rk || rightKeys[0], rightArr ? rightArr.length : 0, rightImuArr ? rightImuArr.length : 0)
@@ -994,7 +1818,7 @@ app.post('/getHandPdf' , async (req , res) => {
         return
       }
 
-      const { dataArr, rotateArr, rows } = await dbGetData({
+      const { dataArr, rotateArr, timeArr, rows } = await dbGetData({
         db: currentDb,
         params: [assessmentId],
         byAssessmentId: true
@@ -1024,6 +1848,17 @@ app.post('/getHandPdf' , async (req , res) => {
       rightArr = rightKey ? dataArr[rightKey] : null
       leftImuArr = leftKey && rotateArr ? rotateArr[leftKey] : null
       rightImuArr = rightKey && rotateArr ? rotateArr[rightKey] : null
+      // 提取每只手对齐的时间戳，转为相对秒数
+      const leftRawTimes = leftKey && timeArr ? timeArr[leftKey] : null
+      if (leftRawTimes && leftRawTimes.length > 0) {
+        const t0 = Number(leftRawTimes[0])
+        leftTimes = leftRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
+      }
+      const rightRawTimes = rightKey && timeArr ? timeArr[rightKey] : null
+      if (rightRawTimes && rightRawTimes.length > 0) {
+        const t0 = Number(rightRawTimes[0])
+        rightTimes = rightRawTimes.map(t => parseFloat(((Number(t) - t0) / 1000).toFixed(3)))
+      }
     }
 
     if (!leftArr && !rightArr) {
@@ -1065,6 +1900,7 @@ app.post('/getHandPdf' , async (req , res) => {
             sensor_data: leftArr,
             hand_type: '左手',
             imu_data: leftImuCleaned,
+            times: leftTimes,
           })
         : null
       rightRenderResult = rightArr
@@ -1072,6 +1908,7 @@ app.post('/getHandPdf' , async (req , res) => {
             sensor_data: rightArr,
             hand_type: '右手',
             imu_data: rightImuCleaned,
+            times: rightTimes,
           })
         : null
     } catch (e) {
@@ -1189,21 +2026,31 @@ app.post('/getSitAndFootPdf', async (req, res) => {
     // 用于去重：记录上一帧的数据签名（JSON字符串），跳过完全相同的连续帧
     let lastStandSig = null
     let lastSitSig = null
+    // 记录最后一个有效帧，用于离线时补齐（确保两传感器时间范围一致）
+    let lastStandArr = null
+    let lastSitArr = null
 
     rows.forEach((row) => {
       let dataObj = {}
       try {
         dataObj = JSON.parse(row.data || '{}')
       } catch {}
+
+      const ts = formatTimestamp(row.timestamp)
+      let standHasData = false
+      let sitHasData = false
+
       if (standKey && dataObj[standKey]) {
         const d = dataObj[standKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
+          standHasData = true
+          lastStandArr = arr
           // 去重：跳过与上一帧完全相同的数据（低帧率设备的重复帧）
           const sig = JSON.stringify(arr)
           if (sig !== lastStandSig) {
             standData.push(arr)
-            standTimes.push(formatTimestamp(row.timestamp))
+            standTimes.push(ts)
             lastStandSig = sig
           }
         }
@@ -1212,15 +2059,19 @@ app.post('/getSitAndFootPdf', async (req, res) => {
         const d = dataObj[sitKey]
         const arr = Array.isArray(d) ? d : d.arr
         if (Array.isArray(arr)) {
+          sitHasData = true
+          lastSitArr = arr
           // 去重：跳过与上一帧完全相同的数据
           const sig = JSON.stringify(arr)
           if (sig !== lastSitSig) {
             sitData.push(arr)
-            sitTimes.push(formatTimestamp(row.timestamp))
+            sitTimes.push(ts)
             lastSitSig = sig
           }
         }
       }
+
+      // 不补帧：保持数据真实性
     })
 
     if (!standData.length || !sitData.length) {
@@ -1334,11 +2185,30 @@ app.post('/getFootPdf', async (req, res) => {
     const t4 = []
 
     const requiredKeys = ['foot1', 'foot2', 'foot3', 'foot4']
+    const gaitSeenStamps = {}  // 步态数据去重用
     rows.forEach((row) => {
       let dataObj = {}
       try {
         dataObj = JSON.parse(row.data || '{}')
       } catch {}
+      // 基于 stamp 去重：检查任一 foot 的 stamp 是否已见过
+      let isDuplicate = false
+      for (const fk of requiredKeys) {
+        const stamp = dataObj[fk]?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!gaitSeenStamps[fk]) gaitSeenStamps[fk] = new Set()
+          if (gaitSeenStamps[fk].has(stamp)) { isDuplicate = true; break }
+        }
+      }
+      if (isDuplicate) return  // 重复帧，跳过
+      // 记录 stamp
+      for (const fk of requiredKeys) {
+        const stamp = dataObj[fk]?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!gaitSeenStamps[fk]) gaitSeenStamps[fk] = new Set()
+          gaitSeenStamps[fk].add(stamp)
+        }
+      }
       const v1 = dataObj.foot1?.arr || dataObj.foot1
       const v2 = dataObj.foot2?.arr || dataObj.foot2
       const v3 = dataObj.foot3?.arr || dataObj.foot3
@@ -1596,6 +2466,8 @@ app.post('/startCol', async (req, res) => {
       JSON.stringify(sensorArr), file, lengthByFile, JSON.stringify(activeSendTypes), lengthBySendTypes, canStart)
     if (canStart) {
       colFlag = true
+      // 清空去重缓存，确保新采集不受上次采集的 stamp 影响
+      Object.keys(lastStoredStamps).forEach(k => delete lastStoredStamps[k])
       colName = (req.body.date || req.body.colName || '')
       colPersonName = req.body.fileName || req.body.name || req.body.collectName || ''
       res.json(new HttpResult(0, port, 'start collection'));
@@ -1626,6 +2498,134 @@ app.post('/setActiveMode', (req, res) => {
   }
 })
 
+// ─── 脚垫滤波/优化参数 API ───
+app.post('/setFootFilter', (req, res) => {
+  try {
+    const { mode, config } = req.body || {}
+    if (!mode || !config || !footFilterConfig[mode]) {
+      res.json(new HttpResult(1, {}, 'invalid mode, must be "standing" or "gait"'))
+      return
+    }
+    // 合并更新（只更新传入的字段）
+    Object.assign(footFilterConfig[mode], config)
+    saveFootFilterConfig()
+    console.log(`[setFootFilter] ${mode} 参数已更新并保存:`, JSON.stringify(footFilterConfig[mode]))
+    res.json(new HttpResult(0, footFilterConfig[mode], 'success'))
+  } catch (e) {
+    console.error('[setFootFilter] error:', e)
+    res.json(new HttpResult(1, {}, 'setFootFilter failed'))
+  }
+})
+
+app.get('/getFootFilter', (req, res) => {
+  res.json(new HttpResult(0, footFilterConfig, 'success'))
+})
+
+
+// 握力传感器清零：记录当前 HL/HR 的传感器值作为基线
+// 修复：采用异步重试机制，等待左右手数据都就绪后再记录基线
+// 解决左右手共用串口、数据交替到达导致某只手基线偶尔缺失的时序问题
+app.post('/tareGrip', async (req, res) => {
+  try {
+    const MAX_WAIT = 5000   // 最多等待 5 秒（HR 的 Packet1 经常丢失，需要更长时间等待完整帧）
+    const INTERVAL = 100    // 每 100ms 检查一次
+    const startTime = Date.now()
+
+    // 尝试从 gloveLatestData 和 dataMap 中读取 HL/HR 基线
+    // 只使用最近 FRESHNESS_MS 内的新鲜数据，避免用旧数据作为基线
+    const FRESHNESS_MS = 5000  // 数据新鲜度窗口 5 秒（配合等待时间）
+    function tryRecordBaseline() {
+      let taredCount = 0
+      const now = Date.now()
+      // 优先从 gloveLatestData 缓存读取（左右手独立存储，不会被覆盖）
+      // 接受 128 或 256 字节的数据作为基线
+      // HR 的 Packet1 在硬件层面系统性丢失，几乎永远只有 128 字节
+      // 基线和实际数据长度一致（都是 128），减基线就能正确清零
+      const MIN_ARR_LEN = 128
+      if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr
+          && gloveLatestData.HL.arr.length >= MIN_ARR_LEN
+          && (now - gloveLatestData.HL.stamp) < FRESHNESS_MS) {
+        gripBaseline.HL = [...gloveLatestData.HL.arr]
+        taredCount++
+        console.log('[tareGrip] HL 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HL.arr.length, gloveLatestData.HL.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HL.arr.length, now - gloveLatestData.HL.stamp)
+      } else if (!gripBaseline.HL && gloveLatestData.HL && gloveLatestData.HL.arr) {
+        console.log('[tareGrip] HL 缓存数据不合格: 长度=%d(需要>=%d), 年龄=%dms(需要<%d)', gloveLatestData.HL.arr.length, MIN_ARR_LEN, now - gloveLatestData.HL.stamp, FRESHNESS_MS)
+      }
+      if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr
+          && gloveLatestData.HR.arr.length >= MIN_ARR_LEN
+          && (now - gloveLatestData.HR.stamp) < FRESHNESS_MS) {
+        gripBaseline.HR = [...gloveLatestData.HR.arr]
+        taredCount++
+        console.log('[tareGrip] HR 基线已记录(从缓存), 长度=%d, 平均值=%.1f, 数据年龄=%dms', gloveLatestData.HR.arr.length, gloveLatestData.HR.arr.reduce((a, b) => a + b, 0) / gloveLatestData.HR.arr.length, now - gloveLatestData.HR.stamp)
+      } else if (!gripBaseline.HR && gloveLatestData.HR && gloveLatestData.HR.arr) {
+        console.log('[tareGrip] HR 缓存数据不合格: 长度=%d(需要>=%d), 年龄=%dms(需要<%d)', gloveLatestData.HR.arr.length, MIN_ARR_LEN, now - gloveLatestData.HR.stamp, FRESHNESS_MS)
+      }
+      // 回退到 dataMap（兼容旧逻辑，同样接受 128 或 256 字节）
+      if (!gripBaseline.HL || !gripBaseline.HR) {
+        Object.keys(dataMap).forEach((key) => {
+          const item = dataMap[key]
+          if (!item || !item.type || !item.stamp) return
+          if ((now - item.stamp) >= FRESHNESS_MS) return  // 跳过过期数据
+          if (!gripBaseline.HL && item.type === 'HL' && item.arr && item.arr.length >= MIN_ARR_LEN) {
+            gripBaseline.HL = [...item.arr]
+            taredCount++
+            console.log('[tareGrip] HL 基线已记录(仍ataMap), 长度=%d', item.arr.length)
+          }
+          if (!gripBaseline.HR && item.type === 'HR' && item.arr && item.arr.length >= MIN_ARR_LEN) {
+            gripBaseline.HR = [...item.arr]
+            taredCount++
+            console.log('[tareGrip] HR 基线已记录(仍ataMap), 长度=%d', item.arr.length)
+          }
+        })
+      }
+      return taredCount
+    }
+
+    // 先清除旧基线，避免残留
+    gripBaseline.HL = null
+    gripBaseline.HR = null
+
+    // 首次尝试
+    tryRecordBaseline()
+
+    // 如果两只手都已记录，直接返回
+    if (gripBaseline.HL && gripBaseline.HR) {
+      console.log('[tareGrip] 清零完成(首次), HL=✓, HR=✓')
+      res.json(new HttpResult(0, { taredCount: 2, HL: true, HR: true }, '清零成功'))
+      return
+    }
+
+    // 否则进入等待重试循环，等待另一只手的数据到达
+    console.log('[tareGrip] 首次未全部就绪, HL=%s HR=%s, 开始等待重试...', gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
+    await new Promise((resolve) => {
+      const timer = setInterval(() => {
+        tryRecordBaseline()
+        if ((gripBaseline.HL && gripBaseline.HR) || (Date.now() - startTime >= MAX_WAIT)) {
+          clearInterval(timer)
+          resolve()
+        }
+      }, INTERVAL)
+    })
+
+    const taredCount = (gripBaseline.HL ? 1 : 0) + (gripBaseline.HR ? 1 : 0)
+    console.log('[tareGrip] 清零完成(等待%dms), 已记录 %d 个设备基线, HL=%s, HR=%s', Date.now() - startTime, taredCount, gripBaseline.HL ? '✓' : '✗', gripBaseline.HR ? '✓' : '✗')
+    res.json(new HttpResult(0, { taredCount, HL: !!gripBaseline.HL, HR: !!gripBaseline.HR }, '清零成功'))
+  } catch (e) {
+    console.error('[tareGrip] 错误:', e)
+    res.json(new HttpResult(1, {}, '清零失败: ' + e.message))
+  }
+})
+
+// 清除握力基线（退出握力评估时调用）
+// 同时清除 gloveLatestData 缓存，避免第二次进入时用旧数据作为基线
+app.post('/clearGripBaseline', (req, res) => {
+  gripBaseline.HL = null
+  gripBaseline.HR = null
+  gloveLatestData.HL = null
+  gloveLatestData.HR = null
+  console.log('[clearGripBaseline] 基线和手套缓存已清除')
+  res.json(new HttpResult(0, {}, '基线已清除'))
+})
 
 /// 停止采集
 app.get('/endCol', async (req, res) => {
@@ -1633,6 +2633,19 @@ app.get('/endCol', async (req, res) => {
   colFlag = false
   // 停止采集时立即刷入缓冲区剩余数据
   flushStorageBuffer()
+  // 等待数据完全写入数据库后再返回，避免报告读取到不完整数据
+  const waitFlush = () => new Promise((resolve) => {
+    const check = () => {
+      if (!isFlushingStorage && storageBuffer.length === 0) {
+        resolve()
+      } else {
+        setTimeout(check, 50)
+      }
+    }
+    check()
+  })
+  await waitFlush()
+  console.log('[endCol] 数据已全部写入数据库')
   res.json(new HttpResult(0, 'success', '停止采集'));
 })
 
@@ -1993,6 +3006,7 @@ app.post('/getDbHeatmap', async (req, res) => {
     }
 
     const dataArr = {}
+    const seenStamps = {}  // 每个设备已见过的 stamp 集合，用于去重
     rows.forEach((row) => {
       let dataObj = {}
       try {
@@ -2002,6 +3016,13 @@ app.post('/getDbHeatmap', async (req, res) => {
         const item = dataObj[key]
         const arr = Array.isArray(item) ? item : item?.arr
         if (!Array.isArray(arr)) return
+        // 基于 stamp 去重：如果该设备的该 stamp 已存储过，跳过
+        const stamp = item?.stamp
+        if (stamp !== undefined && stamp !== null) {
+          if (!seenStamps[key]) seenStamps[key] = new Set()
+          if (seenStamps[key].has(stamp)) return  // 重复帧，跳过
+          seenStamps[key].add(stamp)
+        }
         if (!dataArr[key]) dataArr[key] = []
         dataArr[key].push(arr)
       })
@@ -2777,12 +3798,65 @@ const newSerialPortLink = ({ path, parser, baudRate = 1000000 }) => {
         console.log(err, "err");
       }
     );
-    //绠￠亾娣诲姞瑙ｆ瀽鍣?
     port.pipe(parser);
   } catch (e) {
     console.log(e, "e");
   }
   return port
+}
+
+/**
+ * 带重试的串口连接，解决 macOS 上 Cannot lock port 问题
+ * detectBaudRate 关闭端口后，系统可能还未释放文件锁，立即重新打开会失败
+ * 此函数会自动重试最多 maxRetries 次，每次间隔 retryDelay ms
+ */
+async function newSerialPortLinkWithRetry({ path, parser, baudRate = 1000000, maxRetries = 3, retryDelay = 500 }) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[port] ${path} retry #${attempt} after ${retryDelay}ms`)
+      await new Promise(r => setTimeout(r, retryDelay))
+    }
+    const port = newSerialPortLink({ path, parser, baudRate })
+    if (port) {
+      // 检查端口是否真正打开成功
+      const opened = await new Promise((resolve) => {
+        if (port.isOpen) {
+          resolve(true)
+          return
+        }
+        const onOpen = () => {
+          port.off('error', onErr)
+          resolve(true)
+        }
+        const onErr = (err) => {
+          port.off('open', onOpen)
+          if (err && /lock|unavailable|EBUSY/i.test(err.message)) {
+            console.log(`[port] ${path} lock error on attempt ${attempt}:`, err.message)
+            resolve(false)
+          } else {
+            // 其他错误不影响端口打开
+            resolve(true)
+          }
+        }
+        port.once('open', onOpen)
+        port.once('error', onErr)
+        // 超时保护
+        setTimeout(() => {
+          port.off('open', onOpen)
+          port.off('error', onErr)
+          resolve(port.isOpen)
+        }, 2000)
+      })
+      if (opened) {
+        console.log(`[port] ${path} opened successfully` + (attempt > 0 ? ` (after ${attempt} retries)` : ''))
+        return port
+      }
+      // 打开失败，关闭后重试
+      try { if (port.isOpen) port.close() } catch (e) {}
+    }
+  }
+  console.log(`[port] ${path} failed to open after ${maxRetries} retries`)
+  return null
 }
 
 /**
@@ -2804,34 +3878,89 @@ function parseData(parserArr, objs) {
         return
       }
       if (obj.port.isOpen) {
-      // 统一使用 data.arr（手套在 packet2 到达时已合并，其他设备直接赋值 arr）
-      let blueArr = data.arr && data.arr.length ? data.arr : []
-      // 褰撳墠鏃堕棿鎴充笌鍙戞暟鎹椂闂存埑涔嬪樊
-      const dataStamp = new Date().getTime() - data.stamp
-      json[data.type] = {}
 
-      // 鏍规嵁鍙戦€佹椂闂翠笌鏈€鏂版椂闂存埑鐨勫樊鍊? 鍒ゆ柇璁惧鐨勫湪绂荤嚎鐘舵€?
-      if (dataStamp < 1000) {
-
-        json[data.type].status = 'online'
-        // console.log(first)
-        // if (data.type.includes(file)) json[data.type].arr = blueArr
-        json[data.type].arr = blueArr
-        json[data.type].rotate = data.rotate
-        json[data.type].stamp = data.stamp
-        json[data.type].HZ = data.HZ
-        if (data.cop) json[data.type].cop = data.cop
-        if (data.breatheData) json[data.type].cop = data.breatheData
-        // json[data.type].stampDiff = new Date().getTime() - data.stamp
+      // 手套设备（HL/HR）跳过 dataMap 的 arr，统一由下方 gloveLatestData 处理
+      // 原因：左右手共用一个串口，Packet1 会覆盖 dataItem.type 但不更新 dataItem.arr，
+      // 导致 type 和 arr 不匹配，清零基线被错误应用。
+      if (data.type === 'HL' || data.type === 'HR') {
+        // 仅记录串口在线状态，不使用 data.arr
+        const dataStamp = new Date().getTime() - data.stamp
+        if (dataStamp < 5000) {
+          // 标记串口在线，具体数据由 gloveLatestData 提供
+        } else {
+          // 串口超时，不做处理，由下方 gloveLatestData 判断
+        }
       } else {
-        json[data.type].status = 'offline'
+        // 非手套设备：保持原有逻辑
+        let blueArr = data.arr && data.arr.length ? data.arr : []
+        const dataStamp = new Date().getTime() - data.stamp
+        json[data.type] = {}
+        if (dataStamp < 5000) {
+          json[data.type].status = 'online'
+          json[data.type].arr = blueArr
+          json[data.type].rotate = data.rotate
+          json[data.type].stamp = data.stamp
+          json[data.type].HZ = data.HZ
+          if (data.cop) json[data.type].cop = data.cop
+          if (data.breatheData) json[data.type].cop = data.breatheData
+        } else {
+          json[data.type].status = 'offline'
+        }
       }
     } else {
-      json[data.type] = {}
-      json[data.type].status = 'offline'
+      if (data && data.type) {
+        json[data.type] = {}
+        json[data.type].status = 'offline'
+      }
     }
 
   })
+
+  // 手套数据统一从 gloveLatestData 获取（保证 type 和 arr 一致性）
+  // gloveLatestData 在 Packet2 合并时同步写入，type/arr/stamp 始终匹配
+  if (!global._lastGloveDebugTs) global._lastGloveDebugTs = 0
+  const _shouldDebugLog = (Date.now() - global._lastGloveDebugTs) > 2000
+  ;['HL', 'HR'].forEach((gloveType) => {
+    const cached = gloveLatestData[gloveType]
+    if (!cached) {
+      // 没有缓存数据，设为离线
+      if (!json[gloveType]) json[gloveType] = { status: 'offline' }
+      return
+    }
+    const dataStamp = new Date().getTime() - cached.stamp
+    json[gloveType] = {}
+    if (dataStamp < 5000) {
+      // 应用清零基线：用对应手的基线减去对应手的数据（type/arr 保证一致）
+      let arr = cached.arr && cached.arr.length ? [...cached.arr] : []
+      if (gripBaseline[gloveType] && arr.length) {
+        const base = gripBaseline[gloveType]
+        if (_shouldDebugLog) {
+          const avgBefore = arr.reduce((a, b) => a + b, 0) / arr.length
+          const avgBase = base.reduce((a, b) => a + b, 0) / base.length
+          console.log('[parseData] %s 减基线: arrLen=%d, baseLen=%d, avgBefore=%.1f, avgBase=%.1f', gloveType, arr.length, base.length, avgBefore, avgBase)
+        }
+        arr = arr.map((v, i) => {
+          const diff = v - (base[i] || 0)
+          return diff > 0 ? diff : 0
+        })
+        if (_shouldDebugLog) {
+          const avgAfter = arr.reduce((a, b) => a + b, 0) / arr.length
+          console.log('[parseData] %s 减基线后: avgAfter=%.1f', gloveType, avgAfter)
+        }
+      } else if (_shouldDebugLog && arr.length) {
+        console.log('[parseData] %s 无基线, 直接推送原始数据, avg=%.1f', gloveType, arr.reduce((a, b) => a + b, 0) / arr.length)
+      }
+      json[gloveType].status = 'online'
+      json[gloveType].arr = arr
+      json[gloveType].rotate = cached.rotate
+      json[gloveType].stamp = cached.stamp
+      json[gloveType].HZ = cached.HZ
+    } else {
+      json[gloveType].status = 'offline'
+    }
+  })
+  if (_shouldDebugLog) global._lastGloveDebugTs = Date.now()
+
   if (json.foot) {
     if (!json.foot4) {
       json.foot4 = json.foot
@@ -2850,7 +3979,14 @@ function parseData(parserArr, objs) {
 var sendMacNum = 0, successNum = 0, sendDataLength = 0
 const oldTimeObj = {}
 async function connectPort() {
+  // 只清空已断开端口的 macInfo，保留已连接设备的 MAC 信息
+  const oldMacInfo = { ...macInfo }
   macInfo = {}
+  for (const p of Object.keys(oldMacInfo)) {
+    if (parserArr[p] && parserArr[p].port && parserArr[p].port.isOpen) {
+      macInfo[p] = oldMacInfo[p]
+    }
+  }
   let ports
   if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
     // 测试模式：使用虚拟串口列表
@@ -2866,44 +4002,62 @@ async function connectPort() {
     ports = getPort(ports)
   }
   console.log(ports, 'ports')
-  // 鍒涘缓骞惰繛鎺ユ暟鎹€氶亾骞朵笖璁剧疆鍥炶皟
+
+  // ============================================================
+  // 阶段一：通过分隔符 + 帧长度双重验证，通过波特率探测确定每个端口的设备类型
+  // 关键：每次只打开一个端口，探测完关闭后再探测下一个，避免 CH340 驱动端口锁冲突
+  // ============================================================
+  const baudDetectResults = {}  // path -> detectedBaud
+  console.log('[phase1] Starting baud rate detection for', ports.length, 'ports')
+  for (let i = 0; i < ports.length; i++) {
+    const { path } = ports[i]
+    // 跳过已连接且端口打开的设备，避免重复探测干扰已有连接
+    if (parserArr[path] && parserArr[path].port && parserArr[path].port.isOpen) {
+      baudDetectResults[path] = parserArr[path].baudRate || null
+      console.log('[phase1]', path, '=> skipped (already connected, baud:', baudDetectResults[path], ')')
+      continue
+    }
+    let detectedBaud = null
+    if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
+      try {
+        const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
+        detectedBaud = baudMap[path] || null
+      } catch (e) {}
+      console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || baudRate)
+    } else {
+      detectedBaud = await detectBaudRate(path)
+    }
+    baudDetectResults[path] = detectedBaud
+    console.log('[phase1]', path, '=>', detectedBaud || 'null (will use default ' + baudRate + ')')
+    // 探测完后等待端口完全释放，再探测下一个
+    await new Promise(r => setTimeout(r, 500))
+  }
+  console.log('[phase1] Detection complete:', JSON.stringify(baudDetectResults))
+
+  // 探测全部完成后，等待一段时间确保所有端口锁彻底释放
+  await new Promise(r => setTimeout(r, 1000))
+
+  // ============================================================
+  // 阶段二：根据探测结果逐个打开端口并建立连接
+  // ============================================================
+  console.log('[phase2] Starting port connections')
   for (let i = 0; i < ports.length; i++) {
 
       const portInfo = ports[i]
 
-
-
-
       const { path } = portInfo
-      let portBaudRate = baudRate
-    // parserArr[path]
+      const detectedBaud = baudDetectResults[path]
+      let portBaudRate = detectedBaud || baudRate
+
       const parserItem = parserArr[path] = parserArr[path] ? parserArr[path] : {}
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
       parserItem.baudRate = portBaudRate
-      // parserItem 
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
 
     const { parser } = parserItem
 
-    // if()
-
       if (!(parserItem.port && parserItem.port.isOpen)) {
-        let detectedBaud = null
-        if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
-          // 测试模式：从环境变量获取预设波特率
-          try {
-            const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
-            detectedBaud = baudMap[path] || null
-          } catch (e) {}
-          console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || portBaudRate)
-        } else {
-          detectedBaud = await detectBaudRate(path)
-        }
-        if (detectedBaud) {
-          portBaudRate = detectedBaud
-        }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
-        parserItem.baudRate = portBaudRate
         // 根据探测到的波特率自动设置设备大类
         const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
         if (deviceCategory) {
@@ -2911,13 +4065,16 @@ async function connectPort() {
             dataItem.type = 'sit'
             dataItem.premission = true
           } else if (deviceCategory === 'foot') {
-            // 脚垫类型需要通过 AT 指令获取 MAC 地址后再细分 foot1-4
             dataItem.type = 'foot'
           }
-          // hand 类型由帧内类型位（130字节帧）动态设置为 HL/HR
           console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
         }
-        const port = newSerialPortLink({ path, parser: parserItem.parser, baudRate: portBaudRate })
+        // 使用带重试的端口连接
+        const port = await newSerialPortLinkWithRetry({ path, parser: parserItem.parser, baudRate: portBaudRate })
+        if (!port) {
+          console.log('[port] ' + path + ' skipped: unable to open port')
+          continue
+        }
 
       // linkIngPort.push(port)
 
@@ -2961,15 +4118,28 @@ async function connectPort() {
           successNum++;
           parserItem.macReady = true;
           macInfo[path] = { uniqueId, version };
-          const mappedType = getTypeFromSerialCache(uniqueId);
+          const serialMatch = findTypeFromSerialCache(uniqueId);
+          const mappedType = serialMatch.type;
           if (mappedType) {
             dataItem.type = String(mappedType).trim();
             dataItem.premission = true;
-            console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path}`);
+            syncMacInfoType(path, dataItem.type, true, {
+              typeSource: 'serial.txt',
+              matchStrategy: `test:${serialMatch.strategy}`,
+              serialPath: serialMatch.serialPath,
+              serialKey: serialMatch.rawKey || null,
+            });
+            console.log(`[TEST] Auto-assigned type=${dataItem.type} for ${path} via ${serialMatch.strategy} match (${serialMatch.rawKey} @ ${serialMatch.serialPath})`);
+          } else {
+            syncMacInfoType(path, dataItem.type, false, {
+              typeSource: 'unmatched',
+              matchStrategy: 'test:none',
+              serialPath: serialMatch.serialPath,
+              serialKey: null,
+            });
+            console.log(`[TEST] No serial type match for ${path}: raw=${uniqueId}, normalized=${serialMatch.target}, serialPath=${serialMatch.serialPath}, keys=${serialMatch.entries.map((item) => item.normalizedKey).join(',')}`);
           }
-          if (Object.keys(macInfo).length == ports.length) {
-            socketSendData(server, JSON.stringify({ macInfo }));
-          }
+          pushMacInfoUpdate()
         }
       } else {
         sendMacCommand(port, path, portBaudRate, parserItem)
@@ -3005,13 +4175,17 @@ async function connectPort() {
           const str = buffer.toString()
           if (str.includes('Unique ID')) {
 
-            const uniqueIdMatch = str.match(/Unique ID:\s*([^\s-]+)/);
-            const versionMatch = str.match(/Versions:\s*([^\s-]+)/);
+            const uniqueIdMatch = str.match(/Unique ID\s*[:=]\s*([^\r\n]+)/i);
+            const versionMatch = str.match(/Versions:\s*([A-Za-z0-9._-]+)/i);
 
-            const uniqueId = uniqueIdMatch ? uniqueIdMatch[1] : null;
-            const version = versionMatch ? versionMatch[1] : null;
+            const uniqueIdRaw = uniqueIdMatch ? uniqueIdMatch[1].trim() : null;
+            const uniqueId = uniqueIdRaw ? normalizeSerialIdentifier(uniqueIdRaw) : null;
+            const version = versionMatch ? versionMatch[1].trim() : null;
 
-            console.log("Unique ID:", uniqueId);  // 34463730155032138F
+            console.log("Unique ID:", uniqueIdRaw || uniqueId);  // 34463730155032138F
+            if (uniqueIdRaw && uniqueIdRaw !== uniqueId) {
+              console.log("Normalized Unique ID:", uniqueId);
+            }
             console.log("Versions:", version);    // C40510
             console.log(`[mac] ${path} ${uniqueId || 'n/a'}`)
             successNum++
@@ -3024,6 +4198,7 @@ async function connectPort() {
             console.log('sendTotal:', sendMacNum, '-----', 'success:', successNum)
             macInfo[path] = {
               uniqueId,
+              uniqueIdRaw,
               version
             }
 
@@ -3032,37 +4207,76 @@ async function connectPort() {
             if (deviceCat === 'hand' || deviceCat === 'sit') {
               // 手套和起坐垫：获取到 MAC 即确认授权
               dataItem.premission = true
+              syncMacInfoType(path, dataItem.type, true, {
+                typeSource: 'detected',
+                matchStrategy: 'baud-category',
+              })
             } else if (deviceCat === 'foot') {
               // 脚垫：通过 MAC 地址查映射表确定 foot1-4
-              const mappedType = getTypeFromSerialCache(uniqueId)
+              const serialMatch = findTypeFromSerialCache(uniqueId)
+              const mappedType = serialMatch.type
               if (mappedType) {
                 dataItem.type = String(mappedType).trim()
                 dataItem.premission = true
-                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type}`)
+                syncMacInfoType(path, dataItem.type, true, {
+                  typeSource: 'serial.txt',
+                  matchStrategy: serialMatch.strategy,
+                  serialPath: serialMatch.serialPath,
+                  serialKey: serialMatch.rawKey || null,
+                })
+                console.log(`[foot] ${path} MAC=${uniqueId} => ${dataItem.type} via ${serialMatch.strategy} match (${serialMatch.rawKey} @ ${serialMatch.serialPath})`)
               } else {
+                console.log(`[foot] no local serial match for ${path}: raw=${uniqueId}, normalized=${serialMatch.target}, serialPath=${serialMatch.serialPath}, keys=${serialMatch.entries.map((item) => item.normalizedKey).join(',')}`)
+                syncMacInfoType(path, dataItem.type, false, {
+                  typeSource: 'unmatched',
+                  matchStrategy: 'none',
+                  serialPath: serialMatch.serialPath,
+                  serialKey: null,
+                })
                 // MAC 未在本地缓存中，尝试从服务器查询
                 try {
-                  const response = await axios.get(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
-                  if (response.data.data) {
-                    dataItem.type = JSON.parse(response.data.data.typeInfo)[0]
+                  const response = await fetch(`${constantObj.backendAddress}/device-manage/device/getDetail/${uniqueId}`)
+                  if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`)
+                  }
+                  const result = await response.json()
+                  if (result.data) {
+                    dataItem.type = JSON.parse(result.data.typeInfo)[0]
                     dataItem.premission = true
+                    syncMacInfoType(path, dataItem.type, true, {
+                      typeSource: 'server',
+                      matchStrategy: 'remote',
+                      serialPath: serialMatch.serialPath,
+                      serialKey: null,
+                    })
                   } else {
                     dataItem.premission = false
+                    syncMacInfoType(path, dataItem.type, false, {
+                      typeSource: 'unmatched',
+                      matchStrategy: 'remote-empty',
+                      serialPath: serialMatch.serialPath,
+                      serialKey: null,
+                    })
                   }
                 } catch (err) {
                   console.log('[foot] 服务器查询失败:', err.message)
                   dataItem.premission = false
+                  syncMacInfoType(path, dataItem.type, false, {
+                    typeSource: 'unmatched',
+                    matchStrategy: 'remote-error',
+                    serialPath: serialMatch.serialPath,
+                    serialKey: null,
+                  })
                 }
               }
             } else {
               dataItem.premission = true
+              syncMacInfoType(path, dataItem.type, true, {
+                typeSource: 'detected',
+                matchStrategy: 'default',
+              })
             }
-            if (Object.keys(macInfo).length == ports.length) {
-              // console.log(macInfo)
-              // return macInfo
-
-              socketSendData(server, JSON.stringify({ macInfo }))
-            }
+            pushMacInfoUpdate()
           }
         }
         // console.log(pointArr.length)
@@ -3077,17 +4291,26 @@ async function connectPort() {
         }
         // Packet1: 130字节 = 2(order+type) + 128(sensor前半)
         // 参考 serial_parser_two.py: 缓存 packet1，等待 packet2 到达后合并
+        // 注意：不覆盖 dataItem.type 和 dataItem.stamp，避免 type/arr 不匹配
+        // （Packet1 只有前半数据，完整数据在 Packet2 到达时才合并写入）
         else if (pointArr.length == 130) {
-          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const orderByte = pointArr[0]       // 包顺序位: 应为 1
+          const sensorType = pointArr[1]      // 1=HL, 2=HR
           const sensorData = pointArr.slice(2)  // 128 字节 sensor 前半
 
-          dataItem.type = constantObj.type[sensorType]
-          dataItem.stamp = new Date().getTime()
+          // 追踪日志：每个 Packet1 的到达
+          if (!global._p1LogCount) global._p1LogCount = 0
+          global._p1LogCount++
+          if (global._p1LogCount <= 20) {
+            console.log('[glove-P1] #%d order=%d type=%d path=%s cacheKeys=%s',
+              global._p1LogCount, orderByte, sensorType, path,
+              JSON.stringify(Object.keys(glovePacket1Cache)))
+          }
 
-          // 按 sensorType 缓存 packet1
+          // 仅缓存 Packet1 数据，不修改 dataItem（等 Packet2 到达后再统一更新）
           glovePacket1Cache[sensorType] = {
             data: sensorData,
-            stamp: dataItem.stamp,
+            stamp: new Date().getTime(),
           }
         } else if (pointArr.length == 1024) {
           // 1024字节帧 = 起坐垫 (sit)，32x32 矩阵
@@ -3143,7 +4366,8 @@ async function connectPort() {
         // Packet2: 146字节 = 2(order+type) + 128(sensor后半) + 16(IMU)
         // 参考 serial_parser_two.py: 到达时立即与缓存的 packet1 合并
         } else if (pointArr.length == 146) {
-          const sensorType = pointArr[1]    // 1=HL, 2=HR
+          const orderByte = pointArr[0]       // 包顺序位: 应为 2
+          const sensorType = pointArr[1]      // 1=HL, 2=HR
           const sensorData = pointArr.slice(2, 130)  // 中间 128 字节 = sensor 后半
           const imuRaw = pointArr.slice(130)          // 最后 16 字节 = IMU
 
@@ -3153,16 +4377,46 @@ async function connectPort() {
 
           // 与缓存的 Packet1 合并为完整 256 字节 sensor 数据
           const cached = glovePacket1Cache[sensorType]
+          let fullFrame = false
+
+          // 追踪日志：每个 Packet2 的到达和合并状态
+          if (!global._p2LogCount) global._p2LogCount = 0
+          global._p2LogCount++
+          if (global._p2LogCount <= 20) {
+            console.log('[glove-P2] #%d order=%d type=%d path=%s cached=%s cacheKeys=%s',
+              global._p2LogCount, orderByte, sensorType, path,
+              cached ? 'YES(len=' + cached.data.length + ',age=' + (stamp - cached.stamp) + 'ms)' : 'NO',
+              JSON.stringify(Object.keys(glovePacket1Cache)))
+          }
+
           if (cached) {
             dataItem.arr = [...cached.data, ...sensorData]
             delete glovePacket1Cache[sensorType]
+            fullFrame = true  // 256 字节完整帧
           } else {
-            dataItem.arr = sensorData
+            dataItem.arr = sensorData  // 128 字节不完整帧（Packet1 缓存丢失）
+            console.log('[glove] Packet1缓存丢失, sensorType=%d, 只有%d字节, cacheKeys=%s',
+              sensorType, sensorData.length, JSON.stringify(Object.keys(glovePacket1Cache)))
           }
 
           // 解析并校验四元数
           const rawQuat = bytes4ToInt10(imuRaw)
           dataItem.rotate = validateQuaternion(rawQuat) || rawQuat
+
+          // 写入 gloveLatestData 缓存（接受 128 或 256 字节）
+          // HR 的 Packet1 在硬件层面系统性丢失，几乎永远只有 128 字节
+          // 如果只接受 256 字节，HR 将永远无法清零
+          const gloveType = constantObj.type[sensorType]
+          if (gloveType) {
+            gloveLatestData[gloveType] = {
+              type: gloveType,
+              arr: [...dataItem.arr],
+              rotate: dataItem.rotate,
+              stamp: stamp,
+              HZ: dataItem.HZ,
+              port: path,
+            }
+          }
 
           // 帧率计算
           if (sendDataLength < 30) {
@@ -3182,6 +4436,16 @@ async function connectPort() {
             }
           }
           oldTimeObj[dataItem.type] = stamp
+          // 手套 HZ 打印（每秒最多打印一次）
+          if (dataItem.HZ) {
+            if (!global._gloveHzLogTs) global._gloveHzLogTs = {}
+            const now = Date.now()
+            if (!global._gloveHzLogTs[dataItem.type] || now - global._gloveHzLogTs[dataItem.type] > 1000) {
+              global._gloveHzLogTs[dataItem.type] = now
+              console.log('[glove-HZ] %s: %dms (%d Hz), fullFrame=%s, arrLen=%d',
+                dataItem.type, dataItem.HZ, Math.round(1000 / dataItem.HZ), fullFrame, dataItem.arr ? dataItem.arr.length : 0)
+            }
+          }
           maybeLockSensorHz()
           if (activeSendTypes && activeSendTypes.includes(dataItem.type)) {
             updateSendTimerForActiveTypes()
@@ -3192,10 +4456,24 @@ async function connectPort() {
           if (!dataItem.type) {
             dataItem.type = 'foot'
           }
-          zeroBelowThreshold(pointArr, 8)
-          removeSmallIslands64x64(pointArr, 12)
           // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
           const flippedArr = flipFoot64x64Vertical(pointArr)
+          // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
+          // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
+          let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
+          if (!filterMode) {
+            // 兜底：根据 dataItem.type 推断
+            if (['foot1','foot2','foot3','foot4'].includes(dataItem.type)) {
+              filterMode = 'gait'
+            } else if (dataItem.type === 'foot') {
+              filterMode = 'standing'
+            }
+          }
+          if (filterMode) {
+            applyFootFilter(flippedArr, filterMode, dataItem.type)
+          } else {
+            console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
+          }
           dataItem.arr = flippedArr
           if (dataItem.type === 'foot' && lastFootPointArr.length) {
             dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
@@ -3284,10 +4562,14 @@ async function stopPort() {
     }
   })
 
-  // 娓呴櫎鍙戦€佹暟鎹畾鏃跺櫒
+  // 娓門除鍙戦€佹暟鎹畾鏃跺櫒
   clearInterval(playtimer)
 
-  // 灏唄z娓呴櫎鎺?
+  // 清除手套数据缓存
+  gloveLatestData.HL = null
+  gloveLatestData.HR = null
+
+  // 灰唇z娓門除鎺?
   MaxHZ = undefined
   resetSensorHzCache()
 }
@@ -3424,41 +4706,60 @@ function sendData() {
 }
 
 function ensureMatrixNameColumn(db) {
-  db.all("PRAGMA table_info(matrix)", (err, rows) => {
-    if (err) {
-      console.error('PRAGMA table_info failed:', err)
-      return
-    }
-    const hasName = rows.some((r) => r.name === 'name')
-    if (!hasName) {
-      db.run('ALTER TABLE matrix ADD COLUMN name TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add name failed:', e)
-      })
-    }
-    const hasAssessmentId = rows.some((r) => r.name === 'assessment_id')
-    if (!hasAssessmentId) {
-      db.run('ALTER TABLE matrix ADD COLUMN assessment_id TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add assessment_id failed:', e)
-      })
-    }
-    const hasSampleType = rows.some((r) => r.name === 'sample_type')
-    if (!hasSampleType) {
-      db.run('ALTER TABLE matrix ADD COLUMN sample_type TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add sample_type failed:', e)
-      })
-    }
-    const hasTimestamp = rows.some((r) => r.name === 'timestamp')
-    if (!hasTimestamp) {
-      db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
-        if (e) console.error('ALTER TABLE add timestamp failed:', e)
-      })
-    }
-    const hasSelect = rows.some((r) => r.name === 'select')
-    if (!hasSelect) {
-      db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
-        if (e) console.error('ALTER TABLE add select failed:', e)
-      })
-    }
+  db.serialize(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS matrix (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        timestamp INTEGER,
+        date TEXT,
+        "select" TEXT,
+        name TEXT,
+        assessment_id TEXT,
+        sample_type TEXT
+      )
+    `, (createErr) => {
+      if (createErr) {
+        console.error('CREATE TABLE matrix failed:', createErr)
+      }
+    })
+
+    db.all("PRAGMA table_info(matrix)", (err, rows) => {
+      if (err) {
+        console.error('PRAGMA table_info failed:', err)
+        return
+      }
+      const hasName = rows.some((r) => r.name === 'name')
+      if (!hasName) {
+        db.run('ALTER TABLE matrix ADD COLUMN name TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add name failed:', e)
+        })
+      }
+      const hasAssessmentId = rows.some((r) => r.name === 'assessment_id')
+      if (!hasAssessmentId) {
+        db.run('ALTER TABLE matrix ADD COLUMN assessment_id TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add assessment_id failed:', e)
+        })
+      }
+      const hasSampleType = rows.some((r) => r.name === 'sample_type')
+      if (!hasSampleType) {
+        db.run('ALTER TABLE matrix ADD COLUMN sample_type TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add sample_type failed:', e)
+        })
+      }
+      const hasTimestamp = rows.some((r) => r.name === 'timestamp')
+      if (!hasTimestamp) {
+        db.run('ALTER TABLE matrix ADD COLUMN timestamp INTEGER', (e) => {
+          if (e) console.error('ALTER TABLE add timestamp failed:', e)
+        })
+      }
+      const hasSelect = rows.some((r) => r.name === 'select')
+      if (!hasSelect) {
+        db.run('ALTER TABLE matrix ADD COLUMN "select" TEXT', (e) => {
+          if (e) console.error('ALTER TABLE add select failed:', e)
+        })
+      }
+    })
   })
 }
 
@@ -3470,17 +4771,33 @@ const storageBuffer = []
 const STORAGE_FLUSH_INTERVAL = 200  // 每 200ms 批量写入一次
 let storageFlushTimer = null
 
+// 去重缓存：记录每个设备上次存储的 stamp，避免同一帧数据被重复存储
+const lastStoredStamps = {}
+
 function storageData(data) {
   const timestamp = Date.now()
 
-  // 构建存储数据（去掉 status 字段）
+  // 基于 stamp 去重：只存储有新数据的设备
   const newData = {}
+  let hasNewData = false
   for (const key of Object.keys(data)) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status
+    // 检查 stamp 是否与上次存储的相同（重复帧跳过）
+    if (item.stamp !== undefined && item.stamp !== null && lastStoredStamps[key] === item.stamp) {
+      continue  // 同一帧数据，跳过
+    }
+    // 更新去重缓存
+    if (item.stamp !== undefined && item.stamp !== null) {
+      lastStoredStamps[key] = item.stamp
+    }
     newData[key] = item
+    hasNewData = true
   }
+
+  // 如果所有设备的数据都是重复的，跳过本次存储
+  if (!hasNewData) return
 
   const assessmentId = activeAssessmentId || null
   const sampleType = activeSampleType || null
@@ -3633,4 +4950,3 @@ setInterval(() => {
 //   algorData = await callPy('server', { sensor_data: pointArr })
 //   // console.log('frame_count:' , algorData?.frame_count)
 // }, 2)
-

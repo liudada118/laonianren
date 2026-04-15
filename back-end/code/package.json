@@ -1,15 +1,17 @@
 {
   "name": "jqtools2",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:renderer": "npm --prefix client run build",
+    "build:renderer": "npm --prefix ../../front-end run build",
     "copy:renderer": "node scripts/copy-renderer.js",
-    "build": "npm run build:renderer && npm run copy:renderer && electron-builder -w",
-    "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder -m"
+    "prepare:python-runtime": "node scripts/prepare-python-runtime.js",
+    "inject:release-notes": "node scripts/inject-release-notes.js",
+    "build": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -w && npm run inject:release-notes",
+    "build:mac": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -m && npm run inject:release-notes"
   },
   "author": "",
   "license": "ISC",
@@ -19,6 +21,7 @@
     "crypto-js": "^4.2.0",
     "csv-parser": "^3.2.0",
     "csv-writer": "^1.6.0",
+    "electron-updater": "^6.8.3",
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "serialport": "^13.0.0",
@@ -28,8 +31,63 @@
   },
   "build": {
     "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/sqlite3/**",
+      "node_modules/@mapbox/**",
+      "node_modules/@serialport/**",
+      "node_modules/node-gyp-build/**"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "python/runtime",
+        "to": "python/runtime",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "python/app",
+        "to": "python/app",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/_tmp_*/**"
+        ]
+      },
+      {
+        "from": "python/requirements-electron.txt",
+        "to": "python/requirements-electron.txt"
+      },
+      {
+        "from": "algorithms/python",
+        "to": "algorithms/python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "db/init.db",
+        "to": "db/init.db"
+      },
+      {
+        "from": "serial.txt",
+        "to": "serial.txt"
+      },
+      {
+        "from": "build",
+        "to": "build"
+      }
+    ],
     "win": {
       "icon": "./logo",
+      "forceCodeSigning": false,
       "target": [
         {
           "target": "nsis",
@@ -48,6 +106,11 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     }
   },
   "devDependencies": {
