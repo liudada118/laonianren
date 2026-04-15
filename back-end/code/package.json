@@ -1,6 +1,6 @@
 {
   "name": "jqtools2",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
@@ -8,8 +8,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:renderer": "npm --prefix ../../front-end run build",
     "copy:renderer": "node scripts/copy-renderer.js",
-    "build": "npm run build:renderer && npm run copy:renderer && electron-builder -w",
-    "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder -m"
+    "prepare:python-runtime": "node scripts/prepare-python-runtime.js",
+    "inject:release-notes": "node scripts/inject-release-notes.js",
+    "build": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -w && npm run inject:release-notes",
+    "build:mac": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -m && npm run inject:release-notes"
   },
   "author": "",
   "license": "ISC",
@@ -39,8 +41,8 @@
     "npmRebuild": false,
     "extraResources": [
       {
-        "from": "python/venv",
-        "to": "python/venv",
+        "from": "python/runtime",
+        "to": "python/runtime",
         "filter": [
           "**/*",
           "!**/__pycache__/**",
@@ -55,6 +57,19 @@
           "!**/__pycache__/**",
           "!**/*.pyc",
           "!**/_tmp_*/**"
+        ]
+      },
+      {
+        "from": "python/requirements-electron.txt",
+        "to": "python/requirements-electron.txt"
+      },
+      {
+        "from": "algorithms/python",
+        "to": "algorithms/python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
         ]
       },
       {

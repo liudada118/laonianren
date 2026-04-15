@@ -29,11 +29,7 @@ export default function Login() {
     }
   }, []);
 
-  const handleCheckUpdate = () => {
-    if (window.electronAPI && window.electronAPI.checkForUpdate) {
-      window.electronAPI.checkForUpdate();
-    }
-  };
+
 
   // 启动时从后端读取 serial.txt 缓存
   useEffect(() => {
@@ -279,20 +275,7 @@ export default function Login() {
 
         <div className="flex justify-between items-center mt-5 px-1">
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
-          <div className="flex items-center gap-2">
-            {window.electronAPI && window.electronAPI.checkForUpdate && (
-              <button
-                onClick={handleCheckUpdate}
-                className="text-xs px-2 py-0.5 rounded-md transition-colors duration-150"
-                style={{ color: 'var(--zeiss-blue)', background: 'transparent' }}
-                onMouseEnter={e => e.target.style.background = 'var(--zeiss-blue-light)'}
-                onMouseLeave={e => e.target.style.background = 'transparent'}
-              >
-                检查更新
-              </button>
-            )}
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>v{currentVersion}</span>
-          </div>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>v{currentVersion}</span>
         </div>
       </div>
     </div>

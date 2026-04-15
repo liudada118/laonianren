@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 
 /**
  * 应用更新通知组件
- * 通过 Electron preload 暴露的 API 与主进程通信
- * 实现检查更新、下载更新、安装更新的完整流程
+ * 右下角悬浮更新按钮，检测到新版本时弹窗显示 releaseNotes（来自服务器 latest.yml）
  */
 export default function UpdateNotification() {
   const [updateState, setUpdateState] = useState({
@@ -12,49 +11,44 @@ export default function UpdateNotification() {
     version: '',
     percent: 0,
     releaseNotes: '',
+    releaseDate: '',
   })
   const [showDialog, setShowDialog] = useState(false)
   const [appVersion, setAppVersion] = useState('')
-  const [dismissed, setDismissed] = useState(false)
+  const [hasNewVersion, setHasNewVersion] = useState(false)
 
-  // 检查是否在 Electron 环境中
   const isElectron = typeof window !== 'undefined' && window.electronAPI && window.electronAPI.onUpdateStatus
 
   useEffect(() => {
     if (!isElectron) return
 
-    // 获取当前版本
     window.electronAPI.getAppVersion().then(info => {
-      if (info && info.version) {
-        setAppVersion(info.version)
-      }
+      if (info && info.version) setAppVersion(info.version)
     }).catch(() => {})
 
-    // 监听更新状态
     const unsubscribe = window.electronAPI.onUpdateStatus((data) => {
       setUpdateState(prev => ({ ...prev, ...data }))
 
-      // 发现新版本时自动弹出提示
       if (data.status === 'available') {
+        setHasNewVersion(true)
         setShowDialog(true)
-        setDismissed(false)
       }
 
-      // 下载完成时弹出安装提示
       if (data.status === 'downloaded') {
         setShowDialog(true)
       }
+
+      if (data.status === 'not-available') {
+        setHasNewVersion(false)
+      }
     })
 
-    return () => {
-      if (unsubscribe) unsubscribe()
-    }
+    return () => { if (unsubscribe) unsubscribe() }
   }, [isElectron])
 
-  // 手动检查更新
   const handleCheckUpdate = useCallback(async () => {
     if (!isElectron) return
-    setUpdateState({ status: 'checking', message: '正在检查更新...', version: '', percent: 0, releaseNotes: '' })
+    setUpdateState(prev => ({ ...prev, status: 'checking', message: '正在检查更新...' }))
     setShowDialog(true)
     try {
       await window.electronAPI.checkForUpdate()
@@ -67,7 +61,6 @@ export default function UpdateNotification() {
     }
   }, [isElectron])
 
-  // 开始下载
   const handleDownload = useCallback(async () => {
     if (!isElectron) return
     try {
@@ -81,7 +74,6 @@ export default function UpdateNotification() {
     }
   }, [isElectron])
 
-  // 安装并重启
   const handleInstall = useCallback(async () => {
     if (!isElectron) return
     try {
@@ -91,57 +83,85 @@ export default function UpdateNotification() {
     }
   }, [isElectron])
 
-  // 关闭弹窗
   const handleDismiss = useCallback(() => {
     setShowDialog(false)
-    if (updateState.status === 'available') {
-      setDismissed(true)
-    }
-  }, [updateState.status])
+  }, [])
 
-  // 非 Electron 环境不渲染
   if (!isElectron) return null
 
-  // 状态图标（统一使用 info 图标）
-  const infoSvg = (
-    <svg className="w-5 h-5" style={{ color: 'var(--zeiss-blue)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  )
+  // 状态图标
   const spinnerSvg = (
     <svg className="w-5 h-5 animate-spin" style={{ color: 'var(--zeiss-blue)' }} fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   )
-  const statusIcons = {
-    checking: spinnerSvg,
-    available: infoSvg,
-    downloading: spinnerSvg,
-    downloaded: infoSvg,
-    error: infoSvg,
-    'not-available': infoSvg,
+  const infoSvg = (
+    <svg className="w-5 h-5" style={{ color: 'var(--zeiss-blue)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+  const successSvg = (
+    <svg className="w-5 h-5" style={{ color: 'var(--success, #10B981)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+
+  const statusConfig = {
+    idle:           { icon: infoSvg, title: '软件更新' },
+    checking:       { icon: spinnerSvg, title: '检查更新' },
+    available:      { icon: infoSvg, title: '发现新版本' },
+    downloading:    { icon: spinnerSvg, title: '正在下载' },
+    downloaded:     { icon: successSvg, title: '下载完成' },
+    error:          { icon: infoSvg, title: '更新失败' },
+    'not-available': { icon: successSvg, title: '已是最新' },
   }
+
+  const cfg = statusConfig[updateState.status] || statusConfig.idle
 
   return (
     <>
-      {/* 顶部小提示条 - 有新版本且被关闭时显示 */}
-      {dismissed && updateState.status === 'available' && (
-        <div
-          className="fixed top-0 left-0 right-0 z-[200] flex items-center justify-center gap-2 py-1.5 cursor-pointer transition-all duration-300"
-          style={{
-            background: 'linear-gradient(90deg, var(--zeiss-blue) 0%, #0077EE 100%)',
-            color: 'white',
-            fontSize: 13,
-          }}
-          onClick={() => { setShowDialog(true); setDismissed(false) }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>发现新版本 v{updateState.version}，点击查看</span>
-        </div>
-      )}
+      {/* 右下角更新按钮 */}
+      <button
+        onClick={handleCheckUpdate}
+        className="fixed z-[100] flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200 shadow-lg"
+        style={{
+          right: 20,
+          bottom: 20,
+          background: hasNewVersion
+            ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)'
+            : 'linear-gradient(135deg, var(--zeiss-blue) 0%, #0077EE 100%)',
+          color: 'white',
+          boxShadow: hasNewVersion
+            ? '0 4px 14px rgba(245,158,11,0.35)'
+            : '0 4px 14px rgba(0,102,204,0.35)',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.transform = 'scale(1.05)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.transform = 'scale(1)'
+        }}
+        title={hasNewVersion ? `发现新版本 v${updateState.version}` : '检查更新'}
+      >
+        {hasNewVersion ? (
+          <>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span>新版本 v{updateState.version}</span>
+            {/* 红点提示 */}
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+          </>
+        ) : (
+          <>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>v{appVersion || '...'}</span>
+          </>
+        )}
+      </button>
 
       {/* 更新弹窗 */}
       {showDialog && (
@@ -155,7 +175,7 @@ export default function UpdateNotification() {
 
           {/* 弹窗内容 */}
           <div
-            className="relative z-10 w-[420px] max-w-[90vw] rounded-2xl p-7 animate-scaleIn"
+            className="relative z-10 w-[460px] max-w-[90vw] rounded-2xl p-7 animate-scaleIn"
             style={{
               background: 'var(--bg-secondary)',
               boxShadow: 'var(--shadow-xl)',
@@ -164,15 +184,9 @@ export default function UpdateNotification() {
             {/* 标题栏 */}
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2.5">
-                {statusIcons[updateState.status] || statusIcons.checking}
+                {cfg.icon}
                 <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {updateState.status === 'checking' && '检查更新'}
-                  {updateState.status === 'available' && '发现新版本'}
-                  {updateState.status === 'downloading' && '正在下载'}
-                  {updateState.status === 'downloaded' && '下载完成'}
-                  {updateState.status === 'error' && '更新失败'}
-                  {updateState.status === 'not-available' && '已是最新'}
-                  {updateState.status === 'idle' && '软件更新'}
+                  {cfg.title}
                 </h3>
               </div>
               {updateState.status !== 'downloading' && (
@@ -180,8 +194,8 @@ export default function UpdateNotification() {
                   onClick={handleDismiss}
                   className="p-1 rounded-lg transition-colors duration-150"
                   style={{ color: 'var(--text-muted)' }}
-                  onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -229,27 +243,36 @@ export default function UpdateNotification() {
               </div>
             )}
 
-            {/* 更新说明 */}
+            {/* 更新说明 - 来自服务器 latest.yml 的 releaseNotes */}
             {updateState.releaseNotes && (updateState.status === 'available' || updateState.status === 'downloaded') && (
               <div
-                className="mb-5 p-3 rounded-xl text-sm max-h-32 overflow-y-auto"
+                className="mb-5 p-4 rounded-xl text-sm max-h-48 overflow-y-auto"
                 style={{
                   background: 'var(--bg-primary)',
                   color: 'var(--text-secondary)',
                   border: '1px solid var(--border-light)',
                 }}
               >
-                <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>更新说明</p>
-                <div dangerouslySetInnerHTML={{ __html: updateState.releaseNotes }} />
+                <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                  更新说明
+                </p>
+                {typeof updateState.releaseNotes === 'string' ? (
+                  <div
+                    className="release-notes-content space-y-1"
+                    dangerouslySetInnerHTML={{ __html: formatReleaseNotes(updateState.releaseNotes) }}
+                  />
+                ) : (
+                  <div className="release-notes-content space-y-1">
+                    {updateState.releaseNotes}
+                  </div>
+                )}
               </div>
             )}
 
             {/* 操作按钮 */}
             <div className="flex gap-3 justify-end">
-              {/* 检查中 - 无按钮 */}
               {updateState.status === 'checking' && null}
 
-              {/* 发现新版本 - 下载 / 稍后 */}
               {updateState.status === 'available' && (
                 <>
                   <button
@@ -277,14 +300,12 @@ export default function UpdateNotification() {
                 </>
               )}
 
-              {/* 下载中 - 无按钮（不允许关闭） */}
               {updateState.status === 'downloading' && (
                 <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
                   请勿关闭应用...
                 </span>
               )}
 
-              {/* 下载完成 - 安装 / 稍后 */}
               {updateState.status === 'downloaded' && (
                 <>
                   <button
@@ -302,7 +323,7 @@ export default function UpdateNotification() {
                     onClick={handleInstall}
                     className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150"
                     style={{
-                      background: 'var(--success)',
+                      background: 'var(--success, #10B981)',
                       color: 'white',
                       boxShadow: '0 4px 14px rgba(16,185,129,0.25)',
                     }}
@@ -312,7 +333,6 @@ export default function UpdateNotification() {
                 </>
               )}
 
-              {/* 错误 - 重试 */}
               {updateState.status === 'error' && (
                 <>
                   <button
@@ -340,7 +360,6 @@ export default function UpdateNotification() {
                 </>
               )}
 
-              {/* 已是最新 / 空闲 - 关闭 */}
               {(updateState.status === 'not-available' || updateState.status === 'idle') && (
                 <button
                   onClick={handleDismiss}
@@ -360,6 +379,19 @@ export default function UpdateNotification() {
       )}
     </>
   )
+}
+
+/**
+ * 将 Markdown 格式的 releaseNotes 转为简单 HTML
+ */
+function formatReleaseNotes(text) {
+  if (!text) return ''
+  return text
+    .replace(/^### (.+)$/gm, '<p style="font-weight:600;margin-top:8px;margin-bottom:4px;">$1</p>')
+    .replace(/^## (.+)$/gm, '<p style="font-weight:700;font-size:14px;margin-top:8px;margin-bottom:4px;">$1</p>')
+    .replace(/^- (.+)$/gm, '<div style="display:flex;align-items:flex-start;gap:6px;"><span style="margin-top:6px;width:4px;height:4px;border-radius:50%;background:currentColor;flex-shrink:0;"></span><span>$1</span></div>')
+    .replace(/\n{2,}/g, '<div style="height:8px;"></div>')
+    .replace(/\n/g, '')
 }
 
 /**

@@ -108,6 +108,19 @@ function dedupeSerialPaths(paths) {
   return Array.from(new Set((paths || []).filter(Boolean)))
 }
 
+function getSerialPathPriority(serialPath) {
+  if (!serialPath) return 0
+  const normalized = path.resolve(serialPath)
+  const priorityPaths = [
+    path.join(packagedAppRootDir, 'serial.txt'),
+    packagedResourcesSerialPath,
+    userSerialPath,
+    bundledSerialPath,
+  ]
+  const index = priorityPaths.findIndex((candidate) => candidate && path.resolve(candidate) === normalized)
+  return index === -1 ? 0 : priorityPaths.length - index
+}
+
 ensureDirSync(dbPath)
 ensureDirSync(csvPath)
 ensureDirSync(pdfPath)
@@ -693,11 +706,8 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 // serial.txt cache
 function resolveSerialPath(preferExisting = true) {
   if (preferExisting) {
-    for (const candidate of dedupeSerialPaths(serialPathCandidates)) {
-      try {
-        if (fs.existsSync(candidate)) return candidate
-      } catch {}
-    }
+    const primarySource = getPrimarySerialCacheSource(getExistingSerialCacheSources())
+    if (primarySource?.serialPath) return primarySource.serialPath
   }
   return serialPathCandidates[0]
 }
@@ -735,13 +745,101 @@ function readSerialCacheFile(serialPath) {
   }
 }
 
+function getSerialSourceTimestamp(source) {
+  const updatedAtMs =
+    source?.data?.updatedAt && Number.isFinite(Date.parse(source.data.updatedAt))
+      ? Date.parse(source.data.updatedAt)
+      : 0
+  const mtimeMs = Number.isFinite(source?.mtimeMs) ? source.mtimeMs : 0
+  return Math.max(updatedAtMs, mtimeMs, 0)
+}
+
+function getComparableSerialCacheKey(data) {
+  if (!data || typeof data !== 'object') return ''
+  return JSON.stringify({
+    key: typeof data.key === 'string' ? data.key.trim() : '',
+    orgName: typeof data.orgName === 'string' ? data.orgName.trim() : '',
+    llmApiKey: typeof data.llmApiKey === 'string' ? data.llmApiKey.trim() : '',
+    serialMap: getSerialTypeMapText(data) || '',
+  })
+}
+
+function compareSerialSources(a, b) {
+  const timeDiff = getSerialSourceTimestamp(b) - getSerialSourceTimestamp(a)
+  if (timeDiff !== 0) return timeDiff
+
+  const priorityDiff = (b?.priority || 0) - (a?.priority || 0)
+  if (priorityDiff !== 0) return priorityDiff
+
+  const orderA = serialPathCandidates.indexOf(a?.serialPath)
+  const orderB = serialPathCandidates.indexOf(b?.serialPath)
+  return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB)
+}
+
+function compareSerialSourceRepresentation(a, b) {
+  const priorityDiff = (b?.priority || 0) - (a?.priority || 0)
+  if (priorityDiff !== 0) return priorityDiff
+
+  const timeDiff = getSerialSourceTimestamp(b) - getSerialSourceTimestamp(a)
+  if (timeDiff !== 0) return timeDiff
+
+  const orderA = serialPathCandidates.indexOf(a?.serialPath)
+  const orderB = serialPathCandidates.indexOf(b?.serialPath)
+  return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB)
+}
+
 function getExistingSerialCacheSources() {
   return dedupeSerialPaths(serialPathCandidates)
     .map((serialPath) => ({
       serialPath,
       data: readSerialCacheFile(serialPath),
+      mtimeMs: (() => {
+        try {
+          return fs.statSync(serialPath).mtimeMs || 0
+        } catch {
+          return 0
+        }
+      })(),
+      priority: getSerialPathPriority(serialPath),
     }))
     .filter((item) => item.data && typeof item.data === 'object')
+}
+
+function getPrimarySerialCacheSource(sources) {
+  if (!Array.isArray(sources) || !sources.length) return null
+
+  const groupedSources = new Map()
+  for (const source of sources) {
+    const groupKey = getComparableSerialCacheKey(source.data) || `__path__:${source.serialPath}`
+    const existing = groupedSources.get(groupKey)
+    if (!existing) {
+      groupedSources.set(groupKey, {
+        representative: source,
+        freshestTimestamp: getSerialSourceTimestamp(source),
+      })
+      continue
+    }
+
+    existing.freshestTimestamp = Math.max(existing.freshestTimestamp, getSerialSourceTimestamp(source))
+    if (compareSerialSourceRepresentation(source, existing.representative) < 0) {
+      existing.representative = source
+    }
+  }
+
+  return Array.from(groupedSources.values())
+    .sort((a, b) => {
+      const timeDiff = b.freshestTimestamp - a.freshestTimestamp
+      if (timeDiff !== 0) return timeDiff
+      return compareSerialSourceRepresentation(a.representative, b.representative)
+    })
+    .map((item) => item.representative)[0] || null
+}
+
+function orderSerialCacheSources(sources) {
+  if (!Array.isArray(sources) || !sources.length) return []
+  const primary = getPrimarySerialCacheSource(sources)
+  const rest = sources.filter((source) => source !== primary).sort(compareSerialSources)
+  return primary ? [primary, ...rest] : rest
 }
 
 function mergeSerialCacheData(sources) {
@@ -749,7 +847,7 @@ function mergeSerialCacheData(sources) {
 
   const merged = {}
 
-  for (const source of sources) {
+  for (const source of orderSerialCacheSources(sources)) {
     const data = source?.data
     if (!data || typeof data !== 'object') continue
 

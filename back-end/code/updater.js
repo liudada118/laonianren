@@ -11,7 +11,7 @@ const http = require('http')
 const https = require('https')
 
 // 更新服务器地址
-const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluate'
+const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/shroom1'
 const UPDATE_INFO_FILE = process.platform === 'darwin' ? 'latest-mac.yml' : 'latest.yml'
 
 // 更新检查间隔（毫秒）- 默认每30分钟检查一次

@@ -1,12 +1,19 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-14 19:30
+**最后更新**: 2026-04-15 10:30
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-04-15 10:30 | main | 新增功能 | 完善版本管理和自动更新流程。新增 `release-notes/` 目录结构（windows/mac 分平台存放版本更新说明）；新增 `inject-release-notes.js` 打包后自动将 release-notes 注入 `latest.yml` 的 `releaseNotes` 字段；更新服务器地址改为 `http://sensor.bodyta.com/shroom1`；前端新增 `VersionHistory.jsx`（紫色历史按钮 + 弹窗展示硬编码版本记录）；`UpdateNotification.jsx` 改造为右下角更新按钮 + 弹窗显示服务器 `releaseNotes`；Login.jsx 去掉检查更新按钮。修改文件：`back-end/code/updater.js`、`back-end/code/package.json`、`back-end/code/scripts/inject-release-notes.js`、`back-end/code/release-notes/`、`front-end/src/components/ui/UpdateNotification.jsx`、`front-end/src/components/ui/VersionHistory.jsx`、`front-end/src/App.jsx`、`front-end/src/pages/Login.jsx`。 |
+| 2026-04-14 | main | 配置变更 | 调整 Windows 打包链路为“完整 Python runtime 随包携带”。构建前新增 `prepare-python-runtime.js`，从构建机基础 Python 复制标准库、DLL 与运行时文件到 `back-end/code/python/runtime`，再覆盖项目 `venv` 的 `site-packages`，生成可移植的 `python/runtime/python.exe`；`electron-builder` 现改为携带 `python/runtime`，而不再直接打包 `venv`。修改文件：`back-end/code/scripts/prepare-python-runtime.js`、`back-end/code/package.json`、`back-end/code/.gitignore`。 |
+| 2026-04-14 | main | 配置变更 | 调整打包版 Python 调用路径。主进程 AI 服务与报告算法桥接在打包模式下统一从 `resources/python/runtime` 启动解释器，并显式注入 `PYTHONHOME`/`PYTHONNOUSERSITE`；同时将 `algorithms/python/bridge.py` 作为 `extraResources` 真实文件打入安装包，避免 `app.asar` 内脚本路径无法被外部 Python 进程直接访问。修改文件：`back-end/code/index.js`、`back-end/code/algorithms/python/pythonBridge.js`、`back-end/code/package.json`。 |
+| 2026-04-14 | main | 配置变更 | 收紧打包版 Python 运行时来源。Electron 安装包运行时现在只允许使用 `resources/python/venv` 中随包携带的解释器启动 AI 服务，不再回退到用户机器上的 `python` / `py` 命令；开发环境仍保留本地回退，便于未打包调试。修改文件：`back-end/code/index.js`。 |
+| 2026-04-14 | main | 修复缺陷 | 修复打包版 `serial.txt` 主读取路径错误优先落到 `AppData\\Roaming\\jqtools2\\serial.txt` 的问题。后端现在不再简单采用“第一个存在的文件”，而是对多个 `serial.txt` 候选按内容去重、按更新时间与路径优先级选主源；当安装目录、`resources` 与 `userData` 中存在相同内容时，会优先使用安装目录侧文件，避免自动同步出的 `userData` 副本抢占主路径。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-14 | main | 配置变更 | 修复 Windows 环境下 `pip install -r back-end/code/python/requirements-electron.txt` 读取依赖文件时报 `UnicodeDecodeError: 'gbk' codec can't decode byte` 的问题。根因是 `requirements-electron.txt` 含 UTF-8 中文注释而本地 `pip` 按 GBK 解码；现已将该文件改为 ASCII 注释，并保持 Electron 运行所需的 `fastapi`、`python-multipart` 等依赖可正常安装。 |
+| 2026-04-14 | main | 修复缺陷 | 修复本地 Electron 启动时前端反复请求 `http://localhost:5173/` 导致 `ERR_CONNECTION_REFUSED` 的问题。主进程在未打包模式下若存在 `renderer-build/index.html`，现在默认直接加载本地静态构建，不再强依赖 Vite dev server；若显式设置 `FORCE_VITE_DEV_SERVER=1` 才继续走热更新链路，而当 Vite 不可用时也会自动回退到静态页。修改文件：`back-end/code/index.js`、`back-end/code/renderer-build/*`。 |
 | 2026-04-14 19:30 | main | 重构 | 简化 MAC 映射格式为 `MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4`（逗号分隔，无引号）。后端 `parseSerialTypeMap` 改为新格式优先解析，兼容旧 JSON 和 `serialMap` 格式；`getSerialTypeMapText` 优先从 `key` 字段读取映射；`writeSerialCache` 不再单独写 `serialMap` 字段；`serial.txt` 去掉 `serialMap` 字段，`key` 字段直接存储新格式。前端 Login.jsx 将「系统密钥」改为「设备映射」，placeholder 改为格式示例。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`、`back-end/code/serial.txt`。 |
 | 2026-04-14 17:21 | main | 修复缺陷 | 修复设置页"保存并返回"后 `serial.txt` 未同步更新的问题。后端现在会合并读取多个 `serial.txt` 来源，避免旧版把 MAC 映射写在 `key` 字段时污染登录密钥；保存时会把同一份 JSON 同步写入所有可写的运行时 `serial.txt` 候选路径，并在响应中返回 `writtenPaths`/`failedPaths` 便于排查。前端设置页同时改为校验 `/serialCache` 返回结果，保存失败时停留当前页并显示错误提示。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/Login.jsx`。 |
 | 2026-04-14 17:10 | main | 修复缺陷 | 修复 `serial.txt` 同时承载登录缓存与脚垫 MAC 映射时的覆盖问题。后端现在会在保存登录配置时保留已有的 `serialMap`/旧版 `key` 映射，并通过 `/serialCache` 额外返回解析后的 `serialMap`、`serialEntries`；同时 `macInfo` 推送增加 `typeSource`、`matchStrategy`、`serialPath`、`serialKey`，用于区分型号来自本地 `serial.txt` 还是服务器兜底。修改文件：`back-end/code/server/serialServer.js`。 |
@@ -201,6 +208,9 @@
 - **`serial.txt` 读取顺序**：开发模式直接读取 `back-end/code/serial.txt`；打包模式优先读取用户目录 `AppData/Roaming/肌少症评估系统/serial.txt`，其次读取安装目录/`resources` 下的 `serial.txt`，最后回退到包内 `app.asar` 自带的 `serial.txt`，首次启动时会自动把包内文件落到用户目录，便于后续修改
 - **`serial.txt` 字段兼容**：后端优先从 `serialMap`/`serialMappings`/`deviceMap` 字段读取 MAC→型号映射；若老版本文件仍把映射写在 `key` 字段，也会继续兼容。登录页保存配置时只更新登录缓存字段，保留已有映射，避免系统设置页保存后把脚垫分配表覆盖掉
 - **`serial.txt` 多来源合并与同步写回**：读取缓存时会按候选路径顺序合并多个现存 `serial.txt`，优先取登录字段，同时从后续文件补齐 `serialMap`；保存设置页配置时会把结果同步写入所有可写候选路径，避免用户目录、安装目录、`resources` 目录里的 `serial.txt` 出现新旧不一致
+- **本地前端加载策略**：未打包模式下，如果仓库里已有 `back-end/code/renderer-build/index.html`，Electron 主进程默认直接加载本地静态构建，避免因为 `localhost:5173` 未启动而白屏或在控制台持续刷 `ERR_CONNECTION_REFUSED`；只有显式设置环境变量 `FORCE_VITE_DEV_SERVER=1` 时才优先连接 Vite 开发服务器
+- **Python AI 服务依赖要求**：AI FastAPI 服务除 `fastapi`、`uvicorn`、`numpy` 等基础依赖外，还要求 `python-multipart` 才能注册 `UploadFile`/`Form` 路由；本地 Electron 启动脚本现已统一以 `back-end/code/python/requirements-electron.txt` 为准自举 venv，避免只安装算法子集依赖导致 8765 端口服务启动即崩溃
+- **静态前端下的 AI API 回退**：当桌面端加载本地 `renderer-build` 时，`/pyapi/*` 可能被静态服务器回退成 `index.html`；前端 `gripPythonApi` 现会把这类 HTML/404 视为无效代理并自动回退到直连 `http://127.0.0.1:8765`
 - **MAC 型号来源标记**：WebSocket 推送的 `macInfo[path]` 现在除 `uniqueId`、`version`、`type` 外，还会附带 `typeSource`（如 `serial.txt`、`server`、`unmatched`）、`matchStrategy`、`serialPath`、`serialKey`，便于前端或现场排查页面明确展示“当前型号到底来自哪一份映射”
 - **脚垫数据预处理流程**：对每个 64×64 脚垫帧依次执行 `zeroBelowThreshold(8)` → `removeSmallIslands64x64(12)` → `flipFoot64x64Vertical`（行顺序反转，实现左右对调），确保前端显示方向与实际脚垫物理方向一致。
 - 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
@@ -326,6 +336,11 @@
 | 2026-04-14 16:22 | main | 脚垫 MAC 匹配容错增强 | 扩展 `serialServer.js` 的脚垫 MAC/Unique ID 归一化规则，兼容 `Unique ID=`、`MAC Address:`、`0x...` 等格式，并在精确匹配失败时执行唯一候选的包含式匹配；同时在未命中时记录 `serial.txt` 实际路径和归一化候选 key，便于现场排查。 |
 | 2026-04-14 17:10 | main | `serial.txt` 配置与映射分离兼容 | 修复 `serial.txt` 登录缓存覆盖脚垫 MAC 映射的问题；保存登录配置时保留旧版 `key`/新版 `serialMap` 中的 MAC→型号表，并通过 `/serialCache` 与 `macInfo` 暴露映射条目和来源元数据，便于系统设置页与现场排查统一显示同一份映射真相。 |
 | 2026-04-14 17:21 | main | 设置页 `serial.txt` 同步修复 | 修复设置页保存配置后只更新单一路径、导致用户看到的安装目录 `serial.txt` 未同步变化的问题；现在读取时会合并多个候选 `serial.txt`，保存时同步写回所有可写运行时路径，前端也会在保存失败时阻止返回并提示错误。 |
+| 2026-04-14 | main | 本地启动静态前端回退 | 修复未打包模式下 Electron 前端强依赖 `localhost:5173` 的问题；现在如果 `renderer-build` 存在则默认直接加载静态构建，只有设置 `FORCE_VITE_DEV_SERVER=1` 才使用 Vite 开发服务器，且 Vite 不可达时会自动回退。 |
+| 2026-04-14 | main | Python AI 服务启动修复 | 修复 AI 分析提示 “Python AI service is not running on 127.0.0.1:8765” 的问题；根因是本地 venv 自举使用了算法子目录 `requirements.txt`，缺少 `python-multipart`，导致 FastAPI 在注册 `UploadFile`/`Form` 路由时直接崩溃。现已将 Electron 启动脚本切换到 `requirements-electron.txt`，算法 requirements 也补齐该依赖，同时前端在静态桌面模式下会把失效的 `/pyapi` 代理自动回退到直连 `127.0.0.1:8765`。 |
+| 2026-04-14 | main | Windows pip GBK 兼容修复 | 统一 Electron 启动链路使用 `back-end/code/python/requirements-electron.txt` 作为依赖入口，并将其改为 ASCII 注释，避免 Windows 中文系统中 `pip` 读取 requirements 文件时因默认 GBK 解码而失败；修复后本地 venv 已可正常安装依赖并拉起 8765 AI 服务。 |
+| 2026-04-14 | main | 打包版 `serial.txt` 主路径选择修复 | 修复打包运行时 `serial.txt` 会优先命中 `userData` 目录旧副本的问题；新增按内容去重、按更新时间和路径优先级选主源的规则，相同内容下优先使用安装目录或 `resources` 中的文件，同时保留设置页对多路径同步写回的兼容性。 |
+| 2026-04-14 | main | 打包版脱离系统 Python | 调整 AI 服务 Python 解释器解析策略：安装包运行时只从 `resources/python/venv` 查找随包解释器，不再回退系统 `python`/`py`；若包内运行时损坏，错误信息也改为提示安装包资源缺失，而不是要求终端用户自行安装 Python。 |
 
 ## 6. 未来维护与更新
 

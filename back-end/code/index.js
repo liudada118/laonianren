@@ -22,9 +22,14 @@ let viteProcess = null
 let apiChild = null  // serialServer 子进程引用
 let pythonAiChild = null
 const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
+const preferViteDevServer = process.env.FORCE_VITE_DEV_SERVER === '1'
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
+
+function hasStaticRendererBuild() {
+  return fs.existsSync(path.join(prodWebRoot, 'index.html'))
+}
 
 async function checkDevServerOnce(url, timeoutMs = 1000) {
   return new Promise((resolve) => {
@@ -393,7 +398,23 @@ const createWindow = async () => {
     win.loadURL(`http://${hostname}:${port}`)
   }
 
+  function loadStaticRenderer(reason) {
+    const staticWebRoot = prodWebRoot
+    const staticIndexPath = path.join(staticWebRoot, 'index.html')
+    if (!fs.existsSync(staticIndexPath)) {
+      console.log(`[window] static renderer unavailable (${reason}): ${staticIndexPath}`)
+      return false
+    }
+    console.log(`[window] loading static renderer (${reason}): ${staticWebRoot}`)
+    openWeb({ hostname, port, fn, webRoot: staticWebRoot })
+    return true
+  }
+
   if (!isPackaged) {
+    if (!preferViteDevServer && hasStaticRendererBuild()) {
+      loadStaticRenderer('dev fallback default')
+      return
+    }
     console.log('[window] checking dev server first:', devServerUrl)
     let ok = await waitForDevServer(devServerUrl, 3000)
     if (!ok) {
@@ -404,6 +425,9 @@ const createWindow = async () => {
     }
     console.log('[window] waitForDevServer result:', ok, 'url:', devServerUrl)
     if (!ok) {
+      if (loadStaticRenderer('vite unavailable')) {
+        return
+      }
       const safeUrl = devServerUrl
       const msg = encodeURIComponent(
         `Vite dev server not reachable: ${safeUrl}\n\n` +
@@ -438,16 +462,35 @@ const createWindow = async () => {
 
 
 
+function packagedPythonRuntimeDir() {
+  return path.join(process.resourcesPath, 'python', 'runtime')
+}
+
+function buildPythonRuntimeEnv(extraEnv = {}) {
+  const env = {
+    ...process.env,
+    ...extraEnv,
+  }
+  if (app.isPackaged) {
+    const runtimeDir = packagedPythonRuntimeDir()
+    if (fs.existsSync(runtimeDir)) {
+      env.PYTHONHOME = runtimeDir
+      env.PYTHONNOUSERSITE = '1'
+    }
+  }
+  return env
+}
+
 function pyBin() {
   const isDev = !app.isPackaged
   if (process.platform === 'win32') {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-      : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe')
+      : path.join(process.resourcesPath, 'python', 'runtime', 'python.exe')
   } else {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-      : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python')
+      : path.join(process.resourcesPath, 'python', 'runtime', 'bin', 'python')
   }
 }
 function apiPy() {
@@ -459,24 +502,28 @@ function apiPy() {
 
 function pyAiBin() {
   const isDev = !app.isPackaged
-  const candidates = process.platform === 'win32'
+  const bundledCandidates = process.platform === 'win32'
     ? [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-          : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe'),
-        'python',
-        'py'
+          : path.join(process.resourcesPath, 'python', 'runtime', 'python.exe'),
       ]
     : [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python'),
+          : path.join(process.resourcesPath, 'python', 'runtime', 'bin', 'python'),
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python3')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python3'),
-        'python3',
-        'python'
+          : path.join(process.resourcesPath, 'python', 'runtime', 'bin', 'python3'),
       ]
+
+  const fallbackCandidates = process.platform === 'win32'
+    ? ['python', 'py']
+    : ['python3', 'python']
+
+  const candidates = isDev
+    ? [...bundledCandidates, ...fallbackCandidates]
+    : bundledCandidates
 
   return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
 }
@@ -503,6 +550,7 @@ function checkPythonAiDeps(pythonBin) {
   const probeCode = [
     'import fastapi',
     'import uvicorn',
+    'import multipart',
     'import numpy',
     'import pydantic',
     'import matplotlib',
@@ -518,6 +566,7 @@ function checkPythonAiDeps(pythonBin) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       encoding: 'utf8',
+      env: buildPythonRuntimeEnv(),
     })
 
     if (result.status === 0) {
@@ -546,7 +595,9 @@ async function startPythonAiChild() {
   const scriptPath = aiApiPy()
 
   if (!pythonBin) {
-    throw new Error('Python runtime not found for AI service')
+    throw new Error(app.isPackaged
+      ? 'Bundled Python runtime not found for AI service'
+      : 'Python runtime not found for AI service')
   }
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`AI api server not found: ${scriptPath}`)
@@ -555,9 +606,11 @@ async function startPythonAiChild() {
   const depsCheck = checkPythonAiDeps(pythonBin)
   if (!depsCheck.ok) {
     const requirementsPath = aiRequirementsPath()
-    const installHint = fs.existsSync(requirementsPath)
-      ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
-      : 'Install the Python AI dependencies before starting the packaged app'
+    const installHint = app.isPackaged
+      ? `Bundled Python runtime is incomplete or damaged: ${requirementsPath}`
+      : fs.existsSync(requirementsPath)
+        ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
+        : 'Install the Python AI dependencies before starting the packaged app'
     throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
   }
 
@@ -567,11 +620,10 @@ async function startPythonAiChild() {
   const child = spawn(pythonBin, [scriptPath], {
     cwd: path.dirname(scriptPath),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
+    env: buildPythonRuntimeEnv({
       PYTHONUNBUFFERED: '1',
       PYTHON_API_PORT: String(pythonAiPort)
-    },
+    }),
     shell: false,
     windowsHide: true
   })
