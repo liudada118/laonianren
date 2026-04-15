@@ -5,10 +5,12 @@ import { fetchLlmConfig } from '../lib/gripPythonApi';
 import { backendBridge } from '../lib/BackendBridge';
 
 export default function Login() {
-  const [secretKey, setSecretKey] = useState('');
+  const [deviceMapping, setDeviceMapping] = useState('');
   const [institution, setInstitution] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { login } = useAssessment();
   const navigate = useNavigate();
   const location = useLocation();
@@ -27,11 +29,7 @@ export default function Login() {
     }
   }, []);
 
-  const handleCheckUpdate = () => {
-    if (window.electronAPI && window.electronAPI.checkForUpdate) {
-      window.electronAPI.checkForUpdate();
-    }
-  };
+
 
   // 启动时从后端读取 serial.txt 缓存
   useEffect(() => {
@@ -59,7 +57,7 @@ export default function Login() {
           const cachedOrg = cached.orgName || '';
           const cachedLlm = cached.llmApiKey || serverApiKey || '';
 
-          setSecretKey(cachedKey);
+          setDeviceMapping(cachedKey);
           setInstitution(cachedOrg);
           setLlmApiKey(cachedLlm);
 
@@ -90,25 +88,33 @@ export default function Login() {
     return () => { cancelled = true; };
   }, [login, navigate, editMode]);
 
-  const isValid = secretKey.trim().length > 0;
+  const isValid = deviceMapping.trim().length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isValid) return;
+    if (!isValid || submitting) return;
 
-    const trimmedKey = secretKey.trim();
+    const trimmedKey = deviceMapping.trim();
     const trimmedOrg = institution.trim();
     const trimmedLlm = llmApiKey.trim();
+    setSubmitError('');
+    setSubmitting(true);
 
     // 保存到 serial.txt
     try {
-      await fetch(`${backendBridge.httpUrl}/serialCache`, {
+      const response = await fetch(`${backendBridge.httpUrl}/serialCache`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: trimmedKey, orgName: trimmedOrg, llmApiKey: trimmedLlm }),
       });
-    } catch {
-      // 保存失败不阻塞登录
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result || result.code !== 0) {
+        throw new Error(result?.message || '保存 serial.txt 失败');
+      }
+    } catch (err) {
+      setSubmitError(err?.message || '保存 serial.txt 失败，请检查文件权限后重试');
+      setSubmitting(false);
+      return;
     }
 
     login(trimmedKey, trimmedOrg, trimmedLlm);
@@ -174,13 +180,13 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                系统密钥
+                设备映射
               </label>
               <input
                 type="text"
-                value={secretKey}
-                onChange={(e) => setSecretKey(e.target.value)}
-                placeholder="请输入系统登录密钥"
+                value={deviceMapping}
+                onChange={(e) => setDeviceMapping(e.target.value)}
+                placeholder="MAC:foot1,MAC:foot2,MAC:foot3,MAC:foot4"
                 className="zeiss-input"
                 style={{ padding: '12px 16px' }}
               />
@@ -237,15 +243,28 @@ export default function Login() {
               </div>
             </div>
 
+            {submitError && (
+              <div
+                className="rounded-lg px-3 py-2 text-sm"
+                style={{
+                  color: '#B42318',
+                  background: '#FEF3F2',
+                  border: '1px solid #FECACA',
+                }}
+              >
+                {submitError}
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={!isValid}
+              disabled={!isValid || submitting}
               className="w-full py-3.5 rounded-[10px] font-semibold text-[15px] transition-all duration-200 mt-2"
               style={{
-                background: isValid ? 'var(--zeiss-blue)' : '#E8ECF0',
-                color: isValid ? 'white' : 'var(--text-muted)',
-                cursor: isValid ? 'pointer' : 'not-allowed',
-                boxShadow: isValid ? '0 4px 14px rgba(0,102,204,0.25)' : 'none',
+                background: isValid && !submitting ? 'var(--zeiss-blue)' : '#E8ECF0',
+                color: isValid && !submitting ? 'white' : 'var(--text-muted)',
+                cursor: isValid && !submitting ? 'pointer' : 'not-allowed',
+                boxShadow: isValid && !submitting ? '0 4px 14px rgba(0,102,204,0.25)' : 'none',
                 border: 'none',
               }}
             >
@@ -256,20 +275,7 @@ export default function Login() {
 
         <div className="flex justify-between items-center mt-5 px-1">
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
-          <div className="flex items-center gap-2">
-            {window.electronAPI && window.electronAPI.checkForUpdate && (
-              <button
-                onClick={handleCheckUpdate}
-                className="text-xs px-2 py-0.5 rounded-md transition-colors duration-150"
-                style={{ color: 'var(--zeiss-blue)', background: 'transparent' }}
-                onMouseEnter={e => e.target.style.background = 'var(--zeiss-blue-light)'}
-                onMouseLeave={e => e.target.style.background = 'transparent'}
-              >
-                检查更新
-              </button>
-            )}
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>v{currentVersion}</span>
-          </div>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>v{currentVersion}</span>
         </div>
       </div>
     </div>

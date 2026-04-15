@@ -8,6 +8,7 @@
 /dist
 /dist*
 /python/venv
+/python/runtime
 /python/Python311
 /img
 /pdf

@@ -22,18 +22,47 @@ function getPackagedPythonHome(resourceBase = process.resourcesPath) {
   return fs.existsSync(pythonBin) ? home : null
 }
 
+function getPackagedRuntimeDir(resourceBase = process.resourcesPath) {
+  const base = getResourcesBase(resourceBase)
+  if (!base) return null
+
+  const runtimeDir = path.join(base, 'python', 'runtime')
+  return fs.existsSync(runtimeDir) ? runtimeDir : null
+}
+
 function getPackagedPythonBinary(resourceBase = process.resourcesPath) {
   const home = getPackagedPythonHome(resourceBase)
-  if (!home) return null
-  return path.join(home, 'bin', `python${PY_VERSION}`)
+  if (home) {
+    return path.join(home, 'bin', `python${PY_VERSION}`)
+  }
+
+  const runtimeDir = getPackagedRuntimeDir(resourceBase)
+  if (!runtimeDir) return null
+
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(runtimeDir, 'python.exe'),
+      ]
+    : [
+        path.join(runtimeDir, 'bin', `python${PY_VERSION}`),
+        path.join(runtimeDir, 'bin', 'python3'),
+        path.join(runtimeDir, 'bin', 'python'),
+      ]
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null
 }
 
 function getPackagedSitePackages(resourceBase = process.resourcesPath) {
   const base = getResourcesBase(resourceBase)
-  if (!base || process.platform === 'win32') return null
+  if (!base) return null
 
   const sitePackages = path.join(base, 'python', 'venv', 'lib', `python${PY_VERSION}`, 'site-packages')
-  return fs.existsSync(sitePackages) ? sitePackages : null
+  if (fs.existsSync(sitePackages)) {
+    return sitePackages
+  }
+
+  const runtimeSitePackages = path.join(base, 'python', 'runtime', 'Lib', 'site-packages')
+  return fs.existsSync(runtimeSitePackages) ? runtimeSitePackages : null
 }
 
 function getPackagedMplConfigDir(resourceBase = process.resourcesPath) {
@@ -54,11 +83,14 @@ function prependPathList(existingValue, entry) {
 function getPackagedPythonEnv({ baseEnv = process.env, resourceBase = process.resourcesPath } = {}) {
   const env = { ...baseEnv }
   const pythonHome = getPackagedPythonHome(resourceBase)
+  const runtimeDir = getPackagedRuntimeDir(resourceBase)
   const sitePackages = getPackagedSitePackages(resourceBase)
   const mplConfigDir = getPackagedMplConfigDir(resourceBase)
 
   if (pythonHome) {
     env.PYTHONHOME = pythonHome
+  } else if (runtimeDir) {
+    env.PYTHONHOME = runtimeDir
   }
   if (sitePackages) {
     env.PYTHONPATH = prependPathList(env.PYTHONPATH, sitePackages)
@@ -77,6 +109,7 @@ function getPackagedPythonEnv({ baseEnv = process.env, resourceBase = process.re
 module.exports = {
   PY_VERSION,
   getPackagedPythonHome,
+  getPackagedRuntimeDir,
   getPackagedPythonBinary,
   getPackagedSitePackages,
   getPackagedPythonEnv,

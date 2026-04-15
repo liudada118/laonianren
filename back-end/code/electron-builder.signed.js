@@ -5,7 +5,7 @@ const pkg = require('./package.json')
 
 const baseBuild = pkg.build || {}
 const baseExtraResources = (baseBuild.extraResources || []).filter((item) => {
-  return item && item.from !== 'build'
+  return item && item.from !== 'build' && item.from !== 'python/runtime'
 })
 const serialSource = path.join(__dirname, 'serial.txt')
 const requirementsSource = path.join(__dirname, 'python', 'requirements-electron.txt')

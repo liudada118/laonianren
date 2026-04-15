@@ -100,6 +100,7 @@ async function fetchPythonApi(path, buildInit, options = {}) {
     for (const base of getPythonApiBases()) {
       try {
         const res = await fetch(`${base}${path}`, buildInit());
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
 
         // 生产包里没有 /pyapi 代理；如果误打到静态页服务，会回 index.html。
         if (isHtmlFallbackResponse(res)) {
@@ -109,12 +110,19 @@ async function fetchPythonApi(path, buildInit, options = {}) {
         }
 
         if (res.ok) {
+          // When running against the local static desktop server, `/pyapi/*`
+          // may be routed to index.html instead of an API proxy.
+          if (base === '/pyapi' && contentType.includes('text/html')) {
+            lastResponse = res;
+            sawRetryableFailure = true;
+            continue;
+          }
           preferredPythonApiBase = base;
           return res;
         }
 
-        // Retry when the Vite proxy returns 5xx because 8765 is unreachable.
-        if (base === '/pyapi' && res.status >= 500) {
+        // Retry when the `/pyapi` proxy is unavailable or not wired at all.
+        if (base === '/pyapi' && (res.status === 404 || res.status >= 500)) {
           lastResponse = res;
           sawRetryableFailure = true;
           continue;

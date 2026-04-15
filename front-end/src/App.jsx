@@ -13,6 +13,7 @@ import HistoryReportView from './pages/HistoryReportView';
 import HistoryComprehensiveView from './pages/HistoryComprehensiveView';
 import NotFound from './pages/NotFound';
 import UpdateNotification from './components/ui/UpdateNotification';
+import VersionHistory from './components/ui/VersionHistory';
 
 // Assessment Pages
 import GripAssessment from './pages/assessment/GripAssessment';
@@ -26,6 +27,7 @@ function App() {
       <AssessmentProvider>
         <ToastProvider>
           <UpdateNotification />
+          <VersionHistory />
           <DeviceAlertOverlay />
           <Routes>
             <Route path="/" element={<Login />} />

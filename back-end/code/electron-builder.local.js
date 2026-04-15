@@ -6,7 +6,7 @@ const pkg = require('./package.json')
 const baseBuild = pkg.build || {}
 const localArch = process.arch === 'arm64' ? 'arm64' : 'x64'
 const baseExtraResources = (baseBuild.extraResources || []).filter((item) => {
-  return item && item.from !== 'build'
+  return item && item.from !== 'build' && item.from !== 'python/runtime'
 })
 const hasBundledVenv = baseExtraResources.some(
   (item) => item && item.from === 'python/venv' && item.to === 'python/venv'
