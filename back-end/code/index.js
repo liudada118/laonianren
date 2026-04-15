@@ -22,7 +22,7 @@ let viteProcess = null
 let apiChild = null  // serialServer 子进程引用
 let pythonAiChild = null
 const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
-const preferViteDevServer = process.env.FORCE_VITE_DEV_SERVER === '1'
+const preferViteDevServer = process.env.FORCE_STATIC_RENDERER !== '1'
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
