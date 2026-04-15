@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   // 获取当前版本信息
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // 确保本地 Python AI 服务已启动
+  ensurePythonAi: () => ipcRenderer.invoke('ensure-python-ai'),
   // 监听更新状态
   onUpdateStatus: (callback) => {
     const handler = (_event, data) => callback(data)

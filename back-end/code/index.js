@@ -1,7 +1,7 @@
 const { configureLogging } = require('./util/configureLogging')
 configureLogging('progress')
 
-const { app, BrowserWindow, Menu } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain } = require('electron')
 const path = require('path')
 const { fork, spawn, spawnSync } = require('child_process')
 const { getHardwareFingerprint } = require('./util/getWinConfig')
@@ -10,6 +10,10 @@ const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
 const { initAutoUpdater, registerUpdaterIpcHandlers, cleanupUpdater } = require('./updater')
+const {
+  getPackagedPythonBinary,
+  getPackagedPythonEnv,
+} = require('./util/pythonRuntime')
 // const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
@@ -21,7 +25,10 @@ let devServerUrl = process.env.VITE_DEV_SERVER_URL || `http://localhost:${defaul
 let viteProcess = null
 let apiChild = null  // serialServer 子进程引用
 let pythonAiChild = null
+let pythonAiStartupPromise = null
+let pythonAiIpcRegistered = false
 const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
+const pythonAiStartupTimeoutMs = parseInt(process.env.PYTHON_AI_START_TIMEOUT_MS || '30000', 10)
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
@@ -94,6 +101,21 @@ async function waitForPythonAi(timeoutMs = 15000) {
     await wait(500)
   }
   return false
+}
+
+function registerPythonAiIpcHandlers() {
+  if (pythonAiIpcRegistered) return
+  pythonAiIpcRegistered = true
+
+  ipcMain.handle('ensure-python-ai', async () => {
+    try {
+      await startPythonAiChild()
+      return { success: true, port: pythonAiPort }
+    } catch (err) {
+      console.error('[pyai] ensure failed:', err.message)
+      return { success: false, error: err.message }
+    }
+  })
 }
 
 function startViteDevServer() {
@@ -445,6 +467,10 @@ function pyBin() {
       ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
       : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe')
   } else {
+    const packagedFrameworkPy = getPackagedPythonBinary()
+    if (!isDev && packagedFrameworkPy) {
+      return packagedFrameworkPy
+    }
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
       : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python')
@@ -459,24 +485,32 @@ function apiPy() {
 
 function pyAiBin() {
   const isDev = !app.isPackaged
+  const packagedFrameworkPy = getPackagedPythonBinary()
+  const packagedVenvPy = process.platform === 'win32'
+    ? path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe')
+    : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python')
+
   const candidates = process.platform === 'win32'
-    ? [
-        isDev
-          ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-          : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe'),
-        'python',
-        'py'
-      ]
-    : [
-        isDev
-          ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python'),
-        isDev
-          ? path.join(__dirname, 'python', 'venv', 'bin', 'python3')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python3'),
-        'python3',
-        'python'
-      ]
+    ? (isDev
+      ? [
+          path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe'),
+          'python',
+          'py'
+        ]
+      : [
+          packagedVenvPy,
+        ])
+    : (isDev
+      ? [
+          path.join(__dirname, 'python', 'venv', 'bin', 'python'),
+          path.join(__dirname, 'python', 'venv', 'bin', 'python3'),
+          'python3',
+          'python'
+        ]
+      : [
+          ...((packagedFrameworkPy && fs.existsSync(packagedFrameworkPy)) ? [packagedFrameworkPy] : []),
+          packagedVenvPy,
+        ])
 
   return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
 }
@@ -518,6 +552,7 @@ function checkPythonAiDeps(pythonBin) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       encoding: 'utf8',
+      env: getPackagedPythonEnv({ baseEnv: process.env }),
     })
 
     if (result.status === 0) {
@@ -537,78 +572,103 @@ async function startPythonAiChild() {
     return
   }
 
-  if (pythonAiChild && !pythonAiChild.killed) {
-    const ok = await waitForPythonAi(5000)
-    if (ok) return
+  if (pythonAiStartupPromise) {
+    return pythonAiStartupPromise
   }
 
-  const pythonBin = pyAiBin()
-  const scriptPath = aiApiPy()
+  pythonAiStartupPromise = (async () => {
+    if (pythonAiChild && !pythonAiChild.killed) {
+      const ok = await waitForPythonAi(5000)
+      if (ok) return
 
-  if (!pythonBin) {
-    throw new Error('Python runtime not found for AI service')
-  }
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`AI api server not found: ${scriptPath}`)
-  }
-
-  const depsCheck = checkPythonAiDeps(pythonBin)
-  if (!depsCheck.ok) {
-    const requirementsPath = aiRequirementsPath()
-    const installHint = fs.existsSync(requirementsPath)
-      ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
-      : 'Install the Python AI dependencies before starting the packaged app'
-    throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
-  }
-
-  console.log(`[pyai] starting AI service with ${pythonBin}`)
-  console.log(`[pyai] script path: ${scriptPath}`)
-
-  const child = spawn(pythonBin, [scriptPath], {
-    cwd: path.dirname(scriptPath),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      PYTHONUNBUFFERED: '1',
-      PYTHON_API_PORT: String(pythonAiPort)
-    },
-    shell: false,
-    windowsHide: true
-  })
-
-  pythonAiChild = child
-
-  child.stdout?.on('data', (chunk) => {
-    const text = chunk.toString()
-    if (text && text.trim()) {
-      process.stdout.write(`[pyai] ${text}`)
-    }
-  })
-
-  child.stderr?.on('data', (chunk) => {
-    const text = chunk.toString()
-    if (text && text.trim()) {
-      process.stderr.write(`[pyai] ${text}`)
-    }
-  })
-
-  child.on('error', (err) => {
-    console.error('[pyai] start error:', err.message)
-  })
-
-  child.on('exit', (code, signal) => {
-    console.log(`[pyai] exited: code=${code} signal=${signal}`)
-    if (pythonAiChild === child) {
+      console.warn('[pyai] existing AI child is stale, restarting')
+      try {
+        pythonAiChild.kill('SIGKILL')
+      } catch {}
       pythonAiChild = null
+      await wait(300)
     }
-  })
 
-  const ok = await waitForPythonAi(15000)
-  if (!ok) {
-    throw new Error(`Python AI service did not become ready on port ${pythonAiPort}`)
+    const pythonBin = pyAiBin()
+    const scriptPath = aiApiPy()
+
+    if (!pythonBin) {
+      throw new Error('Python runtime not found for AI service')
+    }
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`AI api server not found: ${scriptPath}`)
+    }
+
+    const depsCheck = checkPythonAiDeps(pythonBin)
+    if (!depsCheck.ok) {
+      const requirementsPath = aiRequirementsPath()
+      const installHint = fs.existsSync(requirementsPath)
+        ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
+        : 'Install the Python AI dependencies before starting the packaged app'
+      throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
+    }
+
+    console.log(`[pyai] starting AI service with ${pythonBin}`)
+    console.log(`[pyai] script path: ${scriptPath}`)
+
+    const child = spawn(pythonBin, [scriptPath], {
+      cwd: path.dirname(scriptPath),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...getPackagedPythonEnv({ baseEnv: process.env }),
+        PYTHONUNBUFFERED: '1',
+        PYTHON_API_PORT: String(pythonAiPort)
+      },
+      shell: false,
+      windowsHide: true
+    })
+
+    pythonAiChild = child
+
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString()
+      if (text && text.trim()) {
+        process.stdout.write(`[pyai] ${text}`)
+      }
+    })
+
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString()
+      if (text && text.trim()) {
+        process.stderr.write(`[pyai] ${text}`)
+      }
+    })
+
+    child.on('error', (err) => {
+      console.error('[pyai] start error:', err.message)
+    })
+
+    child.on('exit', (code, signal) => {
+      console.log(`[pyai] exited: code=${code} signal=${signal}`)
+      if (pythonAiChild === child) {
+        pythonAiChild = null
+      }
+    })
+
+    const ok = await waitForPythonAi(pythonAiStartupTimeoutMs)
+    if (!ok) {
+      try {
+        child.kill('SIGKILL')
+      } catch {}
+      if (pythonAiChild === child) {
+        pythonAiChild = null
+      }
+      throw new Error(`Python AI service did not become ready on port ${pythonAiPort}`)
+    }
+
+    console.log(`[pyai] ready on http://127.0.0.1:${pythonAiPort}`)
+  })()
+
+  try {
+    await pythonAiStartupPromise
+  } finally {
+    pythonAiStartupPromise = null
   }
-
-  console.log(`[pyai] ready on http://127.0.0.1:${pythonAiPort}`)
 }
 
 /** 主进程里直接像调用函数一样用 */
@@ -690,6 +750,7 @@ function startServerProcess() {
 // }
 
 app.whenReady().then(async () => {
+  registerPythonAiIpcHandlers()
   const uuid = await getHardwareFingerprint()
   const dateKey = await getKeyfromWinuuid(uuid)
   console.log(uuid, dateKey)

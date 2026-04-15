@@ -29,6 +29,9 @@
   },
   "build": {
     "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "npmRebuild": false,
     "extraResources": [
       {
@@ -49,6 +52,10 @@
           "!**/*.pyc",
           "!**/_tmp_*/**"
         ]
+      },
+      {
+        "from": "algorithms/python/bridge.py",
+        "to": "algorithms/python/bridge.py"
       },
       {
         "from": "db/init.db",

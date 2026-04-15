@@ -4,28 +4,38 @@ const { execFileSync } = require('child_process')
 const pkg = require('./package.json')
 
 const baseBuild = pkg.build || {}
-const localArch = process.arch === 'arm64' ? 'arm64' : 'x64'
 const baseExtraResources = (baseBuild.extraResources || []).filter((item) => {
   return item && item.from !== 'build'
 })
-const hasBundledVenv = baseExtraResources.some(
-  (item) => item && item.from === 'python/venv' && item.to === 'python/venv'
-)
 const serialSource = path.join(__dirname, 'serial.txt')
 const requirementsSource = path.join(__dirname, 'python', 'requirements-electron.txt')
 const pythonFrameworkSource = '/Library/Frameworks/Python.framework/Versions/3.11'
-const hasBundledSerial = baseExtraResources.some(
-  (item) => item && item.from === 'serial.txt' && item.to === 'serial.txt'
-)
-const hasBundledRequirements = baseExtraResources.some(
-  (item) =>
-    item &&
-    item.from === 'python/requirements-electron.txt' &&
-    item.to === 'python/requirements-electron.txt'
-)
-const hasBundledPythonFramework = baseExtraResources.some(
-  (item) => item && item.from === pythonFrameworkSource && item.to === 'python-runtime/Versions/3.11'
-)
+const nestedSignScript = path.join(__dirname, 'scripts', 'sign-nested-macos-code.js')
+
+function hasResource(fromPath, toPath) {
+  return baseExtraResources.some(
+    (item) => item && item.from === fromPath && item.to === toPath
+  )
+}
+
+function resolveDeveloperIdIdentity() {
+  if (process.env.CSC_NAME) return process.env.CSC_NAME
+
+  try {
+    const output = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const line = output
+      .split('\n')
+      .find((item) => item.includes('Developer ID Application:'))
+    const match = line && line.match(/"([^"]+)"/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
+}
+
 const runtimeFiles = [
   'package.json',
   'index.js',
@@ -68,6 +78,10 @@ const runtimeFiles = [
 module.exports = {
   ...baseBuild,
   productName: baseBuild.productName || '肌少症评估系统',
+  directories: {
+    ...(baseBuild.directories || {}),
+    output: 'dist/signed-arm64',
+  },
   files: runtimeFiles,
   afterPack: async (context) => {
     const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
@@ -75,42 +89,21 @@ module.exports = {
       stdio: 'inherit',
     })
   },
-  mac: {
-    ...(baseBuild.mac || {}),
-    icon: 'renderer-build/logo.png',
-    identity: null,
-    hardenedRuntime: false,
-    target: [
-      {
-        target: 'dir',
-        arch: [localArch],
-      },
-      {
-        target: 'zip',
-        arch: [localArch],
-      },
-      {
-        target: 'dmg',
-        arch: [localArch],
-      },
-    ],
+  afterSign: async (context) => {
+    const identity = resolveDeveloperIdIdentity()
+    if (!identity) {
+      console.warn('[afterSign] skip nested code signing: Developer ID Application identity not found')
+      return
+    }
+
+    const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
+    execFileSync('node', [nestedSignScript, appPath, identity], {
+      stdio: 'inherit',
+    })
   },
   extraResources: [
     ...baseExtraResources,
-    ...(!hasBundledVenv
-      ? [
-          {
-            from: 'python/venv',
-            to: 'python/venv',
-            filter: [
-              '**/*',
-              '!**/__pycache__/**',
-              '!**/.DS_Store',
-            ],
-          },
-        ]
-      : []),
-    ...(fs.existsSync(serialSource) && !hasBundledSerial
+    ...(fs.existsSync(serialSource) && !hasResource('serial.txt', 'serial.txt')
       ? [
           {
             from: 'serial.txt',
@@ -118,7 +111,8 @@ module.exports = {
           },
         ]
       : []),
-    ...(fs.existsSync(requirementsSource) && !hasBundledRequirements
+    ...(fs.existsSync(requirementsSource) &&
+    !hasResource('python/requirements-electron.txt', 'python/requirements-electron.txt')
       ? [
           {
             from: 'python/requirements-electron.txt',
@@ -126,7 +120,8 @@ module.exports = {
           },
         ]
       : []),
-    ...(fs.existsSync(pythonFrameworkSource) && !hasBundledPythonFramework
+    ...(fs.existsSync(pythonFrameworkSource) &&
+    !hasResource(pythonFrameworkSource, 'python-runtime/Versions/3.11')
       ? [
           {
             from: pythonFrameworkSource,
@@ -135,4 +130,18 @@ module.exports = {
         ]
       : []),
   ],
+  mac: {
+    ...(baseBuild.mac || {}),
+    icon: 'renderer-build/logo.png',
+    hardenedRuntime: true,
+    entitlements: 'signing/entitlements.mac.plist',
+    entitlementsInherit: 'signing/entitlements.mac.inherit.plist',
+    gatekeeperAssess: false,
+    target: [
+      {
+        target: 'dmg',
+        arch: ['arm64'],
+      },
+    ],
+  },
 }

@@ -5,21 +5,71 @@
  */
 
 const DIRECT_PYTHON_API_BASE = 'http://127.0.0.1:8765';
-const PYTHON_API_BASE_CANDIDATES = [
-  '/pyapi',
-  DIRECT_PYTHON_API_BASE,
-];
+const IS_DEV = Boolean(import.meta.env?.DEV);
+const PYTHON_API_BASE_CANDIDATES = IS_DEV
+  ? ['/pyapi', DIRECT_PYTHON_API_BASE]
+  : [DIRECT_PYTHON_API_BASE];
 
 let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
 const inFlightAiRequests = new Map();
 let runtimeLlmApiKey = '';
+let ensurePythonAiPromise = null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function ensurePythonAiViaElectron() {
+  if (typeof window === 'undefined' || !window.electronAPI?.ensurePythonAi) {
+    return false;
+  }
+
+  try {
+    const result = await window.electronAPI.ensurePythonAi();
+    return Boolean(result?.success);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPythonAiReady({ timeoutMs = 30000, intervalMs = 1000 } = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isPythonAiServiceRunning()) {
+      return true;
+    }
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
+async function ensurePythonAiReady({ timeoutMs = 30000 } = {}) {
+  if (await isPythonAiServiceRunning()) {
+    return true;
+  }
+
+  if (!ensurePythonAiPromise) {
+    ensurePythonAiPromise = (async () => {
+      const ensured = await ensurePythonAiViaElectron();
+      if (!ensured) {
+        return false;
+      }
+      return waitForPythonAiReady({ timeoutMs, intervalMs: 1000 });
+    })().finally(() => {
+      ensurePythonAiPromise = null;
+    });
+  }
+
+  return ensurePythonAiPromise;
+}
+
 function getPythonApiBases() {
   return [...new Set([preferredPythonApiBase, ...PYTHON_API_BASE_CANDIDATES])];
+}
+
+function isHtmlFallbackResponse(res) {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  return contentType.includes('text/html');
 }
 
 async function isPythonAiServiceRunning() {
@@ -42,6 +92,7 @@ async function fetchPythonApi(path, buildInit, options = {}) {
 
   let lastError = null;
   let lastResponse = null;
+  let ensureTriggered = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let sawRetryableFailure = false;
@@ -49,6 +100,13 @@ async function fetchPythonApi(path, buildInit, options = {}) {
     for (const base of getPythonApiBases()) {
       try {
         const res = await fetch(`${base}${path}`, buildInit());
+
+        // 生产包里没有 /pyapi 代理；如果误打到静态页服务，会回 index.html。
+        if (isHtmlFallbackResponse(res)) {
+          lastResponse = res;
+          sawRetryableFailure = true;
+          continue;
+        }
 
         if (res.ok) {
           preferredPythonApiBase = base;
@@ -72,6 +130,13 @@ async function fetchPythonApi(path, buildInit, options = {}) {
 
     if (!sawRetryableFailure || attempt === maxAttempts) {
       break;
+    }
+
+    if (!ensureTriggered) {
+      ensureTriggered = await ensurePythonAiReady({ timeoutMs: 30000 });
+      if (ensureTriggered) {
+        continue;
+      }
     }
 
     await sleep(retryDelayMs);
@@ -140,14 +205,16 @@ async function postAiReport(path, body) {
 
   const requestPromise = (async () => {
     try {
+      await ensurePythonAiReady({ timeoutMs: 30000 });
+
       const res = await fetchPythonApi(path, () => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
         signal: AbortSignal.timeout(120000),
       }), {
-        maxAttempts: 2,
-        retryDelayMs: 500,
+        maxAttempts: 3,
+        retryDelayMs: 1000,
       });
 
       if (!res.ok) {
@@ -172,6 +239,8 @@ async function postAiReport(path, body) {
 
 export async function checkPythonBackend() {
   try {
+    await ensurePythonAiReady({ timeoutMs: 10000 });
+
     const res = await fetchPythonApi('/health', () => ({
       method: 'GET',
       signal: AbortSignal.timeout(2000),
@@ -185,6 +254,8 @@ export async function checkPythonBackend() {
 
 export async function fetchLlmConfig() {
   try {
+    await ensurePythonAiReady({ timeoutMs: 10000 });
+
     const res = await fetchPythonApi('/llm-config', () => ({
       method: 'GET',
       signal: AbortSignal.timeout(3000),

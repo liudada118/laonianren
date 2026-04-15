@@ -12,11 +12,37 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const {
+  getPackagedPythonBinary,
+  getPackagedPythonEnv,
+} = require('../../util/pythonRuntime');
 
-const BRIDGE_SCRIPT = path.join(__dirname, 'bridge.py');
+function resolveBridgeScript() {
+  const localBridge = path.join(__dirname, 'bridge.py');
+  const resourceBase = process.resourcesPath || process.env.resourcesPath;
+
+  if (!resourceBase) {
+    return localBridge;
+  }
+
+  const packagedBridge = path.join(resourceBase, 'algorithms', 'python', 'bridge.py');
+  if (fs.existsSync(packagedBridge)) {
+    return packagedBridge;
+  }
+
+  const unpackedBridge = localBridge.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
+  if (fs.existsSync(unpackedBridge)) {
+    return unpackedBridge;
+  }
+
+  return localBridge;
+}
+
+const BRIDGE_SCRIPT = resolveBridgeScript();
 
 // 超时时间（毫秒）
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000; // 3分钟
+const PY_PROBE_TIMEOUT_MS = parseInt(process.env.PY_PROBE_TIMEOUT_MS, 10) || 20000;
 
 // ─── 自动检测 Python 可执行文件 ───
 
@@ -46,22 +72,54 @@ function parseCmdParts(cmd) {
   return { cmd: normalized[0] || '', args: normalized.slice(1) };
 }
 
-function probePython(cmd, checkNumpy = false) {
+function probePython(cmd, checkNumpy = false, env = process.env) {
+  const result = probePythonResult(cmd, checkNumpy, env);
+  return result.ok;
+}
+
+function probePythonResult(cmd, checkNumpy = false, env = process.env) {
   const parts = parseCmdParts(cmd);
-  if (!parts.cmd) return false;
+  if (!parts.cmd) return { ok: false, reason: 'empty command' };
 
   const probeCode = checkNumpy
     ? 'import sys,numpy;print(sys.version.split()[0]);print(numpy.__version__)'
     : 'import sys;print(sys.version.split()[0])';
 
   const result = spawnSync(parts.cmd, [...parts.args, '-c', probeCode], {
-    timeout: 5000,
+    timeout: PY_PROBE_TIMEOUT_MS,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     encoding: 'utf8',
+    env,
   });
 
-  return result.status === 0;
+  if (result.error) {
+    return {
+      ok: false,
+      reason: result.error.message,
+      status: result.status,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    };
+  }
+
+  const stderr = (result.stderr || '').trim();
+  const stdout = (result.stdout || '').trim();
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout,
+    stderr,
+    reason: stderr || stdout || `exit ${result.status}`,
+  };
+}
+
+function isPackagedRuntime(resourceBase = process.resourcesPath) {
+  return (
+    String(process.env.isPackaged) === 'true' ||
+    String(process.env.isPackaged) === '1' ||
+    (typeof resourceBase === 'string' && resourceBase.includes(`${path.sep}Contents${path.sep}Resources`))
+  );
 }
 
 function getPythonCmd() {
@@ -78,8 +136,17 @@ function getPythonCmd() {
     console.warn(`[Python] PYTHON_CMD 不可用或缺少 numpy，忽略: ${envCmd}`);
   }
 
-  const resourceBase = process.resourcesPath;
+  const resourceBase = process.resourcesPath || process.env.resourcesPath;
+  const packagedPythonEnv = getPackagedPythonEnv({ baseEnv: process.env, resourceBase });
+  const packagedFrameworkPy = getPackagedPythonBinary(resourceBase);
   const isWin = process.platform === 'win32';
+  const packagedMode = isPackagedRuntime(resourceBase);
+
+  if (packagedMode && packagedFrameworkPy && fs.existsSync(packagedFrameworkPy)) {
+    _pythonCmd = packagedFrameworkPy;
+    console.log(`[Python] 打包模式直接使用 Python.framework: ${_pythonCmd}`);
+    return _pythonCmd;
+  }
 
   // 1) 优先项目内 venv（开发环境）
   const localVenvPy = path.resolve(
@@ -97,23 +164,45 @@ function getPythonCmd() {
     return _pythonCmd;
   }
 
-  // 2) 优先打包内 venv（生产环境）
+  // 2) 生产环境优先使用包内 Python.framework，避免依赖系统 /Library/Frameworks
+  if (packagedFrameworkPy) {
+    const packagedFrameworkProbe = probePythonResult(packagedFrameworkPy, true, packagedPythonEnv);
+    if (packagedFrameworkProbe.ok) {
+      _pythonCmd = packagedFrameworkPy;
+      console.log(`[Python] 使用打包 Python.framework: ${_pythonCmd}`);
+      return _pythonCmd;
+    }
+    console.error(`[Python] 打包 Python.framework 探测失败: ${packagedFrameworkProbe.reason}`);
+  }
+
+  // 3) 回退到打包内 venv（生产环境）
+  let packagedVenvPy = null;
   if (resourceBase) {
-    const packagedVenvPy = path.join(
+    packagedVenvPy = path.join(
       resourceBase,
       'python',
       'venv',
       isWin ? 'Scripts' : 'bin',
       isWin ? 'python.exe' : 'python'
     );
-    if (fs.existsSync(packagedVenvPy) && probePython(packagedVenvPy, true)) {
-      _pythonCmd = packagedVenvPy;
-      console.log(`[Python] 使用打包 venv: ${_pythonCmd}`);
-      return _pythonCmd;
+    if (fs.existsSync(packagedVenvPy)) {
+      const packagedVenvProbe = probePythonResult(packagedVenvPy, true, packagedPythonEnv);
+      if (packagedVenvProbe.ok) {
+        _pythonCmd = packagedVenvPy;
+        console.log(`[Python] 使用打包 venv: ${_pythonCmd}`);
+        return _pythonCmd;
+      }
+      console.error(`[Python] 打包 venv 探测失败: ${packagedVenvProbe.reason}`);
     }
   }
 
-  // 3) Windows 兼容旧逻辑：Python311 回退
+  if (packagedMode && packagedVenvPy && fs.existsSync(packagedVenvPy)) {
+    _pythonCmd = packagedVenvPy;
+    console.error(`[Python] 打包模式下未能验证包内 Python，禁止回退系统 Python: ${_pythonCmd}`);
+    return _pythonCmd;
+  }
+
+  // 4) Windows 兼容旧逻辑：Python311 回退
   if (isWin) {
     const localLegacyPy = path.resolve(__dirname, '..', '..', 'python', 'Python311', 'python.exe');
     if (fs.existsSync(localLegacyPy) && probePython(localLegacyPy, true)) {
@@ -132,7 +221,7 @@ function getPythonCmd() {
     }
   }
 
-  // 4) 最后回退到系统命令
+  // 5) 最后回退到系统命令
   const candidates = isWin
     ? ['python', 'python3', 'py -3', 'py']
     : ['python3', 'python'];
@@ -200,9 +289,8 @@ async function callPython(funcName, params = {}, options = {}) {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         env: {
-          ...process.env,
+          ...getPackagedPythonEnv({ baseEnv: process.env }),
           PYTHONUNBUFFERED: '1',
-          PYTHONIOENCODING: 'utf-8',
           MPLBACKEND: 'Agg',
         },
       });
