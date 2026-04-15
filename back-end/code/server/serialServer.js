@@ -2421,11 +2421,46 @@ app.get('/rescanPort', async (req, res) => {
     }
     console.log('[rescanPort] 清理已断开串口:', deadPaths.length, '个', deadPaths)
 
+    // 1.5 检测僵尸设备：端口 isOpen 但超过 5 秒没收到数据
+    const ZOMBIE_TIMEOUT = 5000 // 5 秒无数据视为僵尸
+    const now = Date.now()
+    const zombiePaths = []
+    for (const path of Object.keys(parserArr)) {
+      const item = parserArr[path]
+      if (item && item.port && item.port.isOpen) {
+        const lastTime = lastDataTime[path]
+        if (lastTime && (now - lastTime) > ZOMBIE_TIMEOUT) {
+          zombiePaths.push(path)
+          console.log(`[rescanPort] 僵尸设备: ${path}, 最后数据 ${Math.round((now - lastTime) / 1000)}s 前`)
+          // 主动关闭端口
+          try {
+            item.port.removeAllListeners()
+            await new Promise((resolve) => {
+              item.port.close((err) => {
+                if (err) console.warn('[rescanPort] zombie close error:', path, err.message)
+                resolve()
+              })
+            })
+          } catch (e) {
+            console.warn('[rescanPort] zombie cleanup error:', path, e.message)
+          }
+          delete parserArr[path]
+          delete dataMap[path]
+          delete lastDataTime[path]
+        }
+      }
+    }
+    if (zombiePaths.length) {
+      console.log('[rescanPort] 清理僵尸设备:', zombiePaths.length, '个', zombiePaths)
+      // 等待端口锁释放
+      await new Promise(r => setTimeout(r, 1000))
+    }
+
     // 2. 重新调用 connectPort，它会跳过已连接的串口（parserArr[path] 存在且 isOpen）
     const ports = await connectPort()
     console.log('[rescanPort] 重新扫描完成，当前连接:', Object.keys(parserArr).length, '个串口')
 
-    res.json(new HttpResult(0, { cleaned: deadPaths, ports }, '重新扫描完成'));
+    res.json(new HttpResult(0, { cleaned: deadPaths, zombie: zombiePaths, ports }, '重新扫描完成'));
   } catch (e) {
     console.error('[rescanPort] 失败:', e)
     res.json(new HttpResult(1, {}, '重新扫描失败: ' + e.message));
@@ -3978,6 +4013,8 @@ function parseData(parserArr, objs) {
 
 var sendMacNum = 0, successNum = 0, sendDataLength = 0
 const oldTimeObj = {}
+// 按端口路径记录最后收到数据帧的时间戳，用于僵尸设备检测
+const lastDataTime = {}
 async function connectPort() {
   // 只清空已断开端口的 macInfo，保留已连接设备的 MAC 信息
   const oldMacInfo = { ...macInfo }
@@ -4105,6 +4142,8 @@ async function connectPort() {
       // });
 
       parserItem.port = port
+      // 初始化该端口的最后数据时间
+      lastDataTime[path] = Date.now()
       // connection established -> send AT to query device info
       if (process.env.VIRTUAL_SERIAL_TEST === 'true' && portBaudRate === 3000000) {
         // 测试模式：直接从虚拟串口名推断MAC和type，跳过AT指令
@@ -4149,6 +4188,8 @@ async function connectPort() {
 
 
         let buffer = Buffer.from(data);
+        // 更新该端口最后收到数据的时间戳，用于僵尸设备检测
+        lastDataTime[path] = Date.now()
 
         pointArr = new Array();
 
@@ -4556,6 +4597,7 @@ async function stopPort() {
           // parserArr[path] = null;
           delete parserArr[path]
           delete dataMap[path]
+          delete lastDataTime[path]
           console.log(parserArr, 'delte')
         }
       });
