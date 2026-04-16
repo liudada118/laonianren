@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
+import { VERSION_HISTORY } from '../components/ui/VersionHistory';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
@@ -264,6 +265,53 @@ export default function Dashboard() {
   const [showSitStandTip, setShowSitStandTip] = useState(false);
   const [sitStandTipPath, setSitStandTipPath] = useState('');
 
+  // 版本号 & 更新相关
+  const [currentVersion, setCurrentVersion] = useState('2.0.0');
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [updateState, setUpdateState] = useState({
+    status: 'idle', message: '', version: '', percent: 0,
+    releaseNotes: '', releaseDate: '', bytesPerSecond: 0,
+  });
+  const isElectron = typeof window !== 'undefined' && window.electronAPI && window.electronAPI.onUpdateStatus;
+
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.getAppVersion) {
+      window.electronAPI.getAppVersion().then(info => {
+        if (info && info.version) setCurrentVersion(info.version);
+      }).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const unsubscribe = window.electronAPI.onUpdateStatus((data) => {
+      setUpdateState(prev => ({ ...prev, ...data }));
+      if (data.status === 'available' || data.status === 'downloaded') setShowUpdateDialog(true);
+    });
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, [isElectron]);
+
+  const handleCheckUpdate = useCallback(async () => {
+    if (!isElectron) return;
+    setUpdateState(prev => ({ ...prev, status: 'checking', message: '正在检查更新...' }));
+    setShowUpdateDialog(true);
+    try { await window.electronAPI.checkForUpdate(); }
+    catch (err) { setUpdateState(prev => ({ ...prev, status: 'error', message: '检查更新失败: ' + (err.message || '未知错误') })); }
+  }, [isElectron]);
+
+  const handleDownload = useCallback(async () => {
+    if (!isElectron) return;
+    try { await window.electronAPI.downloadUpdate(); }
+    catch (err) { setUpdateState(prev => ({ ...prev, status: 'error', message: '下载更新失败: ' + (err.message || '未知错误') })); }
+  }, [isElectron]);
+
+  const handleInstall = useCallback(async () => {
+    if (!isElectron) return;
+    try { await window.electronAPI.installUpdate(); }
+    catch (err) { console.error('安装更新失败:', err); }
+  }, [isElectron]);
+
   const handleStart = (path) => {
     if (patientInfo) {
       // 握力评估需要先提示用户带好手套
@@ -502,7 +550,33 @@ export default function Dashboard() {
       {/* Footer */}
       <footer className="h-8 md:h-10 flex items-center justify-between px-4 md:px-8 shrink-0 z-10">
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
-        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>v2.0.0</span>
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] cursor-pointer transition-colors duration-150"
+            style={{ color: 'var(--text-muted)' }}
+            onClick={() => setShowVersionHistory(true)}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+            title="查看版本历史"
+          >
+            v{currentVersion}
+          </span>
+          {isElectron && (
+            <>
+              <span className="text-[10px]" style={{ color: 'var(--border-light)' }}>|</span>
+              <span
+                className="text-[10px] cursor-pointer font-medium transition-opacity duration-150"
+                style={{ color: 'var(--zeiss-blue)' }}
+                onClick={handleCheckUpdate}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                title="检查软件更新"
+              >
+                检查更新
+              </span>
+            </>
+          )}
+        </div>
       </footer>
 
       {/* 患者信息弹窗 */}
@@ -614,6 +688,195 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* ===== 版本历史弹窗 ===== */}
+      {showVersionHistory && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowVersionHistory(false); }}
+        >
+          <div
+            className="fixed inset-0 animate-fadeIn"
+            style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setShowVersionHistory(false)}
+          />
+          <div
+            className="relative z-10 w-[520px] max-w-[90vw] max-h-[80vh] rounded-2xl animate-scaleIn flex flex-col"
+            style={{ background: 'var(--bg-secondary)', boxShadow: 'var(--shadow-xl)' }}
+          >
+            <div className="flex items-center justify-between p-6 pb-4 border-b" style={{ borderColor: 'var(--border-light)' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)' }}>
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>版本历史</h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>当前版本: v{currentVersion}</p>
+                </div>
+              </div>
+              <button onClick={() => setShowVersionHistory(false)} className="p-1.5 rounded-lg transition-colors duration-150" style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 pt-4 space-y-5">
+              {VERSION_HISTORY.map((release, idx) => {
+                const isCurrent = release.version === currentVersion;
+                return (
+                  <div key={release.version} className="relative">
+                    {idx < VERSION_HISTORY.length - 1 && (
+                      <div className="absolute left-[15px] top-[36px] bottom-[-20px] w-[2px]" style={{ background: 'var(--border-light)' }} />
+                    )}
+                    <div className="flex gap-4">
+                      <div className="flex-shrink-0 mt-1">
+                        <div className="w-[30px] h-[30px] rounded-full flex items-center justify-center" style={{
+                          background: isCurrent ? 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)' : 'var(--bg-primary)',
+                          border: isCurrent ? 'none' : '2px solid var(--border-light)',
+                        }}>
+                          {isCurrent ? (
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                          ) : (
+                            <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-muted)' }} />
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>v{release.version}</span>
+                          {isCurrent && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'rgba(124,58,237,0.1)', color: '#7C3AED' }}>当前</span>}
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{release.date}</span>
+                        </div>
+                        <div className="rounded-xl p-3 space-y-1" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-light)' }}>
+                          {release.highlights.map((item, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                              <span className="mt-1 flex-shrink-0 w-1 h-1 rounded-full" style={{ background: 'var(--text-muted)' }} />
+                              <span>{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-4 pt-3 border-t flex justify-end" style={{ borderColor: 'var(--border-light)' }}>
+              <button onClick={() => setShowVersionHistory(false)} className="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-150"
+                style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)', color: 'white', boxShadow: '0 4px 14px rgba(124,58,237,0.25)' }}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 更新弹窗 ===== */}
+      {showUpdateDialog && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center">
+          <div className="fixed inset-0 animate-fadeIn" style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
+            onClick={updateState.status !== 'downloading' ? () => setShowUpdateDialog(false) : undefined} />
+          <div className="relative z-10 w-[460px] max-w-[90vw] rounded-2xl p-7 animate-scaleIn"
+            style={{ background: 'var(--bg-secondary)', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2.5">
+                {updateState.status === 'checking' || updateState.status === 'downloading' ? (
+                  <svg className="w-5 h-5 animate-spin" style={{ color: 'var(--zeiss-blue)' }} fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : updateState.status === 'downloaded' || updateState.status === 'not-available' ? (
+                  <svg className="w-5 h-5" style={{ color: 'var(--success, #10B981)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" style={{ color: 'var(--zeiss-blue)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+                <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                  {({ idle: '软件更新', checking: '检查更新', available: '发现新版本', downloading: '正在下载', downloaded: '下载完成', error: '更新失败', 'not-available': '已是最新' })[updateState.status] || '软件更新'}
+                </h3>
+              </div>
+              {updateState.status !== 'downloading' && (
+                <button onClick={() => setShowUpdateDialog(false)} className="p-1 rounded-lg transition-colors duration-150" style={{ color: 'var(--text-muted)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              )}
+            </div>
+            <div className="mb-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              当前版本: v{currentVersion}
+              {updateState.version && updateState.status !== 'not-available' && (
+                <span className="ml-3"><span style={{ color: 'var(--text-muted)' }}>&rarr;</span><span className="ml-1 font-semibold" style={{ color: 'var(--zeiss-blue)' }}>v{updateState.version}</span></span>
+              )}
+            </div>
+            <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)' }}>{updateState.message}</p>
+            {updateState.status === 'downloading' && (
+              <div className="mb-5">
+                <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
+                  <div className="h-full rounded-full transition-all duration-300" style={{ width: `${updateState.percent || 0}%`, background: 'linear-gradient(90deg, var(--zeiss-blue) 0%, #0077EE 100%)' }} />
+                </div>
+                <div className="flex justify-between mt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  <span>{updateState.percent || 0}%</span>
+                  {updateState.bytesPerSecond > 0 && <span>{formatBytes(updateState.bytesPerSecond)}/s</span>}
+                </div>
+              </div>
+            )}
+            {updateState.releaseNotes && (updateState.status === 'available' || updateState.status === 'downloaded') && (
+              <div className="mb-5 p-4 rounded-xl text-sm max-h-48 overflow-y-auto" style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>
+                <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-tertiary)' }}>更新说明</p>
+                {typeof updateState.releaseNotes === 'string' ? (
+                  <div className="release-notes-content space-y-1" dangerouslySetInnerHTML={{ __html: formatReleaseNotes(updateState.releaseNotes) }} />
+                ) : (<div className="release-notes-content space-y-1">{updateState.releaseNotes}</div>)}
+              </div>
+            )}
+            <div className="flex gap-3 justify-end">
+              {updateState.status === 'available' && (
+                <>
+                  <button onClick={() => setShowUpdateDialog(false)} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-150" style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>稍后更新</button>
+                  <button onClick={handleDownload} className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150" style={{ background: 'var(--zeiss-blue)', color: 'white', boxShadow: '0 4px 14px rgba(0,102,204,0.25)' }}>立即下载</button>
+                </>
+              )}
+              {updateState.status === 'downloading' && <span className="text-sm" style={{ color: 'var(--text-muted)' }}>请勿关闭应用...</span>}
+              {updateState.status === 'downloaded' && (
+                <>
+                  <button onClick={() => setShowUpdateDialog(false)} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-150" style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>稍后安装</button>
+                  <button onClick={handleInstall} className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150" style={{ background: 'var(--success, #10B981)', color: 'white', boxShadow: '0 4px 14px rgba(16,185,129,0.25)' }}>立即安装并重启</button>
+                </>
+              )}
+              {updateState.status === 'error' && (
+                <>
+                  <button onClick={() => setShowUpdateDialog(false)} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-150" style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>关闭</button>
+                  <button onClick={handleCheckUpdate} className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150" style={{ background: 'var(--zeiss-blue)', color: 'white', boxShadow: '0 4px 14px rgba(0,102,204,0.25)' }}>重试</button>
+                </>
+              )}
+              {(updateState.status === 'not-available' || updateState.status === 'idle') && (
+                <button onClick={() => setShowUpdateDialog(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150" style={{ background: 'var(--zeiss-blue)', color: 'white', boxShadow: '0 4px 14px rgba(0,102,204,0.25)' }}>确定</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatReleaseNotes(text) {
+  if (!text) return '';
+  return text
+    .replace(/^### (.+)$/gm, '<p style="font-weight:600;margin-top:8px;margin-bottom:4px;">$1</p>')
+    .replace(/^## (.+)$/gm, '<p style="font-weight:700;font-size:14px;margin-top:8px;margin-bottom:4px;">$1</p>')
+    .replace(/^- (.+)$/gm, '<div style="display:flex;align-items:flex-start;gap:6px;"><span style="margin-top:6px;width:4px;height:4px;border-radius:50%;background:currentColor;flex-shrink:0;"></span><span>$1</span></div>')
+    .replace(/\n{2,}/g, '<div style="height:8px;"></div>')
+    .replace(/\n/g, '');
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
