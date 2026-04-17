@@ -10,8 +10,11 @@
     "copy:renderer": "node scripts/copy-renderer.js",
     "prepare:python-runtime": "node scripts/prepare-python-runtime.js",
     "inject:release-notes": "node scripts/inject-release-notes.js",
-    "build": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -w && npm run inject:release-notes",
-    "build:mac": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -m && npm run inject:release-notes"
+    "build": "npm run build:win",
+    "build:win": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -w && npm run inject:release-notes",
+    "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder --config electron-builder.local.js --mac",
+    "build:mac:signed": "npm run build:renderer && npm run copy:renderer && electron-builder --config electron-builder.signed.js --mac && npm run inject:release-notes",
+    "build:mac:release": "npm run build:mac:signed"
   },
   "author": "",
   "license": "ISC",
