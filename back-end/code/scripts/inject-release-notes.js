@@ -1,15 +1,3 @@
-/**
- * inject-release-notes.js
- * 
- * 打包后自动运行：读取 release-notes/{platform}/{version}.md，
- * 将内容注入 dist/ 下的 latest.yml / latest-mac.yml 的 releaseNotes 字段。
- * 
- * 用法：node scripts/inject-release-notes.js
- * 
- * electron-builder 生成的 latest.yml 格式为 YAML，
- * 本脚本在文件末尾追加 releaseNotes 字段（YAML block scalar 格式）。
- */
-
 const fs = require('fs')
 const path = require('path')
 
@@ -17,63 +5,102 @@ const pkg = require('../package.json')
 const version = pkg.version
 const distDir = path.join(__dirname, '..', 'dist')
 
-// 平台 → yml 文件名 → release-notes 子目录
 const platformConfigs = [
-  { ymlFile: 'latest.yml', noteDir: 'windows' },
-  { ymlFile: 'latest-mac.yml', noteDir: 'mac' },
+  {
+    label: 'windows',
+    ymlFile: 'latest.yml',
+    noteDir: 'windows',
+    detectsArtifact(name) {
+      return name.endsWith('.exe')
+    }
+  },
+  {
+    label: 'mac',
+    ymlFile: 'latest-mac.yml',
+    noteDir: 'mac',
+    detectsArtifact(name) {
+      return name.endsWith('.dmg') || name.endsWith('.zip')
+    }
+  }
 ]
+
+function detectTargetConfigs() {
+  if (!fs.existsSync(distDir)) {
+    return platformConfigs
+  }
+
+  const distEntries = fs.readdirSync(distDir).map(name => name.toLowerCase())
+  const targets = platformConfigs.filter(({ ymlFile, detectsArtifact }) => (
+    distEntries.includes(ymlFile.toLowerCase()) ||
+    distEntries.some(entry => detectsArtifact(entry))
+  ))
+
+  return targets.length > 0 ? targets : platformConfigs
+}
+
+function loadReleaseNotes(noteDir) {
+  const notePath = path.join(__dirname, '..', 'release-notes', noteDir, `${version}.md`)
+  if (!fs.existsSync(notePath)) {
+    console.warn(`[inject-release-notes] release note not found: ${notePath}`)
+    return null
+  }
+
+  const noteContent = fs.readFileSync(notePath, 'utf-8').trim()
+  if (!noteContent) {
+    console.warn(`[inject-release-notes] release note is empty: ${notePath}`)
+    return null
+  }
+
+  return noteContent
+}
+
+function injectReleaseNotes(ymlPath, noteContent) {
+  const indentedNotes = noteContent
+    .split('\n')
+    .map(line => `  ${line}`)
+    .join('\n')
+
+  let ymlContent = fs.readFileSync(ymlPath, 'utf-8')
+  ymlContent = ymlContent.replace(/\nreleaseNotes:[\s\S]*?(?=\n[a-zA-Z]|\n$|$)/g, '')
+  ymlContent = `${ymlContent.trimEnd()}\nreleaseNotes: |\n${indentedNotes}\n`
+  fs.writeFileSync(ymlPath, ymlContent, 'utf-8')
+}
 
 function run() {
   console.log(`[inject-release-notes] version: ${version}`)
   console.log(`[inject-release-notes] dist dir: ${distDir}`)
 
+  const targetConfigs = detectTargetConfigs()
+  console.log(`[inject-release-notes] detected targets: ${targetConfigs.map(({ label }) => label).join(', ')}`)
+
   let injected = 0
 
-  for (const { ymlFile, noteDir } of platformConfigs) {
+  for (const { label, ymlFile, noteDir } of targetConfigs) {
     const ymlPath = path.join(distDir, ymlFile)
     if (!fs.existsSync(ymlPath)) {
-      console.log(`[inject-release-notes] ${ymlFile} not found, skipping`)
+      console.warn(
+        `[inject-release-notes] ${ymlFile} not found for ${label}; ` +
+        'electron-builder must generate update metadata before release notes can be injected'
+      )
       continue
     }
 
-    // 读取 release notes markdown
-    const notePath = path.join(__dirname, '..', 'release-notes', noteDir, `${version}.md`)
-    if (!fs.existsSync(notePath)) {
-      console.warn(`[inject-release-notes] release note not found: ${notePath}`)
-      continue
-    }
-
-    const noteContent = fs.readFileSync(notePath, 'utf-8').trim()
+    const noteContent = loadReleaseNotes(noteDir)
     if (!noteContent) {
-      console.warn(`[inject-release-notes] release note is empty: ${notePath}`)
       continue
     }
 
-    // 读取现有 yml
-    let ymlContent = fs.readFileSync(ymlPath, 'utf-8')
-
-    // 移除已有的 releaseNotes 字段（如果有）
-    ymlContent = ymlContent.replace(/\nreleaseNotes:[\s\S]*?(?=\n[a-zA-Z]|\n$|$)/g, '')
-
-    // 将 markdown 转为 YAML block scalar（使用 | 保留换行）
-    const indentedNotes = noteContent
-      .split('\n')
-      .map(line => '  ' + line)
-      .join('\n')
-
-    // 追加 releaseNotes 字段
-    ymlContent = ymlContent.trimEnd() + '\nreleaseNotes: |\n' + indentedNotes + '\n'
-
-    fs.writeFileSync(ymlPath, ymlContent, 'utf-8')
+    injectReleaseNotes(ymlPath, noteContent)
     console.log(`[inject-release-notes] injected into ${ymlFile} (${noteContent.length} chars)`)
     injected++
   }
 
   if (injected === 0) {
     console.warn('[inject-release-notes] no yml files were updated')
-  } else {
-    console.log(`[inject-release-notes] done, ${injected} file(s) updated`)
+    return
   }
+
+  console.log(`[inject-release-notes] done, ${injected} file(s) updated`)
 }
 
 run()
