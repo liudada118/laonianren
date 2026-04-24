@@ -7,9 +7,12 @@ const baseBuild = pkg.build || {}
 const baseExtraResources = (baseBuild.extraResources || []).filter((item) => {
   return item && item.from !== 'build' && item.from !== 'python/runtime'
 })
+const hasBundledVenv = baseExtraResources.some(
+  (item) => item && item.from === 'python/venv' && item.to === 'python/venv'
+)
 const serialSource = path.join(__dirname, 'serial.txt')
 const requirementsSource = path.join(__dirname, 'python', 'requirements-electron.txt')
-const pythonFrameworkSource = '/Library/Frameworks/Python.framework/Versions/3.11'
+const pythonFrameworkSource = '/Library/Frameworks/Python.framework'
 const nestedSignScript = path.join(__dirname, 'scripts', 'sign-nested-macos-code.js')
 
 function hasResource(fromPath, toPath) {
@@ -88,6 +91,12 @@ module.exports = {
     execFileSync('node', [path.join(__dirname, 'scripts', 'patch-packaged-python-framework.js'), appPath], {
       stdio: 'inherit',
     })
+    const packagedVenvBin = path.join(appPath, 'Contents', 'Resources', 'python', 'venv', 'bin')
+    if (fs.existsSync(packagedVenvBin)) {
+      execFileSync('node', [path.join(__dirname, 'scripts', 'fix-python-runtime-links.js'), appPath], {
+        stdio: 'inherit',
+      })
+    }
   },
   afterSign: async (context) => {
     const identity = resolveDeveloperIdIdentity()
@@ -103,6 +112,19 @@ module.exports = {
   },
   extraResources: [
     ...baseExtraResources,
+    ...(!hasBundledVenv
+      ? [
+          {
+            from: 'python/venv',
+            to: 'python/venv',
+            filter: [
+              '**/*',
+              '!**/__pycache__/**',
+              '!**/.DS_Store',
+            ],
+          },
+        ]
+      : []),
     ...(fs.existsSync(serialSource) && !hasResource('serial.txt', 'serial.txt')
       ? [
           {
@@ -121,11 +143,11 @@ module.exports = {
         ]
       : []),
     ...(fs.existsSync(pythonFrameworkSource) &&
-    !hasResource(pythonFrameworkSource, 'python-runtime/Versions/3.11')
+    !hasResource(pythonFrameworkSource, 'python-runtime/Python.framework')
       ? [
           {
             from: pythonFrameworkSource,
-            to: 'python-runtime/Versions/3.11',
+            to: 'python-runtime/Python.framework',
           },
         ]
       : []),
@@ -136,6 +158,9 @@ module.exports = {
     hardenedRuntime: true,
     entitlements: 'signing/entitlements.mac.plist',
     entitlementsInherit: 'signing/entitlements.mac.inherit.plist',
+    signIgnore: [
+      '.*\\/Contents\\/Resources\\/python-runtime\\/.*',
+    ],
     gatekeeperAssess: false,
     target: [
       {

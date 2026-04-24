@@ -9,22 +9,36 @@ if (!appPath) {
   process.exit(1)
 }
 
-const pythonRoot = path.join(
-  appPath,
-  'Contents',
-  'Resources',
-  'python-runtime',
-  'Versions',
-  '3.11'
+const resourcesDir = path.join(appPath, 'Contents', 'Resources')
+const pythonRootCandidates = [
+  path.join(resourcesDir, 'python-runtime', 'Python.framework', 'Versions', '3.11'),
+  path.join(resourcesDir, 'python-runtime', 'Versions', '3.11'),
+]
+const pythonRoot = pythonRootCandidates.find((candidate) =>
+  fs.existsSync(path.join(candidate, 'bin', 'python3.11'))
 )
 
-if (!fs.existsSync(path.join(pythonRoot, 'bin', 'python3.11'))) {
+if (!pythonRoot) {
   console.log('[patch-python-framework] skip: packaged Python.framework not found')
   process.exit(0)
 }
 
 const oldPrefix = '/Library/Frameworks/Python.framework/Versions/3.11'
 const changedTargets = new Set()
+
+function ensureOwnerWritable(targetPath) {
+  const stats = fs.lstatSync(targetPath)
+  if (stats.isSymbolicLink()) return
+
+  const currentMode = stats.mode & 0o777
+  const desiredMode = stats.isDirectory()
+    ? (currentMode | 0o700)
+    : (currentMode | 0o200)
+
+  if (desiredMode !== currentMode) {
+    fs.chmodSync(targetPath, desiredMode)
+  }
+}
 
 function walk(dir, result = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -102,6 +116,11 @@ const allTargets = walk(pythonRoot)
   .filter((targetPath) => fs.existsSync(targetPath) && fs.statSync(targetPath).isFile())
   .filter(isMachO)
 
+ensureOwnerWritable(pythonRoot)
+for (const targetPath of walk(pythonRoot)) {
+  ensureOwnerWritable(targetPath)
+}
+
 for (const targetPath of allTargets) {
   const installName = parseInstallName(targetPath)
   if (installName && installName.startsWith(oldPrefix)) {
@@ -121,6 +140,43 @@ for (const signTarget of changedTargets) {
   execFileSync('codesign', ['--force', '--sign', '-', signTarget], {
     stdio: 'inherit',
   })
+}
+
+const pythonIntelHelper = path.join(pythonRoot, 'bin', 'python3.11-intel64')
+if (fs.existsSync(pythonIntelHelper)) {
+  fs.rmSync(pythonIntelHelper, { force: true })
+}
+
+const pythonIntelLink = path.join(pythonRoot, 'bin', 'python3-intel64')
+try {
+  fs.rmSync(pythonIntelLink, { force: true })
+} catch {}
+
+const buildConfigDir = path.join(pythonRoot, 'lib', 'python3.11', 'config-3.11-darwin')
+if (fs.existsSync(buildConfigDir)) {
+  fs.rmSync(buildConfigDir, { recursive: true, force: true })
+}
+
+for (const targetPath of walk(pythonRoot)) {
+  if (!targetPath.endsWith('.a')) continue
+  fs.rmSync(targetPath, { force: true })
+}
+
+const versionsDir = path.dirname(pythonRoot)
+for (const entry of fs.readdirSync(versionsDir, { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue
+  if (entry.name === '3.11') continue
+  fs.rmSync(path.join(versionsDir, entry.name), { recursive: true, force: true })
+}
+
+const frameworkSignatureDir = path.join(pythonRoot, '_CodeSignature')
+if (fs.existsSync(frameworkSignatureDir)) {
+  fs.rmSync(frameworkSignatureDir, { recursive: true, force: true })
+}
+
+const pythonAppSignatureDir = path.join(pythonRoot, 'Resources', 'Python.app', 'Contents', '_CodeSignature')
+if (fs.existsSync(pythonAppSignatureDir)) {
+  fs.rmSync(pythonAppSignatureDir, { recursive: true, force: true })
 }
 
 console.log(`[patch-python-framework] patched targets=${changedTargets.size}`)

@@ -17,9 +17,19 @@ function getPackagedPythonHome(resourceBase = process.resourcesPath) {
   const base = getResourcesBase(resourceBase)
   if (!base || process.platform === 'win32') return null
 
-  const home = path.join(base, 'python-runtime', 'Versions', PY_VERSION)
-  const pythonBin = path.join(home, 'bin', `python${PY_VERSION}`)
-  return fs.existsSync(pythonBin) ? home : null
+  const candidates = [
+    path.join(base, 'python-runtime', 'Python.framework', 'Versions', PY_VERSION),
+    path.join(base, 'python-runtime', 'Versions', PY_VERSION),
+  ]
+
+  for (const home of candidates) {
+    const pythonBin = path.join(home, 'bin', `python${PY_VERSION}`)
+    if (fs.existsSync(pythonBin)) {
+      return home
+    }
+  }
+
+  return null
 }
 
 function getPackagedRuntimeDir(resourceBase = process.resourcesPath) {

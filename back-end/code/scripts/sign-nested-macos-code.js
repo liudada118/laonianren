@@ -36,6 +36,12 @@ function isBundleDir(targetPath) {
   return targetPath.endsWith('.app') || targetPath.endsWith('.framework')
 }
 
+function isPythonFrameworkMainExecutable(targetPath) {
+  return targetPath.endsWith(
+    `${path.sep}python-runtime${path.sep}Python.framework${path.sep}Versions${path.sep}3.11${path.sep}Python`
+  )
+}
+
 function fileDescription(targetPath) {
   try {
     return execFileSync('file', ['-b', targetPath], { encoding: 'utf8' }).trim()
@@ -51,9 +57,11 @@ function isMachOBinary(targetPath) {
 function shouldSignFile(targetPath) {
   const base = path.basename(targetPath)
   const ext = path.extname(targetPath)
+  if (isPythonFrameworkMainExecutable(targetPath)) return false
+  if (targetPath.includes(`${path.sep}python-runtime${path.sep}`)) return true
   if (['.dylib', '.so', '.node'].includes(ext)) return true
   if (base === 'Python') return true
-  if (base === 'python' || base === 'python3' || base === 'python3.11') return true
+  if (base === 'python' || base === 'python3' || base === 'python3.11' || base === 'python3.11-intel64') return true
   if (base === 'ShipIt' || base === 'chrome_crashpad_handler') return true
   if (targetPath.includes(`${path.sep}Contents${path.sep}MacOS${path.sep}`)) return true
   return false
@@ -63,9 +71,11 @@ function needsRuntime(targetPath) {
   const base = path.basename(targetPath)
   return (
     targetPath.includes(`${path.sep}Contents${path.sep}MacOS${path.sep}`) ||
+    base === 'Python' ||
     base === 'python' ||
     base === 'python3' ||
     base === 'python3.11' ||
+    base === 'python3.11-intel64' ||
     base === 'ShipIt' ||
     base === 'chrome_crashpad_handler'
   )

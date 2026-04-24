@@ -13,7 +13,7 @@ const hasBundledVenv = baseExtraResources.some(
 )
 const serialSource = path.join(__dirname, 'serial.txt')
 const requirementsSource = path.join(__dirname, 'python', 'requirements-electron.txt')
-const pythonFrameworkSource = '/Library/Frameworks/Python.framework/Versions/3.11'
+const pythonFrameworkSource = '/Library/Frameworks/Python.framework'
 const hasBundledSerial = baseExtraResources.some(
   (item) => item && item.from === 'serial.txt' && item.to === 'serial.txt'
 )
@@ -24,7 +24,7 @@ const hasBundledRequirements = baseExtraResources.some(
     item.to === 'python/requirements-electron.txt'
 )
 const hasBundledPythonFramework = baseExtraResources.some(
-  (item) => item && item.from === pythonFrameworkSource && item.to === 'python-runtime/Versions/3.11'
+  (item) => item && item.from === pythonFrameworkSource && item.to === 'python-runtime/Python.framework'
 )
 const runtimeFiles = [
   'package.json',
@@ -72,6 +72,9 @@ module.exports = {
   afterPack: async (context) => {
     const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
     execFileSync('node', [path.join(__dirname, 'scripts', 'patch-packaged-python-framework.js'), appPath], {
+      stdio: 'inherit',
+    })
+    execFileSync('node', [path.join(__dirname, 'scripts', 'fix-python-runtime-links.js'), appPath], {
       stdio: 'inherit',
     })
   },
@@ -130,7 +133,7 @@ module.exports = {
       ? [
           {
             from: pythonFrameworkSource,
-            to: 'python-runtime/Versions/3.11',
+            to: 'python-runtime/Python.framework',
           },
         ]
       : []),

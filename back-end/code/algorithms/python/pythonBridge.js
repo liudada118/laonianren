@@ -1,10 +1,28 @@
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+
+function loadPythonRuntimeHelpers() {
+  try {
+    return require('../../util/pythonRuntime')
+  } catch (localErr) {
+    const runtimeResourceBase = process.env.resourcesPath || process.resourcesPath || ''
+    const packagedRuntimeModule = runtimeResourceBase
+      ? path.join(runtimeResourceBase, 'app.asar', 'util', 'pythonRuntime.js')
+      : ''
+
+    if (packagedRuntimeModule && fs.existsSync(packagedRuntimeModule)) {
+      return require(packagedRuntimeModule)
+    }
+
+    throw localErr
+  }
+}
+
 const {
   getPackagedPythonBinary,
   getPackagedPythonEnv,
-} = require('../../util/pythonRuntime')
+} = loadPythonRuntimeHelpers()
 
 const resourceBase = process.env.resourcesPath || process.resourcesPath || ''
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000

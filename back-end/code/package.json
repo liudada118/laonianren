@@ -1,6 +1,6 @@
 {
-  "name": "jqtools2",
-  "version": "1.0.1",
+  "name": "samsystem",
+  "version": "1.0.5",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "build": "npm run build:win",
     "build:win": "npm run build:renderer && npm run copy:renderer && npm run prepare:python-runtime && electron-builder -w && npm run inject:release-notes",
     "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder --config electron-builder.local.js --mac",
-    "build:mac:signed": "npm run build:renderer && npm run copy:renderer && electron-builder --config electron-builder.signed.js --mac && npm run inject:release-notes",
+    "build:mac:signed": "npm run build:renderer && npm run copy:renderer && node scripts/build-mac-release.js",
     "build:mac:release": "npm run build:mac:signed"
   },
   "author": "",
@@ -33,6 +33,7 @@
     "ws": "^8.18.2"
   },
   "build": {
+    "appId": "com.electron.samsystem",
     "asar": true,
     "asarUnpack": [
       "**/*.node",
@@ -67,13 +68,8 @@
         "to": "python/requirements-electron.txt"
       },
       {
-        "from": "algorithms/python",
-        "to": "algorithms/python",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**",
-          "!**/*.pyc"
-        ]
+        "from": "algorithms/python/bridge.py",
+        "to": "algorithms/python/bridge.py"
       },
       {
         "from": "db/init.db",

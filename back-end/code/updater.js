@@ -4,14 +4,13 @@
  * 更新服务器: http://sensor.bodyta.com/evaluate
  */
 const { autoUpdater } = require('electron-updater')
-const { ipcMain, BrowserWindow } = require('electron')
+const { app, ipcMain, BrowserWindow } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
 const https = require('https')
+const { UPDATE_SERVER_URL, UPDATE_CHANNEL, writeAppUpdateConfig } = require('./util/updaterConfig')
 
-// 更新服务器地址
-const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluate'
 const UPDATE_INFO_FILE = process.platform === 'darwin' ? 'latest-mac.yml' : 'latest.yml'
 
 // 更新检查间隔（毫秒）- 默认每30分钟检查一次
@@ -20,6 +19,20 @@ const CHECK_INTERVAL = 30 * 60 * 1000
 let checkTimer = null
 let updaterEnabled = false
 let updaterIpcRegistered = false
+
+function ensureRuntimeAppUpdateConfig() {
+  if (!app.isPackaged) return null
+
+  const runtimeConfigPath = path.join(app.getPath('userData'), 'app-update.yml')
+  try {
+    writeAppUpdateConfig(runtimeConfigPath, UPDATE_SERVER_URL, UPDATE_CHANNEL)
+    autoUpdater.updateConfigPath = runtimeConfigPath
+    return runtimeConfigPath
+  } catch (err) {
+    console.warn(`[updater] 无法写入运行时 app-update.yml: ${err.message}`)
+    return null
+  }
+}
 
 function buildUpdateInfoUrl() {
   return `${UPDATE_SERVER_URL.replace(/\/$/, '')}/${UPDATE_INFO_FILE}`
@@ -118,12 +131,13 @@ function registerUpdaterIpcHandlers() {
 function initAutoUpdater(mainWindow) {
   registerUpdaterIpcHandlers()
   updaterEnabled = true
+  ensureRuntimeAppUpdateConfig()
 
   // 配置更新源
   autoUpdater.setFeedURL({
     provider: 'generic',
     url: UPDATE_SERVER_URL,
-    channel: 'latest'
+    channel: UPDATE_CHANNEL
   })
 
   // 禁用自动下载，让用户确认后再下载
