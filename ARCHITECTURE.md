@@ -1,12 +1,13 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-15 10:30
+**最后更新**: 2026-04-15 17:10
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-04-15 17:10 | main | 配置变更 | 修复 Electron 自动更新元数据未生成的问题。恢复 `back-end/code/package.json` 中 `electron-builder` 的 `build.publish` generic 配置，使 Windows 构建重新产出 `dist/latest.yml`；同步将 `back-end/code/dev-app-update.yml` 更新到 `http://sensor.bodyta.com/shroom1`，并重写 `back-end/code/scripts/inject-release-notes.js`，按实际构建产物识别平台，仅在对应 yml 存在时注入 release notes，并在缺少更新元数据时输出明确提示。 |
 | 2026-04-15 10:30 | main | 新增功能 | 完善版本管理和自动更新流程。新增 `release-notes/` 目录结构（windows/mac 分平台存放版本更新说明）；新增 `inject-release-notes.js` 打包后自动将 release-notes 注入 `latest.yml` 的 `releaseNotes` 字段；更新服务器地址改为 `http://sensor.bodyta.com/shroom1`；前端新增 `VersionHistory.jsx`（紫色历史按钮 + 弹窗展示硬编码版本记录）；`UpdateNotification.jsx` 改造为右下角更新按钮 + 弹窗显示服务器 `releaseNotes`；Login.jsx 去掉检查更新按钮。修改文件：`back-end/code/updater.js`、`back-end/code/package.json`、`back-end/code/scripts/inject-release-notes.js`、`back-end/code/release-notes/`、`front-end/src/components/ui/UpdateNotification.jsx`、`front-end/src/components/ui/VersionHistory.jsx`、`front-end/src/App.jsx`、`front-end/src/pages/Login.jsx`。 |
 | 2026-04-14 | main | 配置变更 | 调整 Windows 打包链路为“完整 Python runtime 随包携带”。构建前新增 `prepare-python-runtime.js`，从构建机基础 Python 复制标准库、DLL 与运行时文件到 `back-end/code/python/runtime`，再覆盖项目 `venv` 的 `site-packages`，生成可移植的 `python/runtime/python.exe`；`electron-builder` 现改为携带 `python/runtime`，而不再直接打包 `venv`。修改文件：`back-end/code/scripts/prepare-python-runtime.js`、`back-end/code/package.json`、`back-end/code/.gitignore`。 |
 | 2026-04-14 | main | 配置变更 | 调整打包版 Python 调用路径。主进程 AI 服务与报告算法桥接在打包模式下统一从 `resources/python/runtime` 启动解释器，并显式注入 `PYTHONHOME`/`PYTHONNOUSERSITE`；同时将 `algorithms/python/bridge.py` 作为 `extraResources` 真实文件打入安装包，避免 `app.asar` 内脚本路径无法被外部 Python 进程直接访问。修改文件：`back-end/code/index.js`、`back-end/code/algorithms/python/pythonBridge.js`、`back-end/code/package.json`。 |
@@ -129,7 +130,7 @@
     - 在开发模式下，启动 Vite 开发服务器。
     - 启动核心后端服务 `serialServer.js` 作为一个独立的 Node.js 子进程 (`child_process.fork`)。这种隔离可以防止后端服务的崩溃影响到整个应用的稳定性。
 4.  **预加载脚本 (`preload.js`)**: 通过 `contextBridge` 安全地向渲染进程暴露 Node.js API，包括自动更新相关接口（checkForUpdate、downloadUpdate、installUpdate、getAppVersion、onUpdateStatus）。
-5.  **自动更新 (`updater.js`)**: 使用 `electron-updater` 实现应用在线自动更新，配置 generic provider 指向 `http://sensor.bodyta.com/evaluate`。启动后 5 秒自动检查更新，之后每 30 分钟定时检查。支持手动检查、下载进度通知、安装重启等完整更新流程。
+5.  **自动更新 (`updater.js`)**: 使用 `electron-updater` 实现应用在线自动更新，当前 generic provider 指向 `http://sensor.bodyta.com/shroom1`。打包链路通过 `back-end/code/package.json` 中的 `build.publish` 生成 `latest.yml` / `latest-mac.yml` 更新元数据，`back-end/code/scripts/inject-release-notes.js` 会在打包后按实际构建平台将 `release-notes/{platform}/{version}.md` 注入对应 yml 的 `releaseNotes` 字段；开发联调时则通过 `back-end/code/dev-app-update.yml` 复用同一更新源。启动后 5 秒自动检查更新，之后每 30 分钟定时检查。支持手动检查、下载进度通知、安装重启等完整更新流程。
 
 ### 2.2. 前端架构 (`front-end`)
 
@@ -341,6 +342,8 @@
 | 2026-04-14 | main | Windows pip GBK 兼容修复 | 统一 Electron 启动链路使用 `back-end/code/python/requirements-electron.txt` 作为依赖入口，并将其改为 ASCII 注释，避免 Windows 中文系统中 `pip` 读取 requirements 文件时因默认 GBK 解码而失败；修复后本地 venv 已可正常安装依赖并拉起 8765 AI 服务。 |
 | 2026-04-14 | main | 打包版 `serial.txt` 主路径选择修复 | 修复打包运行时 `serial.txt` 会优先命中 `userData` 目录旧副本的问题；新增按内容去重、按更新时间和路径优先级选主源的规则，相同内容下优先使用安装目录或 `resources` 中的文件，同时保留设置页对多路径同步写回的兼容性。 |
 | 2026-04-14 | main | 打包版脱离系统 Python | 调整 AI 服务 Python 解释器解析策略：安装包运行时只从 `resources/python/venv` 查找随包解释器，不再回退系统 `python`/`py`；若包内运行时损坏，错误信息也改为提示安装包资源缺失，而不是要求终端用户自行安装 Python。 |
+
+| 2026-04-15 17:10 | main | 自动更新元数据生成修复 | 恢复 `electron-builder` 的 `build.publish` 配置后，Windows 打包重新产出 `dist/latest.yml`，并已验证 `scripts/inject-release-notes.js` 可自动注入 `releaseNotes`；同时将 `dev-app-update.yml` 的更新源与生产环境统一到 `http://sensor.bodyta.com/shroom1`。|
 
 ## 6. 未来维护与更新
 
