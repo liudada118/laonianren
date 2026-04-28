@@ -743,7 +743,7 @@ export default function StandingAssessment() {
             </div>
             <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>静态站立评估指导</h3>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              请被评估者站在<span className="font-bold" style={{ color: '#0066CC' }}>足底压力传感器中心</span>，<span className="font-bold" style={{ color: '#0066CC' }}>自然站立状态</span>，保持<span className="font-bold" style={{ color: '#0066CC' }}>10秒以上</span>。
+              点击屏幕下方采集按钮后，请被评估者站在<span className="font-bold" style={{ color: '#0066CC' }}>足底压力传感器中心</span>，<span className="font-bold" style={{ color: '#0066CC' }}>自然站立状态</span>，保持<span className="font-bold" style={{ color: '#0066CC' }}>10秒以上</span>，10秒后系统会自动结束采集。
             </p>
             <button
               onClick={() => setShowGuideTip(false)}
