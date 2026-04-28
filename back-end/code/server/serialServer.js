@@ -3751,6 +3751,16 @@ server.on("connection", function connection(ws, req) {
   const clientName = ip + port;
   console.log("%s is connected", clientName);
 
+  // 新连接建立时，立即推送当前设备状态（macInfo）给该客户端
+  // 解决：断开 WebSocket 再重连后前端设备状态丢失的问题
+  try {
+    if (macInfo && Object.keys(macInfo).length) {
+      ws.send(JSON.stringify({ macInfo }))
+    }
+  } catch (e) {
+    console.log('[ws] push macInfo to new client failed:', e.message)
+  }
+
   socketSendData(server, JSON.stringify({}))
 
   ws.on("message", (msg) => {
