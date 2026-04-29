@@ -715,7 +715,7 @@ export default function GaitAssessment() {
   const [smoothness, setSmoothness] = useState(0.5);
   const [filterEnabled, setFilterEnabled] = useState(true);
   const [filterThreshold, setFilterThreshold] = useState(15);
-  const [filterMinArea, setFilterMinArea] = useState(20);
+  const [filterMinArea, setFilterMinArea] = useState(12);
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [optimizeBad, setOptimizeBad] = useState(40);
   const [optimizeGood, setOptimizeGood] = useState(100);

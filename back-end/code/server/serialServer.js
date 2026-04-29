@@ -1016,7 +1016,7 @@ const footFilterDefaultConfig = {
   gait: {
     filterEnabled: true,
     filterThreshold: 15,
-    filterMinArea: 20,
+    filterMinArea: 12,
     optimizeEnabled: true,
     optimizeBad: 40,
     optimizeGood: 100,
