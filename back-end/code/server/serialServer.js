@@ -1007,8 +1007,8 @@ let activeSampleType = null
 const footFilterDefaultConfig = {
   standing: {
     filterEnabled: true,
-    filterThreshold: 12,
-    filterMinArea: 15,
+    filterThreshold: 10,
+    filterMinArea: 8,
     optimizeEnabled: true,
     optimizeBad: 40,
     optimizeGood: 100,

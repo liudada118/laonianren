@@ -178,8 +178,8 @@ export default function StandingAssessment() {
   const [smoothness, setSmoothness] = useState(0.8);
   const [filterThreshold, setFilterThreshold] = useState(0);
   const [filterEnabled, setFilterEnabled] = useState(true);
-  const [standingFilterThreshold, setStandingFilterThreshold] = useState(12);
-  const [standingFilterMinArea, setStandingFilterMinArea] = useState(15);
+  const [standingFilterThreshold, setStandingFilterThreshold] = useState(10);
+  const [standingFilterMinArea, setStandingFilterMinArea] = useState(8);
   const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [standingOptimizeBad, setStandingOptimizeBad] = useState(40);
   const [standingOptimizeGood, setStandingOptimizeGood] = useState(100);

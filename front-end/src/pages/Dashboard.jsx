@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { VERSION_HISTORY } from '../components/ui/VersionHistory';
+import { backendBridge } from '../lib/BackendBridge';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
@@ -274,6 +275,14 @@ export default function Dashboard() {
     releaseNotes: '', releaseDate: '', bytesPerSecond: 0,
   });
   const isElectron = typeof window !== 'undefined' && window.electronAPI && window.electronAPI.onUpdateStatus;
+
+  // 进入 Dashboard 时重置后端推送模式为全部设备，确保所有设备状态灯正常显示
+  // （从评估页面返回时，后端可能仍处于单设备推送模式，导致其他设备状态灯灰色）
+  useEffect(() => {
+    if (deviceConnStatus === 'connected') {
+      backendBridge.setActiveMode(null).catch(e => console.warn('[Dashboard] 重置推送模式失败:', e));
+    }
+  }, [deviceConnStatus]);
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.getAppVersion) {
