@@ -185,8 +185,17 @@ export function AssessmentProvider({ children }) {
   }, []);
 
   // ─── 断开所有设备 ───
-  const disconnectAllDevices = useCallback(() => {
+  const disconnectAllDevices = useCallback(async () => {
+    // 1. 先通知后端关闭所有串口
+    try {
+      await backendBridge.disconnectAll();
+      console.log('[disconnectAllDevices] 后端串口已全部断开');
+    } catch (e) {
+      console.warn('[disconnectAllDevices] 后端断开失败:', e);
+    }
+    // 2. 再断开 WebSocket 连接
     backendBridge.disconnect();
+    // 3. 重置前端状态
     setDeviceConnStatus('disconnected');
     setDeviceOnlineMap({});
     setWsConnected(false);

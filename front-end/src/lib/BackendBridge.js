@@ -165,6 +165,11 @@ class BackendBridge {
     return res.json();
   }
 
+  async disconnectAll() {
+    const res = await fetch(`${this.httpUrl}/disconnectAll`);
+    return res.json();
+  }
+
   async setActiveMode(mode) {
     const res = await fetch(`${this.httpUrl}/setActiveMode`, {
       method: 'POST',

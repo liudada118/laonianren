@@ -2403,6 +2403,64 @@ app.get('/connPort', async (req, res) => {
 
 })
 
+// 断开所有串口并重置状态（点击"已连接"回到"一键连接"时调用）
+app.get('/disconnectAll', async (req, res) => {
+  try {
+    console.log('[disconnectAll] 开始断开所有串口...')
+    const closedPaths = []
+
+    // 1. 停止数据推送定时器
+    if (playtimer) {
+      clearInterval(playtimer)
+      playtimer = null
+    }
+    currentSendIntervalMs = null
+
+    // 2. 关闭所有串口并清理事件监听
+    for (const portPath of Object.keys(parserArr)) {
+      const item = parserArr[portPath]
+      if (item && item.port) {
+        try { item.port.removeAllListeners() } catch (e) {}
+        if (item.port.isOpen) {
+          try {
+            await new Promise((resolve) => {
+              item.port.close((err) => {
+                if (err) console.warn('[disconnectAll] close error:', portPath, err.message)
+                resolve()
+              })
+            })
+          } catch (e) {
+            console.warn('[disconnectAll] close exception:', portPath, e.message)
+          }
+        }
+        closedPaths.push(portPath)
+      }
+    }
+
+    // 3. 清空所有运行时状态
+    for (const key of Object.keys(parserArr)) delete parserArr[key]
+    for (const key of Object.keys(dataMap)) delete dataMap[key]
+    for (const key of Object.keys(lastDataTime)) delete lastDataTime[key]
+    for (const key of Object.keys(macInfo)) delete macInfo[key]
+    linkIngPort.length = 0
+    colFlag = false
+    historyFlag = false
+    historyPlayFlag = false
+    activeSendTypes = null
+    activeAssessmentId = null
+    activeSampleType = null
+    sensorHzCache = {}
+    sensorHzLocked = false
+    sensorTypeSignature = ''
+
+    console.log('[disconnectAll] 已断开', closedPaths.length, '个串口:', closedPaths)
+    res.json(new HttpResult(0, { closed: closedPaths }, '已断开所有串口'))
+  } catch (e) {
+    console.error('[disconnectAll] 失败:', e)
+    res.json(new HttpResult(1, {}, '断开失败: ' + e.message))
+  }
+})
+
 // 重新扫描串口（掉线重连）
 // 清理已断开的串口，重新扫描并连接新发现的设备
 app.get('/rescanPort', async (req, res) => {
