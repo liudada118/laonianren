@@ -1,12 +1,13 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-29 00:05
+**最后更新**: 2026-04-29 04:15
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-04-29 04:15 | ld | 修复缺陷 | 修复设备已连接但状态栏绿灯显示灰色的问题。在 `Dashboard.jsx` 挂载时重置后端推送模式为全部设备（`setActiveMode(null)`），确保从单设备评估页面返回主页后，后端能够继续推送所有已连接设备的状态。同时调整静态站立评估的脚垫滤波默认值：`filterThreshold` 改为 10，`filterMinArea` 改为 8。修改文件：`front-end/src/pages/Dashboard.jsx`、`back-end/code/server/serialServer.js`、`front-end/src/pages/assessment/StandingAssessment.jsx`。 |
 | 2026-04-29 00:05 | ld | 修复缺陷 | 解决打包更新后用户配置数据（设备MAC映射、机构名称、大模型API-key）被覆盖的问题。将 `serialPathCandidates` 简化为打包后仅使用 `userData` 目录读取和写入，移除安装目录的读写，避免更新时文件被新包替换。同时增强 `ensureSeedFile` 逻辑并添加 `init.db` 的种子复制。修改文件：`back-end/code/server/serialServer.js`。 |
 | 2026-04-15 17:10 | main | 配置变更 | 修复 Electron 自动更新元数据未生成的问题。恢复 `back-end/code/package.json` 中 `electron-builder` 的 `build.publish` generic 配置，使 Windows 构建重新产出 `dist/latest.yml`；同步将 `back-end/code/dev-app-update.yml` 更新到 `http://sensor.bodyta.com/shroom1`，并重写 `back-end/code/scripts/inject-release-notes.js`，按实际构建产物识别平台，仅在对应 yml 存在时注入 release notes，并在缺少更新元数据时输出明确提示。 |
 | 2026-04-15 10:30 | main | 新增功能 | 完善版本管理和自动更新流程。新增 `release-notes/` 目录结构（windows/mac 分平台存放版本更新说明）；新增 `inject-release-notes.js` 打包后自动将 release-notes 注入 `latest.yml` 的 `releaseNotes` 字段；更新服务器地址改为 `http://sensor.bodyta.com/shroom1`；前端新增 `VersionHistory.jsx`（紫色历史按钮 + 弹窗展示硬编码版本记录）；`UpdateNotification.jsx` 改造为右下角更新按钮 + 弹窗显示服务器 `releaseNotes`；Login.jsx 去掉检查更新按钮。修改文件：`back-end/code/updater.js`、`back-end/code/package.json`、`back-end/code/scripts/inject-release-notes.js`、`back-end/code/release-notes/`、`front-end/src/components/ui/UpdateNotification.jsx`、`front-end/src/components/ui/VersionHistory.jsx`、`front-end/src/App.jsx`、`front-end/src/pages/Login.jsx`。 |
