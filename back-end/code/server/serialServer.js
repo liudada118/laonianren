@@ -23,7 +23,8 @@ const module2 = require('../util/aes_ecb')
 const multer = require('multer')
 
 
-console.log('userData from env:', typeof process.env.isPackaged);
+console.log('[storage] userData from env:', process.env.userData);
+console.log('[storage] isPackaged:', process.env.isPackaged);
 
 let { isPackaged, appPath } = process.env
 isPackaged = isPackaged == 'true'
@@ -51,14 +52,24 @@ function ensureDirSync(dir) {
 
 function ensureSeedFile(src, dest) {
   try {
-    if (!src || !fs.existsSync(src) || fs.existsSync(dest)) return
+    if (!src || !fs.existsSync(src)) {
+      console.log('[storage] seed skip (src missing):', src)
+      return
+    }
+    if (fs.existsSync(dest)) {
+      console.log('[storage] seed skip (dest exists):', dest)
+      return
+    }
     ensureDirSync(path.dirname(dest))
     fs.copyFileSync(src, dest)
+    console.log('[storage] seed copied:', src, '->', dest)
   } catch (err) {
     console.warn('[storage] failed to seed file:', src, '->', dest, err.message)
   }
 }
 
+console.log('[storage] storageBase:', storageBase)
+console.log('[storage] userSerialPath:', path.join(storageBase, 'serial.txt'))
 ensureDirSync(storageBase)
 
 const bundledConfigPath = path.join(bundledBase, 'config.txt')
@@ -96,12 +107,9 @@ const serialPathCandidates = (() => {
   if (!isPackaged) {
     return [bundledSerialPath]
   }
-  return [
-    userSerialPath,
-    path.join(packagedAppRootDir, 'serial.txt'),
-    packagedResourcesSerialPath,
-    bundledSerialPath,
-  ]
+  // 打包后只从 userData 目录读取用户配置，避免更新安装后被覆盖
+  // 首次安装时 ensureSeedFile 会从 resources 复制默认值到 userData
+  return [userSerialPath]
 })()
 
 function dedupeSerialPaths(paths) {
@@ -111,14 +119,9 @@ function dedupeSerialPaths(paths) {
 function getSerialPathPriority(serialPath) {
   if (!serialPath) return 0
   const normalized = path.resolve(serialPath)
-  const priorityPaths = [
-    path.join(packagedAppRootDir, 'serial.txt'),
-    packagedResourcesSerialPath,
-    userSerialPath,
-    bundledSerialPath,
-  ]
-  const index = priorityPaths.findIndex((candidate) => candidate && path.resolve(candidate) === normalized)
-  return index === -1 ? 0 : priorityPaths.length - index
+  // 打包后只有 userSerialPath 一个候选，优先级最高
+  if (normalized === path.resolve(userSerialPath)) return 10
+  return 0
 }
 
 ensureDirSync(dbPath)
@@ -130,6 +133,10 @@ if (isPackaged) {
   ensureSeedFile(bundledConfigPath, userConfigPath)
   ensureSeedFile(packagedResourcesSerialPath, userSerialPath)
   ensureSeedFile(bundledSerialPath, userSerialPath)
+  // 确保 init.db 模板也复制到 userData/db 目录
+  const bundledInitDb = path.join(packagedResourcesDir, 'db', 'init.db')
+  const userInitDb = path.join(dbPath, 'init.db')
+  ensureSeedFile(bundledInitDb, userInitDb)
 }
 
 let pdfDir = pdfPath
