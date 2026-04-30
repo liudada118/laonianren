@@ -71,17 +71,16 @@ export function AssessmentProvider({ children }) {
       _handleDeviceStatusChange(type, status);
     });
 
-    // 批量设备状态更新（每帧推送，确保状态灯和在线数始终一致）
-    const offStatusBatch = backendBridge.on('deviceStatusBatch', (changes) => {
-      setDeviceOnlineMap(prev => {
-        const next = { ...prev };
-        for (const { type, status } of changes) {
-          next[type] = status;
-        }
-        return next;
-      });
-      // 对每个变化处理断开提示逻辑
-      for (const { type, status } of changes) {
+    // 批量设备状态更新（每帧推送所有设备的完整状态快照，确保状态灯和在线数始终一致）
+    const offStatusBatch = backendBridge.on('deviceStatusBatch', (snapshot) => {
+      // 直接用快照替换整个 deviceOnlineMap，确保与后端完全同步
+      const newMap = {};
+      for (const { type, status } of snapshot) {
+        newMap[type] = status;
+      }
+      setDeviceOnlineMap(newMap);
+      // 对每个设备处理断开提示逻辑
+      for (const { type, status } of snapshot) {
         _handleDeviceStatusChange(type, status);
       }
     });

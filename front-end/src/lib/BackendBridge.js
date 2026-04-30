@@ -518,19 +518,23 @@ class BackendBridge {
     }
   }
 
-  // 批量更新设备状态：一次性推送本帧中所有设备的状态变化
-  // 解决问题：逐个去重可能导致重连后部分设备状态丢失
+  // 批量更新设备状态：每帧推送所有已知设备的完整状态快照
+  // 确保前端 deviceOnlineMap 始终与后端实际状态完全一致
   _batchUpdateDeviceStatus(frameDeviceStatus) {
-    const changes = [];
-    for (const type of Object.keys(frameDeviceStatus)) {
-      const status = frameDeviceStatus[type];
-      this.deviceOnline[type] = status;
-      // 无条件推送，确保前端始终能收到最新状态
-      changes.push({ type, status });
+    // 所有已知设备类型
+    const ALL_DEVICES = ['HL', 'HR', 'sit', 'foot1', 'foot2', 'foot3', 'foot4'];
+    const snapshot = [];
+    for (const type of ALL_DEVICES) {
+      if (type in frameDeviceStatus) {
+        // 本帧中有该设备的数据，更新状态
+        this.deviceOnline[type] = frameDeviceStatus[type];
+      }
+      // 无论本帧是否有该设备数据，都推送当前已知状态
+      // 如果从未出现过（undefined），视为 offline
+      const status = this.deviceOnline[type] || 'offline';
+      snapshot.push({ type, status });
     }
-    if (changes.length > 0) {
-      this._emit('deviceStatusBatch', changes);
-    }
+    this._emit('deviceStatusBatch', snapshot);
   }
 
   _countFrame(type) {
