@@ -146,6 +146,8 @@ class BackendBridge {
       this.ws = null;
     }
     this.isConnected = false;
+    // 清空设备在线状态，确保重连后能正确触发 deviceStatus 事件
+    this.deviceOnline = {};
     this._emit('disconnect');
   }
 
