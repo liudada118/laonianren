@@ -1,12 +1,13 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-30 07:20
+**最后更新**: 2026-04-30 07:55
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-04-30 07:55 | ld | 修复缺陷 | 彻底修复设备在线数量与状态灯不一致。`_batchUpdateDeviceStatus` 改为每帧推送所有 7 个设备的完整状态快照（未出现在本帧的设备保持上次状态，默认 offline）；`AssessmentContext` 的 `deviceStatusBatch` 监听器改为用快照直接替换整个 `deviceOnlineMap`，而非合并更新，确保状态灯和在线数始终完全一致。修改文件：`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
 | 2026-04-30 07:20 | ld | 修复缺陷 | 重构设备状态推送为批量模式，彻底修复重连后在线数和状态灯不一致。旧的逐个去重逻辑（`prev !== status`）在重连、丢帧等场景下会导致部分设备状态事件不触发。重构为：`_handleMessage` 收集本帧所有设备状态到 `frameDeviceStatus`，然后通过 `_batchUpdateDeviceStatus` 无条件推送 `deviceStatusBatch` 事件；`AssessmentContext` 监听该事件一次性更新 `deviceOnlineMap`，确保状态灯和在线数始终同步。修改文件：`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
 | 2026-04-30 07:00 | ld | 修复缺陷 | 修复断开重连后设备在线数量对不上的问题。根因是 `BackendBridge.disconnect()` 未清空 `this.deviceOnline`，重连后 `_updateDeviceStatus` 检查 `prev !== status` 时发现 prev 仍是上次的 'online'，不触发 `deviceStatus` 事件，导致 React 的 `deviceOnlineMap` 不更新。修复：在 `disconnect()` 中清空 `this.deviceOnline = {}`。修改文件：`front-end/src/lib/BackendBridge.js`。 |
 | 2026-04-30 06:48 | ld | 修复缺陷 | 彻底修复断开重连后设备状态灯全灰的问题。根因是 `setActiveMode(null)` 调用 `resetSendTimer()` 清除 `playtimer` 后，由于 `activeSendTypes` 为 null 不会调用 `updateSendTimerForActiveTypes()` 重建定时器，而此时 `MaxHZ` 已有值，数据帧回调中的重建条件也不成立。修复：在 `setActiveSendTypes` 中，当 types 为 null 且有活跃串口时，主动创建默认 80ms 的 `playtimer`。同时在 `disconnectAll` 中增加重置 `MaxHZ`、`HZ`、`oldTimeObj`、`gloveLatestData` 等所有帧率计算和数据缓存相关变量。修改文件：`back-end/code/server/serialServer.js`。 |
