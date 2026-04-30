@@ -65,39 +65,27 @@ export function AssessmentProvider({ children }) {
 
   // 监听 BackendBridge 的设备状态事件
   useEffect(() => {
+    // 单个设备状态变化（保留兼容，供其他组件直接监听）
     const offStatus = backendBridge.on('deviceStatus', ({ type, status }) => {
       setDeviceOnlineMap(prev => ({ ...prev, [type]: status }));
-
-      const prevStatus = prevDeviceStatusRef.current[type];
-
-      if (prevStatus === 'online' && status === 'offline') {
-        // 设备从 online 变为 offline，启动防抖定时器，5秒后若仍然 offline 才弹提示
-        if (!offlineTimersRef.current[type]) {
-          offlineTimersRef.current[type] = setTimeout(() => {
-            offlineTimersRef.current[type] = null;
-            // 5秒后再次检查设备是否仍然 offline
-            const currentStatus = backendBridge.deviceOnline[type];
-            if (currentStatus === 'offline' || currentStatus === undefined) {
-              const deviceName = DEVICE_NAME_MAP[type] || type;
-              const alertMsg = { id: Date.now() + '_' + type, type, deviceName, time: new Date().toLocaleTimeString() };
-              setDeviceAlerts(prev => [...prev, alertMsg]);
-              console.warn(`[设备断开] ${deviceName} 已断开连接`);
-              // 5秒后自动移除提示
-              setTimeout(() => {
-                setDeviceAlerts(prev => prev.filter(a => a.id !== alertMsg.id));
-              }, 5000);
-            }
-          }, 5000);
-        }
-      } else if (status === 'online') {
-        // 设备回到 online，取消防抖定时器（避免误报）
-        if (offlineTimersRef.current[type]) {
-          clearTimeout(offlineTimersRef.current[type]);
-          offlineTimersRef.current[type] = null;
-        }
-      }
-      prevDeviceStatusRef.current[type] = status;
+      _handleDeviceStatusChange(type, status);
     });
+
+    // 批量设备状态更新（每帧推送，确保状态灯和在线数始终一致）
+    const offStatusBatch = backendBridge.on('deviceStatusBatch', (changes) => {
+      setDeviceOnlineMap(prev => {
+        const next = { ...prev };
+        for (const { type, status } of changes) {
+          next[type] = status;
+        }
+        return next;
+      });
+      // 对每个变化处理断开提示逻辑
+      for (const { type, status } of changes) {
+        _handleDeviceStatusChange(type, status);
+      }
+    });
+
     const offConnect = backendBridge.on('connect', () => {
       setWsConnected(true);
     });
@@ -110,11 +98,43 @@ export function AssessmentProvider({ children }) {
     });
     return () => {
       offStatus();
+      offStatusBatch();
       offConnect();
       offDisconnect();
       offMacInfo();
     };
   }, []);
+
+  // 设备状态变化处理（断开提示防抖逻辑）
+  function _handleDeviceStatusChange(type, status) {
+    const prevStatus = prevDeviceStatusRef.current[type];
+
+    if (prevStatus === 'online' && status === 'offline') {
+      // 设备从 online 变为 offline，启动防抖定时器，5秒后若仍然 offline 才弹提示
+      if (!offlineTimersRef.current[type]) {
+        offlineTimersRef.current[type] = setTimeout(() => {
+          offlineTimersRef.current[type] = null;
+          const currentStatus = backendBridge.deviceOnline[type];
+          if (currentStatus === 'offline' || currentStatus === undefined) {
+            const deviceName = DEVICE_NAME_MAP[type] || type;
+            const alertMsg = { id: Date.now() + '_' + type, type, deviceName, time: new Date().toLocaleTimeString() };
+            setDeviceAlerts(prev => [...prev, alertMsg]);
+            console.warn(`[设备断开] ${deviceName} 已断开连接`);
+            setTimeout(() => {
+              setDeviceAlerts(prev => prev.filter(a => a.id !== alertMsg.id));
+            }, 5000);
+          }
+        }, 5000);
+      }
+    } else if (status === 'online') {
+      // 设备回到 online，取消防抖定时器
+      if (offlineTimersRef.current[type]) {
+        clearTimeout(offlineTimersRef.current[type]);
+        offlineTimersRef.current[type] = null;
+      }
+    }
+    prevDeviceStatusRef.current[type] = status;
+  }
 
   // 清除设备断开提示
   const dismissDeviceAlert = useCallback((alertId) => {

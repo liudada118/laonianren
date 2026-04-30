@@ -397,15 +397,21 @@ class BackendBridge {
     // 触发原始数据事件
     this._emit('rawData', msg);
 
+    // 收集本帧所有设备状态，统一批量推送（避免逐个去重导致状态灯不一致）
+    const frameDeviceStatus = {};
+
     // 手套模式数据: { data: { HL: {...}, HR: {...} } }
     if (msg.data && typeof msg.data === 'object') {
-      this._processGloveData(msg.data);
+      this._processGloveData(msg.data, frameDeviceStatus);
     }
 
     // 高频模式数据: { sitData: { foot1: {...}, sit: {...}, ... } }
     if (msg.sitData && typeof msg.sitData === 'object') {
-      this._processHighHZData(msg.sitData);
+      this._processHighHZData(msg.sitData, frameDeviceStatus);
     }
+
+    // 批量更新设备状态：一次性推送本帧中所有设备的状态
+    this._batchUpdateDeviceStatus(frameDeviceStatus);
 
     // MAC信息: { macInfo: {...} }
     if (msg.macInfo) {
@@ -425,11 +431,11 @@ class BackendBridge {
     return padded;
   }
 
-  _processGloveData(data) {
+  _processGloveData(data, frameDeviceStatus) {
     // 处理HL（左手）
     if (data.HL) {
       const status = data.HL.status;
-      this._updateDeviceStatus('HL', status);
+      frameDeviceStatus['HL'] = status;
       if (status === 'online') {
         const arr = this._normalizeGloveArr(data.HL.arr);
         if (arr) {
@@ -442,7 +448,7 @@ class BackendBridge {
     // 处理HR（右手）
     if (data.HR) {
       const status = data.HR.status;
-      this._updateDeviceStatus('HR', status);
+      frameDeviceStatus['HR'] = status;
       if (status === 'online') {
         const arr = this._normalizeGloveArr(data.HR.arr);
         if (arr) {
@@ -453,12 +459,12 @@ class BackendBridge {
     }
   }
 
-  _processHighHZData(data) {
+  _processHighHZData(data, frameDeviceStatus) {
     // 在高频模式下，后端可能也会包含HL/HR手套数据
     // 处理HL（左手）
     if (data.HL) {
       const status = data.HL.status;
-      this._updateDeviceStatus('HL', status);
+      frameDeviceStatus['HL'] = status;
       if (status === 'online') {
         const arr = this._normalizeGloveArr(data.HL.arr);
         if (arr) {
@@ -471,7 +477,7 @@ class BackendBridge {
     // 处理HR（右手）
     if (data.HR) {
       const status = data.HR.status;
-      this._updateDeviceStatus('HR', status);
+      frameDeviceStatus['HR'] = status;
       if (status === 'online') {
         const arr = this._normalizeGloveArr(data.HR.arr);
         if (arr) {
@@ -485,7 +491,7 @@ class BackendBridge {
     ['foot1', 'foot2', 'foot3', 'foot4'].forEach(type => {
       if (data[type]) {
         const status = data[type].status;
-        this._updateDeviceStatus(type, status);
+        frameDeviceStatus[type] = status;
         if (status === 'online' && Array.isArray(data[type].arr)) {
           this._emit(`${type}Data`, data[type].arr);
           this._countFrame(type);
@@ -496,7 +502,7 @@ class BackendBridge {
     // 处理坐垫
     if (data.sit) {
       const status = data.sit.status;
-      this._updateDeviceStatus('sit', status);
+      frameDeviceStatus['sit'] = status;
       if (status === 'online' && Array.isArray(data.sit.arr)) {
         this._emit('sitData', data.sit.arr);
         this._countFrame('sit');
@@ -509,6 +515,21 @@ class BackendBridge {
     this.deviceOnline[type] = status;
     if (prev !== status) {
       this._emit('deviceStatus', { type, status });
+    }
+  }
+
+  // 批量更新设备状态：一次性推送本帧中所有设备的状态变化
+  // 解决问题：逐个去重可能导致重连后部分设备状态丢失
+  _batchUpdateDeviceStatus(frameDeviceStatus) {
+    const changes = [];
+    for (const type of Object.keys(frameDeviceStatus)) {
+      const status = frameDeviceStatus[type];
+      this.deviceOnline[type] = status;
+      // 无条件推送，确保前端始终能收到最新状态
+      changes.push({ type, status });
+    }
+    if (changes.length > 0) {
+      this._emit('deviceStatusBatch', changes);
     }
   }
 
