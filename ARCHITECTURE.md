@@ -1,13 +1,13 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-30 03:10
+**最后更新**: 2026-04-30 06:48
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
-| 2026-04-30 03:10 | ld | 修复缺陷 | 修复断开重连后设备状态灯全灰的问题。根因是 `disconnectAll` 未重置 `MaxHZ` 变量，导致重连后 `playtimer` 启动条件 `(!MaxHZ && ...)` 永远不成立，数据无法通过 WebSocket 推送到前端。修复：在 `disconnectAll` 中增加重置 `MaxHZ`、`HZ`、`oldTimeObj`、`gloveLatestData`、`gripBaseline`、`glovePacket1Cache`、`sendDataLength` 等所有帧率计算和数据缓存相关变量。修改文件：`back-end/code/server/serialServer.js`。 |
+| 2026-04-30 06:48 | ld | 修复缺陷 | 彻底修复断开重连后设备状态灯全灰的问题。根因是 `setActiveMode(null)` 调用 `resetSendTimer()` 清除 `playtimer` 后，由于 `activeSendTypes` 为 null 不会调用 `updateSendTimerForActiveTypes()` 重建定时器，而此时 `MaxHZ` 已有值，数据帧回调中的重建条件也不成立。修复：在 `setActiveSendTypes` 中，当 types 为 null 且有活跃串口时，主动创建默认 80ms 的 `playtimer`。同时在 `disconnectAll` 中增加重置 `MaxHZ`、`HZ`、`oldTimeObj`、`gloveLatestData` 等所有帧率计算和数据缓存相关变量。修改文件：`back-end/code/server/serialServer.js`。 |
 | 2026-04-29 06:54 | ld | 新增功能 | 实现点击“已连接”按钮断开所有串口并回到“一键连接”状态。后端新增 `/disconnectAll` API，关闭所有串口并清理运行时状态（parserArr、dataMap、macInfo、playtimer 等）；前端 `BackendBridge` 新增 `disconnectAll()` 方法；`AssessmentContext.disconnectAllDevices` 改为先调后端断开串口再断开 WebSocket。再次点击“一键连接”时重新走完整连接流程。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
 | 2026-04-29 04:17 | ld | 配置变更 | 调整步道评估脚垫滤波默认值：`filterMinArea` 从 20 改为 12（`filterThreshold` 保持 15 不变）。修改文件：`back-end/code/server/serialServer.js`、`front-end/src/pages/assessment/GaitAssessment.jsx`。 |
 | 2026-04-29 04:15 | ld | 修复缺陷 | 修复设备已连接但状态栏绿灯显示灰色的问题。在 `Dashboard.jsx` 挂载时重置后端推送模式为全部设备（`setActiveMode(null)`），确保从单设备评估页面返回主页后，后端能够继续推送所有已连接设备的状态。同时调整静态站立评估的脚垫滤波默认值：`filterThreshold` 改为 10，`filterMinArea` 改为 8。修改文件：`front-end/src/pages/Dashboard.jsx`、`back-end/code/server/serialServer.js`、`front-end/src/pages/assessment/StandingAssessment.jsx`。 |
