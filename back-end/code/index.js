@@ -31,7 +31,7 @@ const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
 const preferViteDevServer = process.env.FORCE_STATIC_RENDERER !== '1'
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
-const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
+const shouldOpenDevTools = !isPackaged || process.env.OPEN_DEVTOOLS === '1'
 
 function hasStaticRendererBuild() {
   return fs.existsSync(path.join(prodWebRoot, 'index.html'))
@@ -391,7 +391,7 @@ const createWindow = async () => {
   const win = new BrowserWindow({
     // width: 800,
     // height: 600,
-    fullscreen: true,
+    fullscreen: !shouldOpenDevTools,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
@@ -402,9 +402,9 @@ const createWindow = async () => {
 
   })
   
-  // win.maximize()
   if (shouldOpenDevTools) {
-    win.webContents.openDevTools({ mode: 'detach' })
+    win.maximize()
+    win.webContents.openDevTools({ mode: 'right' })
   }
 
   const hostname = "127.0.0.1";

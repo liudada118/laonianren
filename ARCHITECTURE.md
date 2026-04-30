@@ -1,12 +1,13 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-30 07:55
+**最后更新**: 2026-04-30 09:30
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-04-30 09:30 | ld | 调试支持 | 开发环境默认打开 DevTools 辅助调试。修改 `shouldOpenDevTools` 逻辑为：未打包时（`!isPackaged`）默认打开，打包后需设置环境变量 `OPEN_DEVTOOLS=1` 才打开。DevTools 模式从 `detach`（独立窗口）改为 `right`（嵌入右侧），同时将全屏改为最大化（`win.maximize()`），避免 DevTools 被全屏窗口遮挡。打包后生产环境默认不打开 DevTools，保持全屏。修改文件：`back-end/code/index.js`。 |
 | 2026-04-30 07:55 | ld | 修复缺陷 | 彻底修复设备在线数量与状态灯不一致。`_batchUpdateDeviceStatus` 改为每帧推送所有 7 个设备的完整状态快照（未出现在本帧的设备保持上次状态，默认 offline）；`AssessmentContext` 的 `deviceStatusBatch` 监听器改为用快照直接替换整个 `deviceOnlineMap`，而非合并更新，确保状态灯和在线数始终完全一致。修改文件：`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
 | 2026-04-30 07:20 | ld | 修复缺陷 | 重构设备状态推送为批量模式，彻底修复重连后在线数和状态灯不一致。旧的逐个去重逻辑（`prev !== status`）在重连、丢帧等场景下会导致部分设备状态事件不触发。重构为：`_handleMessage` 收集本帧所有设备状态到 `frameDeviceStatus`，然后通过 `_batchUpdateDeviceStatus` 无条件推送 `deviceStatusBatch` 事件；`AssessmentContext` 监听该事件一次性更新 `deviceOnlineMap`，确保状态灯和在线数始终同步。修改文件：`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
 | 2026-04-30 07:00 | ld | 修复缺陷 | 修复断开重连后设备在线数量对不上的问题。根因是 `BackendBridge.disconnect()` 未清空 `this.deviceOnline`，重连后 `_updateDeviceStatus` 检查 `prev !== status` 时发现 prev 仍是上次的 'online'，不触发 `deviceStatus` 事件，导致 React 的 `deviceOnlineMap` 不更新。修复：在 `disconnect()` 中清空 `this.deviceOnline = {}`。修改文件：`front-end/src/lib/BackendBridge.js`。 |
