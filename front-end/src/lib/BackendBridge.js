@@ -51,7 +51,8 @@ class BackendBridge {
       // 坐垫数据
       sitData: [],        // (arr1024) => void
       // 设备状态
-      deviceStatus: [],   // ({ type, status }) => void
+      deviceStatus: [],        // ({ type, status }) => void
+      deviceStatusBatch: [],   // (snapshot[]) => void  —— 批量设备状态快照
       // MAC信息
       macInfo: [],        // (macInfo) => void
       // 原始数据（用于调试）
