@@ -4799,6 +4799,15 @@ function sendData() {
   // 根据 activeSendTypes 过滤（按评估模式只推送对应设备数据）
   obj = filterDataByTypes(obj, activeSendTypes)
 
+  // 调试日志：每秒输出一次推送数据概况
+  if (!global._sendDataLogTs || Date.now() - global._sendDataLogTs >= 1000) {
+    global._sendDataLogTs = Date.now()
+    const types = obj ? Object.keys(obj) : []
+    const statuses = types.map(t => `${t}:${obj[t]?.status || 'no-status'}`)
+    const wsClients = server?.clients?.size || 0
+    console.log(`[sendData] devices=${types.length} [${statuses.join(', ')}] activeSendTypes=${JSON.stringify(activeSendTypes)} wsClients=${wsClients} parserArr=${Object.keys(parserArr).length}`)
+  }
+
   // 根据数据类型分离推送：手套用 data，其他用 sitData
   if (obj && Object.keys(obj).length) {
     const payload = {}

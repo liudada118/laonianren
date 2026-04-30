@@ -108,12 +108,18 @@ class BackendBridge {
       };
 
       this.ws.onmessage = (event) => {
+        let msg;
         try {
-          const msg = JSON.parse(event.data);
+          msg = JSON.parse(event.data);
+        } catch (e) {
+          // 非JSON数据，忽略
+          console.warn('[BackendBridge] Non-JSON message:', event.data?.substring(0, 100));
+          return;
+        }
+        try {
           this._handleMessage(msg);
         } catch (e) {
-          // 可能是非JSON数据
-          console.warn('[BackendBridge] Non-JSON message:', event.data?.substring(0, 100));
+          console.error('[BackendBridge] _handleMessage error:', e);
         }
       };
 
@@ -397,6 +403,15 @@ class BackendBridge {
     // 触发原始数据事件
     this._emit('rawData', msg);
 
+    // 调试日志：每秒输出一次收到的消息概况
+    if (!this._msgLogTs || Date.now() - this._msgLogTs >= 1000) {
+      this._msgLogTs = Date.now();
+      const keys = Object.keys(msg);
+      const dataKeys = msg.data ? Object.keys(msg.data) : [];
+      const sitKeys = msg.sitData ? Object.keys(msg.sitData) : [];
+      console.log(`[_handleMessage] keys=[${keys}] data=[${dataKeys}] sitData=[${sitKeys}]`);
+    }
+
     // 收集本帧所有设备状态，统一批量推送（避免逐个去重导致状态灯不一致）
     const frameDeviceStatus = {};
 
@@ -533,6 +548,13 @@ class BackendBridge {
       // 如果从未出现过（undefined），视为 offline
       const status = this.deviceOnline[type] || 'offline';
       snapshot.push({ type, status });
+    }
+    // 调试日志：每秒输出一次状态快照
+    if (!this._batchLogTs || Date.now() - this._batchLogTs >= 1000) {
+      this._batchLogTs = Date.now();
+      const onlineDevices = snapshot.filter(s => s.status === 'online').map(s => s.type);
+      const frameKeys = Object.keys(frameDeviceStatus);
+      console.log(`[_batchUpdate] frame=[${frameKeys}] online=[${onlineDevices}] snapshot=${JSON.stringify(snapshot.map(s => s.type + ':' + s.status))}`);
     }
     this._emit('deviceStatusBatch', snapshot);
   }
