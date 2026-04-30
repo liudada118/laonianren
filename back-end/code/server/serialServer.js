@@ -2442,6 +2442,8 @@ app.get('/disconnectAll', async (req, res) => {
     for (const key of Object.keys(dataMap)) delete dataMap[key]
     for (const key of Object.keys(lastDataTime)) delete lastDataTime[key]
     for (const key of Object.keys(macInfo)) delete macInfo[key]
+    for (const key of Object.keys(oldTimeObj)) delete oldTimeObj[key]
+    for (const key of Object.keys(glovePacket1Cache)) delete glovePacket1Cache[key]
     linkIngPort.length = 0
     colFlag = false
     historyFlag = false
@@ -2452,6 +2454,15 @@ app.get('/disconnectAll', async (req, res) => {
     sensorHzCache = {}
     sensorHzLocked = false
     sensorTypeSignature = ''
+    // 重置帧率计算相关变量，确保重连后 playtimer 能被重新创建
+    MaxHZ = undefined
+    HZ = 30
+    sendDataLength = 0
+    sendMacNum = 0
+    successNum = 0
+    // 重置手套数据缓存
+    gloveLatestData = { HL: null, HR: null }
+    gripBaseline = { HL: null, HR: null }
 
     console.log('[disconnectAll] 已断开', closedPaths.length, '个串口:', closedPaths)
     res.json(new HttpResult(0, { closed: closedPaths }, '已断开所有串口'))
