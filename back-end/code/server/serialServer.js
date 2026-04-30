@@ -1378,6 +1378,14 @@ function setActiveSendTypes(types, sampleType = undefined) {
   resetSendTimer()
   if (activeSendTypes && activeSendTypes.length) {
     updateSendTimerForActiveTypes()
+  } else {
+    // activeSendTypes 为 null 时（Dashboard 全设备模式），如果有活跃串口则保持默认推送
+    if (Object.keys(parserArr).length > 0) {
+      playtimer = setInterval(() => {
+        colAndSendData()
+      }, 80)
+      console.log('[setActiveSendTypes] null mode, 启动默认 80ms playtimer')
+    }
   }
 }
 
