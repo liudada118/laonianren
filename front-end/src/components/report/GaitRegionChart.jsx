@@ -17,7 +17,11 @@ const REGION_COLORS_HOVER = [
   'rgba(155, 89, 182, 1)',
 ];
 const REGION_NAMES = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
-const SPACING_MM = 7;
+// 真实传感器物理间距 14mm；后端在生成 gaitAverageData.heatmap 时做了 3 倍上采样，
+// 所以这里每个"子像素"的物理尺寸是 14/3 ≈ 4.67mm
+const SENSOR_PITCH_MM = 14;
+const HEATMAP_UPSCALE = 3;
+const SUBPIXEL_MM = SENSOR_PITCH_MM / HEATMAP_UPSCALE;
 const MIRROR_FOOT_RENDER = true;
 
 /**
@@ -154,7 +158,7 @@ function drawFoot(ctx, sections, offsetX, width, canvasH, hoveredRegion, _title,
   ctx.fillText(rightHint, cx + footW - 2, hintY);
 }
 
-export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords, innerOnRight = null }) {
+export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords, leftRegionAreas, rightRegionAreas, innerOnRight = null }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [hoveredRegion, setHoveredRegion] = useState(null);
@@ -267,14 +271,41 @@ export default function GaitRegionChart({ leftRegionCoords, rightRegionCoords, i
     setHoveredRegion({ side, index: bestRegion });
     const totalPoints = sections.reduce((s, r) => s + r.length, 0);
     const pts = sections[bestRegion].length;
-    const areaCm2 = pts * SPACING_MM * SPACING_MM / 100;
-    const areaPercent = totalPoints > 0 ? (pts / totalPoints) * 100 : 0;
+    const regionName = REGION_NAMES[bestRegion];
+
+    // 优先使用后端从 raw heatmap 计算的真实面积（每像素 14×14/100 = 1.96 cm²）
+    // 这才是物理实际面积。前端这里 pts 是 smooth 子像素数，受高斯模糊扩散影响会偏大，
+    // 仅用作回退（万一后端没传 regionAreas）
+    const regionAreas = side === 'left' ? leftRegionAreas : rightRegionAreas;
+    const backendAreaInfo = regionAreas?.[regionName];
+
+    let areaCm2, displayPts;
+    if (backendAreaInfo && typeof backendAreaInfo.areaCm2 === 'number') {
+      areaCm2 = backendAreaInfo.areaCm2;
+      displayPts = backendAreaInfo.count ?? pts;
+    } else {
+      // 回退：用 smooth 子像素 × (14/3)² / 100，会因模糊扩散偏大
+      areaCm2 = pts * SUBPIXEL_MM * SUBPIXEL_MM / 100;
+      displayPts = pts;
+    }
+
+    // 占比按真实面积总和算（如果有 regionAreas），否则按 smooth pts
+    let areaPercent;
+    if (regionAreas) {
+      const totalAreaCm2 = REGION_NAMES.reduce(
+        (s, name) => s + (regionAreas[name]?.areaCm2 ?? 0), 0
+      );
+      areaPercent = totalAreaCm2 > 0 ? (areaCm2 / totalAreaCm2) * 100 : 0;
+    } else {
+      areaPercent = totalPoints > 0 ? (pts / totalPoints) * 100 : 0;
+    }
+
     setTooltip({
       x: e.clientX - canvasRect.left, y: e.clientY - canvasRect.top,
-      regionIndex: bestRegion, side, pointCount: pts,
+      regionIndex: bestRegion, side, pointCount: displayPts,
       areaCm2: Math.round(areaCm2 * 10) / 10, areaPercent: Math.round(areaPercent * 10) / 10,
     });
-  }, [leftSections, rightSections]);
+  }, [leftSections, rightSections, leftRegionAreas, rightRegionAreas]);
 
   const handleMouseLeave = useCallback(() => { setHoveredRegion(null); setTooltip(null); }, []);
 

@@ -26,8 +26,8 @@ from matplotlib.colors import LinearSegmentedColormap
 
 #33
 # ================= 配置参数 =================
-# 每秒帧数
-FPS = 77
+# 每秒帧数（硬件采样率；白色步道约 40Hz，黑色步道约 77Hz，请按实际硬件设置）
+FPS = 40
 # ===========================================
 MY_FONT_NAME = 'SimSun'  
 try:
@@ -251,7 +251,12 @@ def load_and_preprocess_aligned_final(d1, d2, d3, d4, t1, t2, t3, t4):
             keep_mask = (neighbor_counts >= 4).astype(np.uint8)
             final_frame = final_frame * keep_mask
 
-        total_matrix.append(final_frame.tolist()) 
+        # [Step 6] 接缝插值填充：在 4 块垫子拼接后的固定接缝行附近（64/128/192 ±5行）
+        # 若存在 ≤5 行的横向 0 带且上下有非零参考，则线性插值；脚弓等较宽缺失区不受影响
+        if np.max(final_frame) > 0:
+            final_frame = fill_seam_gaps(final_frame)
+
+        total_matrix.append(final_frame.tolist())
 
     return total_matrix
 
@@ -349,53 +354,121 @@ def reverse_AMPD(data):
     return np.where(p_data == max_window_length)[0]
 
 
-def detect_foot_on_early(pressure, peaks, valleys):
+def detect_foot_on_early(pressure, peaks, valleys, low_ratio=0.05, consecutive_low=5):
     # pressure: 压力序列, peaks: 波峰索引, valleys: 波谷索引
-    # 返回: 每一步的“落地”时刻帧索引列表
-
-    pressure = np.array(pressure)
+    # low_ratio: 判定为"脚还没踩上"的阈值占峰值的比例（5%）
+    # consecutive_low: 必须连续多少帧低于阈值才认定（防单帧噪声误判）
+    # 返回: 每一步的"落地"时刻帧索引列表
+    #
+    # 三道兜底：
+    #   ① AMPD 找峰值前最近的波谷
+    #   ② 阈值兜底：从 peak 往前扫，找连续 N 帧低于 5% 峰值的位置（处理 AMPD 在水平段失效）
+    #   ③ 都没有就用 0
+    pressure = np.array(pressure, dtype=float)
     if len(pressure) == 0: return []
     diff = np.diff(pressure)
     foot_on_frames = []
 
     for peak in peaks:
-        prev_valleys = [v for v in valleys if v < peak]
-        if not prev_valleys: valley = 0
-        else: valley = prev_valleys[-1]
+        peak_val = pressure[peak] if pressure[peak] > 0 else 1e-6
 
+        # ① AMPD 找峰值之前的最近波谷
+        prev_valleys = [v for v in valleys if v < peak]
+        valley_ampd = prev_valleys[-1] if prev_valleys else None
+
+        # ② 阈值兜底：倒序扫描，找"连续 consecutive_low 帧低于阈值"的位置
+        threshold = peak_val * low_ratio
+        valley_threshold = None
+        consec = 0
+        for j in range(peak - 1, -1, -1):
+            if pressure[j] < threshold:
+                consec += 1
+                if consec >= consecutive_low:
+                    valley_threshold = j + consecutive_low - 1  # 时间上最靠后的低帧（最接近 peak）
+                    break
+            else:
+                consec = 0
+
+        # ③ 综合：落地点取更晚的（更接近 peak 才更准确）
+        if valley_ampd is not None and valley_threshold is not None:
+            valley = max(valley_ampd, valley_threshold)
+        elif valley_ampd is not None:
+            valley = valley_ampd
+        elif valley_threshold is not None:
+            valley = valley_threshold
+        else:
+            valley = 0
+
+        # ④ 在 [valley, peak] 区间里找上升最快的点
         interval_diff = diff[valley:peak]
         if len(interval_diff) == 0:
             foot_on_frames.append(valley)
             continue
-        threshold = np.percentile(diff, 95)
-        candidates = np.where(interval_diff > threshold)[0]
-        if len(candidates) == 0: foot_on_frames.append(None)
-        else: foot_on_frames.append(valley + candidates[0])
+        threshold_diff = np.percentile(diff, 95)
+        candidates = np.where(interval_diff > threshold_diff)[0]
+        if len(candidates) == 0:
+            foot_on_frames.append(valley)  # 之前是 None 会丢步，现在用 valley 兜底
+        else:
+            foot_on_frames.append(valley + candidates[0])
     return foot_on_frames
 
 
-def detect_foot_off_late(pressure, peaks, valleys):
+def detect_foot_off_late(pressure, peaks, valleys, low_ratio=0.05, consecutive_low=5):
     # pressure: 压力序列, peaks: 波峰索引, valleys: 波谷索引
-    # 返回: 每一步的“离地”时刻帧索引列表
-
-    pressure = np.array(pressure)
+    # low_ratio: 判定为"脚已离地"的阈值占峰值的比例（5%）
+    # consecutive_low: 必须连续多少帧低于阈值才认定（防单帧噪声误判）
+    # 返回: 每一步的"离地"时刻帧索引列表
+    #
+    # 三道兜底：
+    #   ① AMPD 找峰值后最近的波谷
+    #   ② 阈值兜底：从 peak 往后扫，找连续 N 帧低于 5% 峰值的位置（处理 AMPD 在水平段失效）
+    #   ③ 都没有就用 len(pressure)-1
+    pressure = np.array(pressure, dtype=float)
     if len(pressure) == 0: return []
     diff = np.diff(pressure)
     foot_off_frames = []
 
     for peak in peaks:
-        next_valleys = [v for v in valleys if v > peak]
-        if not next_valleys: valley = len(pressure) - 1
-        else: valley = next_valleys[0]
+        peak_val = pressure[peak] if pressure[peak] > 0 else 1e-6
 
+        # ① AMPD 找峰值之后的最近波谷
+        next_valleys = [v for v in valleys if v > peak]
+        valley_ampd = next_valleys[0] if next_valleys else None
+
+        # ② 阈值兜底：正序扫描，找"连续 consecutive_low 帧低于阈值"的起点
+        threshold = peak_val * low_ratio
+        valley_threshold = None
+        consec = 0
+        for j in range(peak + 1, len(pressure)):
+            if pressure[j] < threshold:
+                consec += 1
+                if consec >= consecutive_low:
+                    valley_threshold = j - consecutive_low + 1  # 第一个低于阈值的帧
+                    break
+            else:
+                consec = 0
+
+        # ③ 综合：离地点取更早的（更准确反映真实抬脚时间）
+        if valley_ampd is not None and valley_threshold is not None:
+            valley = min(valley_ampd, valley_threshold)
+        elif valley_ampd is not None:
+            valley = valley_ampd
+        elif valley_threshold is not None:
+            valley = valley_threshold
+        else:
+            valley = len(pressure) - 1
+
+        # ④ 在 [peak, valley] 区间里找下降最快的点
         interval_diff = diff[peak:valley]
         if len(interval_diff) == 0:
             foot_off_frames.append(valley)
             continue
-        threshold = np.percentile(diff, 5)
-        candidates = np.where(interval_diff < threshold)[0]
-        if len(candidates) == 0: foot_off_frames.append(None)
-        else: foot_off_frames.append(peak + candidates[-1])
+        threshold_diff = np.percentile(diff, 5)
+        candidates = np.where(interval_diff < threshold_diff)[0]
+        if len(candidates) == 0:
+            foot_off_frames.append(valley)  # 之前是 None 会丢步，现在用 valley 兜底
+        else:
+            foot_off_frames.append(peak + candidates[-1])
     return foot_off_frames
 
 
@@ -1259,15 +1332,150 @@ def divide_y_regions(section_coords, foot_side="Left"):
     return s1_coords, s2_coords, s3_coords, s4_coords, s5_coords, s6_coords
 
 
-def extract_region_coords_from_heatmap(smooth_heatmap, foot_side):
+def compute_region_areas_per_peak_frame(total_matrix, on_list, off_list, is_right,
+                                         center_l, center_r, sensor_pitch_mm=14.0):
+    # total_matrix: 所有帧的压力矩阵列表
+    # on_list/off_list: 每一步的落地/离地帧索引（来自 detect_foot_on_early/off_late）
+    # is_right: 是否右脚
+    # center_l/center_r: 左右脚的中心列（用于 mask 隔离单脚）
+    # sensor_pitch_mm: 传感器物理间距（默认 14mm）
+    # 返回: {"S1": {"count": 平均像素数, "areaCm2": 平均面积}, ...}
+    #
+    # 算法（参考静态站立 calculate_single_frame_arch_features，物理意义清晰）：
+    # 1) 对每一步，找出"压力总和最大的帧"（峰值帧）—— 这帧反映脚最完整接触的瞬间
+    # 2) 在这单帧上做 5:5:9:5 分区 + 6 区细分
+    # 3) 算每区像素数 × 14²/100 = 真实物理面积
+    # 4) 多步的面积/像素数取平均，作为最终值
+    #
+    # 为什么不用"多帧平均图"做面积？
+    # 因为多帧平均会被脚滚动的整个轨迹"虚胖"，且被 0 稀释的程度跟步频有关——
+    # 慢走的人和快走的人测出来的面积会不同，物理意义不清。
+    # 单帧（峰值帧）是脚最完整接触的瞬间，代表"瞬时接触面积"，物理意义清楚。
+    if not total_matrix or not on_list or not off_list:
+        return {}
+
+    data_3d = np.array(total_matrix)
+    area_per_pixel_cm2 = (sensor_pitch_mm * sensor_pitch_mm) / 100.0  # 14²/100 = 1.96 cm²
+    foot_side = "Right" if is_right else "Left"
+
+    # 收集每一步的"该步 6 区像素数"
+    counts_per_step = [[] for _ in range(6)]   # counts_per_step[i] = 各步在 S(i+1) 区的像素数
+
+    min_len = min(len(on_list), len(off_list))
+    for i in range(min_len):
+        on_idx, off_idx = on_list[i], off_list[i]
+        if on_idx is None or off_idx is None:
+            continue
+        try:
+            on_idx, off_idx = int(on_idx), int(off_idx)
+        except (TypeError, ValueError):
+            continue
+        if off_idx <= on_idx:
+            continue
+        if on_idx >= len(data_3d):
+            continue
+
+        # 取这一步所有帧
+        step_frames_raw = data_3d[on_idx:min(off_idx + 1, len(data_3d))]
+        if step_frames_raw.shape[0] == 0:
+            continue
+
+        # 应用 mask 隔离单脚
+        masked_list = []
+        for frame in step_frames_raw:
+            try:
+                mask = get_foot_mask_by_centers(frame, is_right, center_l, center_r)
+                masked_list.append(frame * mask)
+            except Exception:
+                masked_list.append(frame)
+        masked_frames = np.array(masked_list)
+
+        # 找压力总和最大的帧 = 峰值帧
+        loads = np.sum(masked_frames, axis=(1, 2))
+        if np.max(loads) <= 0:
+            continue
+        peak_idx = int(np.argmax(loads))
+        peak_frame = masked_frames[peak_idx]
+
+        # 在峰值帧上找有压力的像素坐标
+        ys, xs = np.where(peak_frame > 0)
+        if len(ys) == 0:
+            continue
+        coords = list(zip(ys.tolist(), xs.tolist()))
+
+        # 复用现有的 5:5:9:5 + 6 区分割算法
+        sections4 = divide_x_regions(coords)
+        regions6 = divide_y_regions(sections4, foot_side=foot_side)
+
+        for k, zone in enumerate(regions6):
+            counts_per_step[k].append(len(zone))
+
+    # 多步求平均
+    if not any(counts_per_step):
+        return {}
+    result = {}
+    for k in range(6):
+        if counts_per_step[k]:
+            avg_count = float(np.mean(counts_per_step[k]))
+        else:
+            avg_count = 0.0
+        avg_area_cm2 = avg_count * area_per_pixel_cm2
+        result[f"S{k+1}"] = {
+            "count": round(avg_count, 1),
+            "areaCm2": round(avg_area_cm2, 1),
+        }
+    return result
+
+
+def compute_region_areas_from_raw(raw_heatmap, foot_side, threshold_ratio=0.05, sensor_pitch_mm=14.0):
+    # raw_heatmap: 未上采样、未模糊的原始平均热力图（每像素对应一个真实传感器格子）
+    # foot_side: "Left"/"Right"
+    # threshold_ratio: 提取脚印的阈值（占最大值比例）
+    # sensor_pitch_mm: 传感器间距（mm），决定每像素物理面积
+    # 返回: {"S1": {"count": 真实像素数, "areaCm2": 面积}, ...}
+    #
+    # 设计参考：静态站立 (OneStep_report.py) 的做法——
+    # 用未经平滑的原始矩阵做面积计算，每像素面积 = sensor_pitch_mm² / 100 cm²
+    # 这样得到的面积才符合物理实际，不会被高斯模糊扩散虚胖
+    if not raw_heatmap:
+        return {}
+    hm = np.array(raw_heatmap)
+    if hm.size == 0 or np.max(hm) == 0:
+        return {}
+    threshold = np.max(hm) * threshold_ratio
+    coords = np.column_stack(np.where(hm > threshold))
+    if len(coords) == 0:
+        return {}
+    coord_list = coords.tolist()
+    regions = divide_y_regions(divide_x_regions(coord_list), foot_side=foot_side)
+    area_per_pixel_cm2 = (sensor_pitch_mm * sensor_pitch_mm) / 100.0  # 14² / 100 = 1.96 cm²
+    result = {}
+    for i, zone in enumerate(regions):
+        count = len(zone)
+        result[f"S{i+1}"] = {
+            "count": count,
+            "areaCm2": round(count * area_per_pixel_cm2, 1),
+        }
+    return result
+
+
+def extract_region_coords_from_heatmap(smooth_heatmap, foot_side, threshold_ratio=0.15):
     # smooth_heatmap: 3倍上采样+平滑后的热力图二维数组, foot_side: "Left"/"Right"
+    # threshold_ratio: 提取脚印的阈值占最大值比例（默认 15%）
     # 返回: S1-S6 分区坐标字典（坐标已在上采样后的热力图空间中）
+    #
+    # 阈值说明：
+    # heatmap 是经过多步平均 + 高斯模糊（sigma=0.8）的，
+    # 模糊会把脚边缘的像素值"扩散"到周围零像素上。
+    # 旧阈值 5% 太低，模糊扩散出来的"虚化边缘"会被错误地算成脚印的一部分，
+    # 导致采样点数虚高、面积过大。
+    # 改为 15% 后，模糊扩散区域被切掉，只保留真实接触区。
     if not smooth_heatmap:
         return {}
     hm = np.array(smooth_heatmap)
     if hm.size == 0 or np.max(hm) == 0:
         return {}
-    threshold = np.max(hm) * 0.05
+    threshold = np.max(hm) * threshold_ratio
     coords = np.column_stack(np.where(hm > threshold))
     if len(coords) == 0:
         return {}
@@ -2077,9 +2285,97 @@ def build_gait_average_data(total_matrix, left_on, left_off, right_on, right_off
     }
 
 
+def fill_seam_gaps(frame, seam_centers=(64, 128, 192), seam_search_radius=4, max_fill_rows=10, min_foot_coverage=0.7):
+    # frame: 2D 矩阵（256×64）
+    # seam_centers: 4 块 64×64 垫子拼接后的理论接缝行位置
+    # seam_search_radius: 每个理论接缝位置向前后扫描的半径（真实接缝可能偏 ±4 行）
+    # max_fill_rows: 接缝 0 带的最大行宽（允许填的最多行数）
+    # min_foot_coverage: 认定为"真接缝"所需的横向覆盖率
+    # 返回: 插值填充后的帧副本
+    """区分接缝和脚弓的关键：**跨接缝的脚宽**（上下同时有数据的列数）。
+    - 真接缝：水平线横穿，几乎所有跨接缝的列 center 都是 0 → 覆盖率接近 100%
+    - 脚弓：跨接缝的列中，外侧 center 非零（lateral 接地）、内侧 center 是 0 → 覆盖率 40~60%
+
+    Phase 1：跨接缝脚宽 = 上方 N 行 **AND** 下方 N 行同时有非零数据的列数
+    Phase 2：接缝列 = 跨接缝脚宽中 center 行恰好为 0 的列
+    Phase 3：覆盖率 < min_foot_coverage → 判为脚弓，跳过
+    Phase 4：对接缝列做线性插值
+    （对每个理论接缝中心，±seam_search_radius 范围内每一行都试一遍，选命中的）
+    """
+    original = np.asarray(frame, dtype=np.float32)
+    H, W = original.shape
+    filled = original.copy()
+
+    for center_exp in seam_centers:
+        for center in range(max(1, center_exp - seam_search_radius),
+                            min(H - 1, center_exp + seam_search_radius + 1)):
+            above_lo = max(0, center - max_fill_rows)
+            below_hi = min(H, center + max_fill_rows + 1)
+
+            # Phase 1: 跨接缝脚宽 = 上下【都】有数据的列（AND, 不是 OR）
+            # 这样锥形边缘（只在上方或只在下方有数据的列）不会拉大分母
+            spanning_cols = []
+            for c in range(W):
+                if (np.any(original[above_lo:center, c] > 0)
+                    and np.any(original[center + 1:below_hi, c] > 0)):
+                    spanning_cols.append(c)
+            foot_width = len(spanning_cols)
+            if foot_width == 0:
+                continue
+
+            # Phase 2: 接缝列 = 跨接缝脚宽中 center 恰好为 0 的列
+            seam_cols = [c for c in spanning_cols if original[center, c] == 0]
+
+            # Phase 3: 覆盖率判定
+            if len(seam_cols) / foot_width < min_foot_coverage:
+                continue
+
+            # Phase 4: 在真接缝列上做插值
+            # 参考值：取接缝上下各 5 个邻近非零像素中的**最大值**
+            # （紧邻接缝的单个像素通常已被衰减，用"核心压力"作参考才能匹配周围亮度）
+            REF_PROBE = 5  # 探查窗口深度（最多往外找 5 个非零像素，足够捕获局部核心）
+            for c in seam_cols:
+                # 找 0 带实际边界
+                top = center
+                while top > 0 and original[top - 1, c] == 0:
+                    top -= 1
+                bottom = center
+                while bottom < H - 1 and original[bottom + 1, c] == 0:
+                    bottom += 1
+                gap_size = bottom - top + 1
+                if gap_size > max_fill_rows:
+                    continue  # 该列 0 带过宽，跳过（保守起见）
+                r_above = top - 1
+                r_below = bottom + 1
+                if r_above < 0 or r_below >= H:
+                    continue
+                # 从紧邻接缝的行向外扫 REF_PROBE 个像素，取遇到的最大值做参考
+                above_vals = []
+                r_probe = r_above
+                while r_probe >= 0 and len(above_vals) < REF_PROBE:
+                    if original[r_probe, c] > 0:
+                        above_vals.append(float(original[r_probe, c]))
+                    r_probe -= 1
+                below_vals = []
+                r_probe = r_below
+                while r_probe < H and len(below_vals) < REF_PROBE:
+                    if original[r_probe, c] > 0:
+                        below_vals.append(float(original[r_probe, c]))
+                    r_probe += 1
+                if not above_vals or not below_vals:
+                    continue
+                v_above = max(above_vals)
+                v_below = max(below_vals)
+                span = r_below - r_above
+                for r in range(top, bottom + 1):
+                    t = (r - r_above) / span
+                    filled[r, c] = v_above * (1.0 - t) + v_below * t
+    return filled
+
+
 def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, right_off, center_l, center_r):
     """提取压力演变数据（供前端渲染），逻辑与 plot_dynamic_pressure_evolution 一致"""
-    frame_ms = 40
+    frame_ms = int(round(1000 / FPS))  # 按实际采样率换算每帧毫秒数
     if len(total_matrix) > 0:
         MAT_H, MAT_W = np.array(total_matrix[0]).shape
     else:
@@ -2089,9 +2385,30 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
         try: return int(x)
         except: return None
 
+    def step_overlaps_seam(step_frames, seam_centers=(64, 128, 192), margin=2):
+        """判断这一步的足印是否覆盖到任何接缝行附近。
+        margin: 脚边缘到接缝中心的允许"安全距离"。脚边到接缝中心 ≤ margin 即视为踩到。
+        """
+        if not step_frames:
+            return False
+        # 用峰值帧（压力最大那一帧）判断脚的行范围。它最能代表脚的真实接触区
+        loads = [float(np.sum(f)) for f in step_frames]
+        if not loads or max(loads) <= 0:
+            return False
+        peak_f = step_frames[int(np.argmax(loads))]
+        valid = np.where(peak_f > 0)
+        if len(valid[0]) == 0:
+            return False
+        min_r, max_r = int(valid[0].min()), int(valid[0].max())
+        for sc in seam_centers:
+            if (min_r - margin) <= sc <= (max_r + margin):
+                return True
+        return False
+
     def process_foot(on_list, off_list, is_right):
-        best_step_data = None
-        max_load_peak = -1.0
+        # 1) 收集所有有效步（连同是否踩接缝的标记）
+        clean_candidates = []   # 不踩接缝的步：(peak, loads, frames, start_ms)
+        seam_candidates = []    # 踩接缝的步：(peak, loads, frames, start_ms)
 
         min_len = min(len(on_list), len(off_list))
         if min_len > 0:
@@ -2111,9 +2428,23 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
                     step_frames.append(clean_frame)
                 if not step_loads: continue
                 current_peak = max(step_loads)
-                if current_peak > max_load_peak:
-                    max_load_peak = current_peak
-                    best_step_data = (step_loads, step_frames, start * frame_ms)
+                tup = (current_peak, step_loads, step_frames, start * frame_ms)
+                if step_overlaps_seam(step_frames):
+                    seam_candidates.append(tup)
+                else:
+                    clean_candidates.append(tup)
+
+        # 2) 优先选"不踩接缝"的步中峰值最高的；
+        #    若全都踩接缝，再退回踩接缝步（数据已在 load_and_preprocess 阶段被 fill_seam_gaps 处理过）
+        best_step_data = None
+        if clean_candidates:
+            best = max(clean_candidates, key=lambda s: s[0])
+            print(f"  [脚={'右' if is_right else '左'}] 候选 {len(clean_candidates)} 干净步 / {len(seam_candidates)} 接缝步, 选干净步 peak={best[0]:.1f}")
+            best_step_data = (best[1], best[2], best[3])
+        elif seam_candidates:
+            best = max(seam_candidates, key=lambda s: s[0])
+            print(f"  [脚={'右' if is_right else '左'}] 所有 {len(seam_candidates)} 步都踩接缝，选峰值最高 peak={best[0]:.1f}（接缝已插值填充）")
+            best_step_data = (best[1], best[2], best[3])
 
         if best_step_data is None:
             all_loads = []
@@ -2136,7 +2467,7 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
                     best_step_data = (step_loads, step_frames, sim_start * frame_ms)
 
         if best_step_data is None:
-            return [None] * 10, [''] * 10, 1.0
+            return [None] * 10, [None] * 10, [''] * 10, 1.0
 
         loads, frames, start_time_base = best_step_data
         loads = np.array(loads)
@@ -2163,38 +2494,69 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
             if (rmax - rmin) < 5: rmax = min(MAT_H, rmin + 5)
             if (cmax - cmin) < 5: cmax = min(MAT_W, cmin + 5)
 
-        # 选10帧
+        # 选10帧（强制时间严格单调递增：落地 → 峰值 → 离地）
         selected_frames = []
         selected_titles = []
-        peak_idx = np.argmax(loads)
-        peak_val = loads[peak_idx] if loads[peak_idx] > 0 else 0.0001
+        peak_idx = int(np.argmax(loads))
+        peak_val = float(loads[peak_idx]) if loads[peak_idx] > 0 else 0.0001
+        total_frames = len(loads)
 
-        ascending_idxs = np.arange(0, peak_idx + 1)
-        ascending_loads = loads[:peak_idx + 1]
-        descending_idxs = np.arange(peak_idx, len(loads))
-        descending_loads = loads[peak_idx:]
+        # 定位真实的"落地"和"离地"帧：第一个/最后一个 load >= 5% 峰值的帧
+        # 这样"落地 0ms"那帧就是脚实际接触地面、画面已经有数据的瞬间，不会是空黑帧
+        contact_threshold = peak_val * 0.05
+        start_offset = peak_idx  # 兜底
+        for i in range(total_frames):
+            if loads[i] >= contact_threshold:
+                start_offset = i
+                break
+        end_offset = peak_idx  # 兜底
+        for i in range(total_frames - 1, -1, -1):
+            if loads[i] >= contact_threshold:
+                end_offset = i
+                break
+        # 时间从"真实落地"那帧算起（start_offset 对应 0ms）
+        time_at = lambda idx: (idx - start_offset) * frame_ms
 
-        # Frame 1: 落地
-        selected_frames.append(frames[min(1, len(frames) - 1)])
+        # Frame 1: 落地（第一个有数据的帧，时间 0ms）
+        selected_frames.append(frames[start_offset])
         selected_titles.append("落地\n0ms")
-        # Frames 2-5: 上升
+
+        # Frames 2-5: 上升段（4 档：40%/50%/60%/85% 峰值）
+        # 每一档的搜索起点 lo = 上一档 idx + 1，保证时间单调递增
+        last_idx = start_offset
         for r in [0.4, 0.5, 0.6, 0.85]:
-            idx = int((np.abs(ascending_loads - peak_val * r)).argmin())
-            t = int(ascending_idxs[idx]) * frame_ms
-            selected_frames.append(frames[ascending_idxs[idx]])
-            selected_titles.append(f"{t}ms")
+            lo = last_idx + 1
+            hi = peak_idx + 1
+            if lo >= hi:
+                idx = peak_idx  # 上升段帧数太少，退到峰值
+            else:
+                sub = loads[lo:hi]
+                idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
+            selected_frames.append(frames[idx])
+            selected_titles.append(f"{time_at(idx)}ms")
+            last_idx = idx
+
         # Frame 6: 峰值
         selected_frames.append(frames[peak_idx])
-        selected_titles.append(f"峰值\n{peak_idx * frame_ms}ms")
-        # Frames 7-9: 下降
+        selected_titles.append(f"峰值\n{time_at(peak_idx)}ms")
+
+        # Frames 7-9: 下降段（3 档：85%/70%/50% 峰值），同样强制时间单调
+        last_idx = peak_idx
         for r in [0.85, 0.7, 0.5]:
-            idx = int((np.abs(descending_loads - peak_val * r)).argmin())
-            t = int(descending_idxs[idx]) * frame_ms
-            selected_frames.append(frames[descending_idxs[idx]])
-            selected_titles.append(f"{t}ms")
-        # Frame 10: 离地
-        selected_frames.append(frames[-1])
-        selected_titles.append(f"离地\n{(len(frames) - 1) * frame_ms}ms")
+            lo = last_idx + 1
+            hi = end_offset   # 离地帧之前就停（不进入空闲段）
+            if lo >= hi:
+                idx = max(hi, last_idx + 1) if hi > 0 else last_idx
+            else:
+                sub = loads[lo:hi]
+                idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
+            selected_frames.append(frames[idx])
+            selected_titles.append(f"{time_at(idx)}ms")
+            last_idx = idx
+
+        # Frame 10: 离地（最后一个有数据的帧）
+        selected_frames.append(frames[end_offset])
+        selected_titles.append(f"离地\n{time_at(end_offset)}ms")
 
         # 裁剪 + 插值平滑（渲染用smooth，tooltip用raw）
         from scipy.ndimage import zoom, gaussian_filter
@@ -2539,7 +2901,7 @@ def plot_dynamic_pressure_evolution(total_matrix, left_on, left_off, right_on, r
     1. 动态步态演变图
     2. [已集成] 高清平滑插值算法 (zoom + bicubic)
     """
-    frame_ms = 40
+    frame_ms = int(round(1000 / FPS))  # 按实际采样率换算每帧毫秒数
     
     # 1. 动态获取矩阵尺寸
     if len(total_matrix) > 0:
@@ -3726,6 +4088,16 @@ def analyze_gait_from_content(csv_contents, working_dir=None):
         "regionCoords": {
             "left": extract_region_coords_from_heatmap(gait_avg_data.get("left", {}).get("heatmap"), "Left"),
             "right": extract_region_coords_from_heatmap(gait_avg_data.get("right", {}).get("heatmap"), "Right"),
+        },
+        # 真实面积：用每步的峰值帧（=脚最完整接触的瞬间）做单帧分区 → 多步取平均
+        # 每像素 14×14/100 = 1.96 cm²。物理意义：瞬时接触面积的多步均值。
+        # 设计参考：静态站立 calculate_single_frame_arch_features
+        # 用单帧而不是多帧平均图，避免"脚滚动轨迹被算成接触面积"+"被 0 稀释影响阈值"
+        "regionAreas": {
+            "left": compute_region_areas_per_peak_frame(
+                total_matrix, left_on, left_off, False, center_l, center_r),
+            "right": compute_region_areas_per_peak_frame(
+                total_matrix, right_on, right_off, True, center_l, center_r),
         },
         "supportPhases": support_phases_result,
         "cyclePhases": cycle_phases_result,

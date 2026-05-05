@@ -210,6 +210,9 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const leftRegionCoords = realData?.regionCoords?.left || {};
   const rightRegionCoords = realData?.regionCoords?.right || {};
+  // 真实面积（从 raw heatmap 计算，每像素 1.96 cm²，与静态站立的算法对齐）
+  const leftRegionAreas = realData?.regionAreas?.left || null;
+  const rightRegionAreas = realData?.regionAreas?.right || null;
   // Desired page order:
   // left foot = outer -> inner
   // right foot = inner -> outer
@@ -587,7 +590,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <section id="gait-regions">
           <div className="zeiss-section-title">7. 分区点位图（压力分区 S1-S6）</div>
           <div className="zeiss-card p-4">
-            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} innerOnRight={innerOnRight} />
+            <GaitRegionChart leftRegionCoords={leftRegionCoords} rightRegionCoords={rightRegionCoords} leftRegionAreas={leftRegionAreas} rightRegionAreas={rightRegionAreas} innerOnRight={innerOnRight} />
           </div>
         </section>
 
