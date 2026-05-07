@@ -2500,6 +2500,11 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
         peak_idx = int(np.argmax(loads))
         peak_val = float(loads[peak_idx]) if loads[peak_idx] > 0 else 0.0001
         total_frames = len(loads)
+        if total_frames <= 0:
+            return [None] * 10, [None] * 10, [''] * 10, 1.0
+
+        def clamp_frame_idx(idx):
+            return int(max(0, min(int(idx), total_frames - 1)))
 
         # 定位真实的"落地"和"离地"帧：第一个/最后一个 load >= 5% 峰值的帧
         # 这样"落地 0ms"那帧就是脚实际接触地面、画面已经有数据的瞬间，不会是空黑帧
@@ -2532,6 +2537,7 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
             else:
                 sub = loads[lo:hi]
                 idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
+            idx = clamp_frame_idx(idx)
             selected_frames.append(frames[idx])
             selected_titles.append(f"{time_at(idx)}ms")
             last_idx = idx
@@ -2546,10 +2552,11 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
             lo = last_idx + 1
             hi = end_offset   # 离地帧之前就停（不进入空闲段）
             if lo >= hi:
-                idx = max(hi, last_idx + 1) if hi > 0 else last_idx
+                idx = end_offset if end_offset >= last_idx else last_idx
             else:
                 sub = loads[lo:hi]
                 idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
+            idx = clamp_frame_idx(idx)
             selected_frames.append(frames[idx])
             selected_titles.append(f"{time_at(idx)}ms")
             last_idx = idx

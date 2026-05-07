@@ -290,6 +290,45 @@ function flipFoot64x64Vertical(arr) {
   return out
 }
 
+function flipFlatMatrixVertical(arr, size) {
+  if (!Array.isArray(arr) || arr.length !== size * size) return arr
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const srcRowStart = (size - 1 - r) * size
+    const dstRowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[dstRowStart + c] = arr[srcRowStart + c]
+    }
+  }
+  return out
+}
+
+function flipFlatMatrixHorizontal(arr, size) {
+  if (!Array.isArray(arr) || arr.length !== size * size) return arr
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const rowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+    }
+  }
+  return out
+}
+
+function flipReportFrameVertical(arr) {
+  if (!Array.isArray(arr)) return arr
+  if (arr.length === 4096) return flipFlatMatrixVertical(arr, 64)
+  if (arr.length === 1024) return flipFlatMatrixVertical(arr, 32)
+  return arr
+}
+
+function flipReportFrameHorizontal(arr) {
+  if (!Array.isArray(arr)) return arr
+  if (arr.length === 4096) return flipFlatMatrixHorizontal(arr, 64)
+  if (arr.length === 1024) return flipFlatMatrixHorizontal(arr, 32)
+  return arr
+}
+
 function shiftFoot64x64FirstRowToLast(arr) {
   if (!Array.isArray(arr) || arr.length !== 4096) return arr
   const size = 64
@@ -2146,9 +2185,11 @@ app.post('/getSitAndFootPdf', async (req, res) => {
 
     let renderData = null
     try {
+      const reportStandData = standData.map(flipReportFrameHorizontal)
+      const reportSitData = sitData.map(flipReportFrameHorizontal)
       renderData = await callAlgorithm('generate_sit_stand_render_report', {
-        stand_data: standData,
-        sit_data: sitData,
+        stand_data: reportStandData,
+        sit_data: reportSitData,
         stand_times: standTimes,
         sit_times: sitTimes,
         username: resolvedName || req.body?.collectName || req.body?.userName || 'user',
@@ -3204,11 +3245,12 @@ app.post('/getDbHeatmap', async (req, res) => {
 
     if (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']) {
       const sensor = dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']
-      pdfArrData = sensor
+      const reportSensor = sensor.map(flipReportFrameVertical)
+      pdfArrData = reportSensor
       let renderData = null
       try {
         renderData = await callAlgorithm('generate_standing_render_report', {
-          data_array: sensor,
+          data_array: reportSensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
         })

@@ -331,6 +331,8 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const thStyle = 'px-3 py-2 text-left font-semibold text-[14px]';
   const tdStyle = 'px-3 py-2 text-[14px]';
+  const supportThStyle = 'px-2 py-2 text-left font-semibold text-[12px] whitespace-nowrap';
+  const supportTdStyle = 'px-2 py-2 text-[12px] whitespace-nowrap';
   const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
 
   useEffect(() => {
@@ -616,18 +618,26 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
                   <span className="w-2 h-2 rounded-full" style={{ background: color }} /> {label}
                 </h4>
                 <div className="zeiss-card overflow-x-auto p-3">
-                  <table className="w-full" style={{ fontSize: '14px' }}>
+                  <table className="w-full min-w-[560px] table-fixed" style={{ fontSize: '12px' }}>
+                    <colgroup>
+                      <col style={{ width: '76px' }} />
+                      <col style={{ width: '66px' }} />
+                      <col style={{ width: '72px' }} />
+                      <col style={{ width: '102px' }} />
+                      <col style={{ width: '108px' }} />
+                      <col style={{ width: '92px' }} />
+                    </colgroup>
                     <thead><tr className="zeiss-table-header">
-                      {['阶段', '范围', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map(h => <th key={h} className={thStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
+                      {['阶段', '范围', '时长(ms)', 'COP速度(mm/s)', '最大面积(cm²)', '最大负荷(N)'].map(h => <th key={h} className={supportThStyle} style={{ color: 'var(--text-tertiary)' }}>{h}</th>)}
                     </tr></thead>
                     <tbody>{supportPhases.map((r, i) => (
                       <tr key={i} className="zeiss-table-row">
-                        <td className={tdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
-                        <td className={tdStyle} style={{ color: 'var(--text-muted)' }}>{r.range}</td>
-                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].duration}</td>
-                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].copSpeed}</td>
-                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxArea}</td>
-                        <td className={tdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxLoad}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-muted)' }}>{r.range}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].duration}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].copSpeed}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxArea}</td>
+                        <td className={supportTdStyle} style={{ color: 'var(--text-secondary)' }}>{r[side].maxLoad}</td>
                       </tr>
                     ))}</tbody>
                   </table>
