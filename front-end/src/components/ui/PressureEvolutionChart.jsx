@@ -129,13 +129,12 @@ export default function PressureEvolutionChart({ evolutionData, className = '' }
           renderFrame(ctx, frame, vmax, cx, cy, CELL_W, CELL_H);
           ctx.restore();
 
-          // tooltip用rawFrame（原始牛顿值），渲染用frame（插值平滑版）
-          const rawFrame = row.data.rawFrames?.[ci];
+          // tooltip 和渲染都用 frame（平滑插值版），避免边缘模糊区域 hover 无响应
           cells.push({
             x: cx, y: cy, w: CELL_W, h: CELL_H,
-            rawFrame: rawFrame || frame,
-            rawRows: rawFrame ? rawFrame.length : frame.length,
-            rawCols: rawFrame ? rawFrame[0].length : frame[0].length,
+            rawFrame: frame,
+            rawRows: frame.length,
+            rawCols: frame[0].length,
           });
         }
 

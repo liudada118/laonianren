@@ -212,10 +212,10 @@ export default function GaitAverageChart({ gaitAvgData, className = '', innerOnR
       ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.fillText(rightHint, fx + FOOT_W - 8, hintY);
 
-      // tooltip用rawHeatmap（原始牛顿值），渲染用heatmap（插值平滑版）
+      // tooltip 和渲染都用 hm（平滑插值版），避免边缘模糊区域 hover 无响应
       footMeta.push({
         x: offX, y: offY, w: drawW, h: drawH,
-        rawHeatmap: rawHm, rawH: rawHm.length, rawW: rawHm[0].length,
+        rawHeatmap: hm, rawH: hm.length, rawW: hm[0].length,
         mirrored: false,
       });
     });
