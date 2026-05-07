@@ -60,10 +60,34 @@ fi
 ditto "$APP_PATH" "$MOUNT_POINT/$APP_NAME"
 ln -s /Applications "$MOUNT_POINT/Applications"
 
+osascript <<EOF
+tell application "Finder"
+  tell disk "$VOLUME_NAME"
+    open
+    delay 1
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set bounds of container window to {120, 120, 760, 460}
+    set viewOptions to icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    set text size of viewOptions to 14
+    set position of item "$APP_NAME" of container window to {170, 190}
+    set position of item "Applications" of container window to {470, 190}
+    delay 1
+    close
+    open
+    delay 1
+  end tell
+end tell
+EOF
+
 sync
 detach_volume
 
 TARGET_BASE="${OUTPUT_DMG%.dmg}"
+mkdir -p "$(dirname "$OUTPUT_DMG")"
 rm -f "$TARGET_BASE.dmg"
 hdiutil convert "$RW_IMAGE" -format UDZO -ov -o "$TARGET_BASE" >/dev/null
 

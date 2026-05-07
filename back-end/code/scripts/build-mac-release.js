@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const { createHash } = require('crypto')
 const { execFileSync } = require('child_process')
+const { Atomics, SharedArrayBuffer } = global
 
 const projectDir = path.join(__dirname, '..')
 const pkg = require(path.join(projectDir, 'package.json'))
@@ -34,6 +35,16 @@ function run(command, args, options = {}) {
   execFileSync(command, args, {
     cwd: projectDir,
     stdio: 'inherit',
+    ...options,
+  })
+}
+
+function runCapture(command, args, options = {}) {
+  console.log(`[build-mac-release] ${command} ${args.join(' ')}`)
+  return execFileSync(command, args, {
+    cwd: projectDir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
     ...options,
   })
 }
@@ -71,6 +82,107 @@ function ensureExists(targetPath, label) {
 
 function sha512Base64(targetPath) {
   return createHash('sha512').update(fs.readFileSync(targetPath)).digest('base64')
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function notaryAuthArgs() {
+  return [
+    '--key',
+    process.env.APPLE_API_KEY,
+    '--key-id',
+    process.env.APPLE_API_KEY_ID,
+    '--issuer',
+    process.env.APPLE_API_ISSUER,
+  ]
+}
+
+function parseJsonOutput(raw, context) {
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    fail(`${context} 返回了无法解析的输出:\n${raw}`)
+  }
+}
+
+function pollNotaryInfo(submissionId, targetPath) {
+  const deadline = Date.now() + 60 * 60 * 1000
+
+  while (Date.now() < deadline) {
+    const raw = runCapture('xcrun', [
+      'notarytool',
+      'info',
+      submissionId,
+      ...notaryAuthArgs(),
+      '--output-format',
+      'json',
+    ])
+    const info = parseJsonOutput(raw, `查询公证状态失败: ${targetPath}`)
+    const status = String(info.status || '').toLowerCase()
+    console.log(`[build-mac-release] notarization ${submissionId} status=${info.status}`)
+
+    if (status === 'accepted') {
+      return info
+    }
+    if (status === 'invalid' || status === 'rejected') {
+      fail(`${targetPath} 公证失败，submission=${submissionId} status=${info.status}`)
+    }
+
+    sleep(15000)
+  }
+
+  fail(`${targetPath} 公证超时，submission=${submissionId}`)
+}
+
+function notarize(targetPath) {
+  const submitRaw = runCapture('xcrun', [
+    'notarytool',
+    'submit',
+    targetPath,
+    ...notaryAuthArgs(),
+    '--output-format',
+    'json',
+    '--no-progress',
+  ])
+  const submitted = parseJsonOutput(submitRaw, `提交公证失败: ${targetPath}`)
+  const submissionId = submitted.id
+
+  if (!submissionId) {
+    fail(`${targetPath} 公证提交成功但缺少 submission id`)
+  }
+
+  console.log(`[build-mac-release] notarization submitted id=${submissionId} path=${targetPath}`)
+
+  try {
+    const waitRaw = runCapture('xcrun', [
+      'notarytool',
+      'wait',
+      submissionId,
+      ...notaryAuthArgs(),
+      '--output-format',
+      'json',
+      '--no-progress',
+      '--timeout',
+      '1h',
+    ])
+    const waited = parseJsonOutput(waitRaw, `等待公证完成失败: ${targetPath}`)
+    const status = String(waited.status || '').toLowerCase()
+
+    if (status === 'accepted') {
+      return waited
+    }
+    if (status === 'invalid' || status === 'rejected') {
+      fail(`${targetPath} 公证失败，submission=${submissionId} status=${waited.status}`)
+    }
+  } catch (error) {
+    console.warn(
+      `[build-mac-release] notarytool wait failed for ${submissionId}, falling back to info polling: ${error.signal || error.message}`
+    )
+  }
+
+  return pollNotaryInfo(submissionId, targetPath)
 }
 
 function buildLatestMacYml() {
@@ -130,35 +242,13 @@ run('node', [signScript, appPath, identity, entitlements])
 run('codesign', ['--verify', '--strict', '--verbose=2', appPath])
 
 run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath])
-run('xcrun', [
-  'notarytool',
-  'submit',
-  zipPath,
-  '--key',
-  process.env.APPLE_API_KEY,
-  '--key-id',
-  process.env.APPLE_API_KEY_ID,
-  '--issuer',
-  process.env.APPLE_API_ISSUER,
-  '--wait',
-])
+notarize(zipPath)
 run('xcrun', ['stapler', 'staple', appPath])
 run('spctl', ['-a', '-vv', appPath])
 
 run('zsh', [createDmgScript, appPath, dmgPath, productName])
 run('codesign', ['--force', '--timestamp', '--sign', identity, dmgPath])
-run('xcrun', [
-  'notarytool',
-  'submit',
-  dmgPath,
-  '--key',
-  process.env.APPLE_API_KEY,
-  '--key-id',
-  process.env.APPLE_API_KEY_ID,
-  '--issuer',
-  process.env.APPLE_API_ISSUER,
-  '--wait',
-])
+notarize(dmgPath)
 run('xcrun', ['stapler', 'staple', dmgPath])
 
 buildLatestMacYml()

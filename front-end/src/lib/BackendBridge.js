@@ -99,12 +99,10 @@ class BackendBridge {
     }
 
     try {
-      console.log(`[BackendBridge] Connecting to ${this.backendUrl}...`);
       this.ws = new WebSocket(this.backendUrl);
 
       this.ws.onopen = () => {
         this.isConnected = true;
-        console.log('[BackendBridge] Connected');
         this._emit('connect');
       };
 
@@ -126,7 +124,6 @@ class BackendBridge {
 
       this.ws.onclose = () => {
         this.isConnected = false;
-        console.log('[BackendBridge] Disconnected');
         this._emit('disconnect');
         // 自动重连
         this.reconnectTimer = setTimeout(() => this.connect(), 3000);
@@ -410,7 +407,6 @@ class BackendBridge {
       const keys = Object.keys(msg);
       const dataKeys = msg.data ? Object.keys(msg.data) : [];
       const sitKeys = msg.sitData ? Object.keys(msg.sitData) : [];
-      console.log(`[_handleMessage] keys=[${keys}] data=[${dataKeys}] sitData=[${sitKeys}]`);
     }
 
     // 收集本帧所有设备状态，统一批量推送（避免逐个去重导致状态灯不一致）
@@ -555,7 +551,6 @@ class BackendBridge {
       this._batchLogTs = Date.now();
       const onlineDevices = snapshot.filter(s => s.status === 'online').map(s => s.type);
       const frameKeys = Object.keys(frameDeviceStatus);
-      console.log(`[_batchUpdate] frame=[${frameKeys}] online=[${onlineDevices}] snapshot=${JSON.stringify(snapshot.map(s => s.type + ':' + s.status))}`);
     }
     this._emit('deviceStatusBatch', snapshot);
   }

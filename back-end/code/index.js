@@ -9,6 +9,7 @@ const { getKeyfromWinuuid } = require('./util/getServer')
 const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
+const os = require('os')
 const { initAutoUpdater, registerUpdaterIpcHandlers, cleanupUpdater } = require('./updater')
 const {
   getPackagedPythonBinary,
@@ -490,6 +491,165 @@ function buildPythonRuntimeEnv(extraEnv = {}) {
   }
 }
 
+function getDevPythonVenvInfo() {
+  const pythonDir = path.join(__dirname, 'python')
+  const venvDir = path.join(pythonDir, 'venv')
+  const cfgPath = path.join(venvDir, 'pyvenv.cfg')
+  const libDir = path.join(venvDir, 'lib')
+  let version = null
+  let fullVersion = null
+  let home = null
+  let executable = null
+  let sitePackages = null
+
+  try {
+    if (fs.existsSync(cfgPath)) {
+      const cfgText = fs.readFileSync(cfgPath, 'utf8')
+      const versionMatch = cfgText.match(/^version\s*=\s*([0-9]+(?:\.[0-9]+){1,2})/m)
+      if (versionMatch) {
+        fullVersion = versionMatch[1]
+        version = fullVersion.split('.').slice(0, 2).join('.')
+      }
+      const homeMatch = cfgText.match(/^home\s*=\s*(.+)$/m)
+      if (homeMatch) {
+        home = homeMatch[1].trim()
+      }
+      const executableMatch = cfgText.match(/^executable\s*=\s*(.+)$/m)
+      if (executableMatch) {
+        executable = executableMatch[1].trim()
+      }
+    }
+  } catch {}
+
+  try {
+    if (fs.existsSync(libDir)) {
+      const pyLibDir = fs.readdirSync(libDir).find((name) => /^python\d+\.\d+$/.test(name))
+      if (pyLibDir) {
+        version = version || pyLibDir.replace(/^python/, '')
+        const candidate = path.join(libDir, pyLibDir, 'site-packages')
+        if (fs.existsSync(candidate)) {
+          sitePackages = candidate
+        }
+      }
+    }
+  } catch {}
+
+  return { venvDir, version, fullVersion, home, executable, sitePackages }
+}
+
+function prependPythonPath(env, extraPaths = []) {
+  const filtered = extraPaths.filter(Boolean)
+  if (!filtered.length) {
+    return env
+  }
+
+  const key = process.platform === 'win32' ? 'Path' : 'PYTHONPATH'
+  if (process.platform === 'win32') {
+    const current = env.PYTHONPATH || env[key] || ''
+    return {
+      ...env,
+      PYTHONPATH: [...filtered, current].filter(Boolean).join(path.delimiter),
+    }
+  }
+
+  const current = env.PYTHONPATH || ''
+  return {
+    ...env,
+    PYTHONPATH: [...filtered, current].filter(Boolean).join(path.delimiter),
+  }
+}
+
+function getHealthyDevPythonCandidates() {
+  const isWin = process.platform === 'win32'
+  const { version, fullVersion, home, executable } = getDevPythonVenvInfo()
+  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir()
+  const pyenvVersions = [...new Set([fullVersion, version].filter(Boolean))]
+  const pyenvVersionDirs = homeDir
+    ? pyenvVersions.map((item) => path.join(homeDir, '.pyenv', 'versions', item))
+    : []
+
+  const candidates = [
+    path.join(__dirname, 'python', 'venv', isWin ? 'Scripts' : 'bin', isWin ? 'python.exe' : 'python'),
+    ...(!isWin ? [
+      path.join(__dirname, 'python', 'venv', 'bin', 'python3'),
+      path.join(__dirname, 'python', 'venv', 'bin', 'python3.11'),
+    ] : []),
+    executable,
+    ...(home ? [
+      path.join(home, isWin ? 'python.exe' : `python${version || '3.11'}`),
+      path.join(home, isWin ? 'python.exe' : 'python3'),
+      path.join(home, isWin ? 'python.exe' : 'python'),
+    ] : []),
+    ...pyenvVersionDirs.flatMap((pyenvVersionDir) => [
+      path.join(pyenvVersionDir, 'bin', `python${version || '3.11'}`),
+      path.join(pyenvVersionDir, 'bin', 'python3'),
+      path.join(pyenvVersionDir, 'bin', 'python'),
+    ]),
+    ...(isWin ? ['python', 'py'] : [`python${version || '3.11'}`, 'python3', 'python']),
+  ]
+
+  return [...new Set(candidates.filter(Boolean))]
+}
+
+function buildPythonAiRuntimeProbe(version, sitePackages) {
+  const checks = []
+  if (version) {
+    const [major, minor] = String(version).split('.').map((item) => parseInt(item, 10))
+    if (major && minor) {
+      checks.push(`assert sys.version_info[:2] == (${major}, ${minor}), sys.version`)
+    }
+  }
+  if (sitePackages) {
+    checks.push('import pydantic_core._pydantic_core')
+  }
+  return `import sys; ${checks.join('; ')}`
+}
+
+function buildPythonAiRuntimeEnv(baseEnv, runtime) {
+  if (!runtime?.sitePackages) {
+    return baseEnv
+  }
+  return prependPythonPath(baseEnv, [runtime.sitePackages])
+}
+
+function resolvePythonAiRuntime() {
+  const isDev = !app.isPackaged
+  const isWin = process.platform === 'win32'
+
+  if (!isDev) {
+    const bundledPython = getPackagedPythonBinary()
+    const packagedVenvPy = path.join(
+      process.resourcesPath,
+      'python',
+      'venv',
+      isWin ? 'Scripts' : 'bin',
+      isWin ? 'python.exe' : 'python'
+    )
+    const pythonBin = [bundledPython, fs.existsSync(packagedVenvPy) ? packagedVenvPy : null].filter(Boolean)[0]
+    return pythonBin ? { pythonBin, env: buildPythonRuntimeEnv(), sitePackages: null } : null
+  }
+
+  const { version, sitePackages } = getDevPythonVenvInfo()
+  const probeCode = buildPythonAiRuntimeProbe(version, sitePackages)
+  for (const candidate of getHealthyDevPythonCandidates()) {
+    const baseEnv = buildPythonRuntimeEnv()
+    const env = buildPythonAiRuntimeEnv(baseEnv, { sitePackages })
+    try {
+      const result = spawnSync(candidate, ['-c', probeCode], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        encoding: 'utf8',
+        env,
+      })
+      if (result.status === 0) {
+        return { pythonBin: candidate, env, sitePackages }
+      }
+    } catch {}
+  }
+
+  return null
+}
+
 function pyBin() {
   const isDev = !app.isPackaged
   const isWin = process.platform === 'win32'
@@ -522,36 +682,7 @@ function apiPy() {
 }
 
 function pyAiBin() {
-  const isDev = !app.isPackaged
-  const isWin = process.platform === 'win32'
-  const bundledPython = getPackagedPythonBinary()
-  const packagedVenvPy = path.join(
-    process.resourcesPath,
-    'python',
-    'venv',
-    isWin ? 'Scripts' : 'bin',
-    isWin ? 'python.exe' : 'python'
-  )
-
-  const bundledCandidates = isDev
-    ? [
-        path.join(__dirname, 'python', 'venv', isWin ? 'Scripts' : 'bin', isWin ? 'python.exe' : 'python'),
-        ...(!isWin ? [path.join(__dirname, 'python', 'venv', 'bin', 'python3')] : []),
-      ]
-    : [
-        bundledPython,
-        fs.existsSync(packagedVenvPy) ? packagedVenvPy : null,
-      ].filter(Boolean)
-
-  const fallbackCandidates = isWin
-    ? ['python', 'py']
-    : ['python3', 'python']
-
-  const candidates = isDev
-    ? [...bundledCandidates, ...fallbackCandidates]
-    : bundledCandidates
-
-  return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
+  return resolvePythonAiRuntime()?.pythonBin || null
 }
 
 function aiApiPy() {
@@ -568,7 +699,7 @@ function aiRequirementsPath() {
     : path.join(process.resourcesPath, 'python', 'requirements-electron.txt')
 }
 
-function checkPythonAiDeps(pythonBin) {
+function checkPythonAiDeps(pythonBin, runtimeEnv = buildPythonRuntimeEnv()) {
   if (!pythonBin) {
     return { ok: false, reason: 'Python runtime not found' }
   }
@@ -592,7 +723,7 @@ function checkPythonAiDeps(pythonBin) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       encoding: 'utf8',
-      env: buildPythonRuntimeEnv(),
+      env: runtimeEnv,
     })
 
     if (result.status === 0) {
@@ -629,7 +760,8 @@ async function startPythonAiChild() {
       await wait(300)
     }
 
-    const pythonBin = pyAiBin()
+    const runtime = resolvePythonAiRuntime()
+    const pythonBin = runtime?.pythonBin
     const scriptPath = aiApiPy()
 
     if (!pythonBin) {
@@ -641,13 +773,13 @@ async function startPythonAiChild() {
       throw new Error(`AI api server not found: ${scriptPath}`)
     }
 
-    const depsCheck = checkPythonAiDeps(pythonBin)
+    const depsCheck = checkPythonAiDeps(pythonBin, runtime?.env || buildPythonRuntimeEnv())
     if (!depsCheck.ok) {
       const requirementsPath = aiRequirementsPath()
       const installHint = app.isPackaged
         ? `Bundled Python runtime is incomplete or damaged: ${requirementsPath}`
         : fs.existsSync(requirementsPath)
-          ? `Install Python deps with: ${pythonBin} -m pip install -r "${requirementsPath}"`
+          ? `Rebuild Python env or install deps with a healthy Python 3.11 runtime for: ${requirementsPath}`
           : 'Install the Python AI dependencies before starting the packaged app'
       throw new Error(`Python AI dependencies missing: ${depsCheck.reason}. ${installHint}`)
     }
@@ -658,10 +790,11 @@ async function startPythonAiChild() {
     const child = spawn(pythonBin, [scriptPath], {
       cwd: path.dirname(scriptPath),
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildPythonRuntimeEnv({
+      env: {
+        ...(runtime?.env || buildPythonRuntimeEnv()),
         PYTHONUNBUFFERED: '1',
         PYTHON_API_PORT: String(pythonAiPort)
-      }),
+      },
       shell: false,
       windowsHide: true
     })

@@ -227,14 +227,12 @@ export default function GripAssessment() {
 
     // 设置手套模式，后端只推送 HL/HR 数据
     backendBridge.setActiveMode(1).then(() => {
-      console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
       addSimLog('已设置为手套模式 (mode=1)', 'info');
       // 设置模式后延迟 500ms 执行清零，确保已收到稳定的基线数据
       // 如果某只手清零失败（HR 的 Packet1 经常丢失），自动重试最多 3 次
       const doTareWithRetry = async (attempt = 1, maxAttempts = 3) => {
         try {
           const r = await backendBridge.tareGrip();
-          console.log('[GripAssessment] 握力清零完成 (attempt=%d):', attempt, r);
           const data = r?.data || r;
           if (data && data.HL && data.HR) {
             addSimLog('左右手传感器已清零', 'info');
@@ -632,7 +630,6 @@ export default function GripAssessment() {
               rightAssessmentId: rightAssessmentIdRef.current,
             });
             if (resp?.code === 0 && resp?.data?.render_data) {
-              console.log('[GripAssessment] 后端报告数据已获取:', resp.data);
               setGripReportData(resp.data.render_data);
               setShowCompleteDialog(true);
               return;
@@ -649,7 +646,6 @@ export default function GripAssessment() {
             leftRawFramesRef.current, rightRawFramesRef.current,
             patientInfo?.name || ''
           );
-          console.log('[GripAssessment] 前端报告数据已生成:', report);
           setGripReportData(report);
         } catch (e) {
           console.error('[GripAssessment] 报告生成失败:', e);

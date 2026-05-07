@@ -45,6 +45,10 @@ def setup_chinese_font():
             'C:/Windows/Fonts/msyh.ttc',
             'C:/Windows/Fonts/simsun.ttc',
             '/System/Library/Fonts/PingFang.ttc',
+            '/System/Library/Fonts/Hiragino Sans GB.ttc',
+            '/System/Library/Fonts/STHeiti Light.ttc',
+            '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+            '/Library/Fonts/Arial Unicode.ttf',
             '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
         ]
         for fp in font_paths:

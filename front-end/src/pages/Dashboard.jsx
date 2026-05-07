@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { VERSION_HISTORY } from '../components/ui/VersionHistory';
+import { useToast } from '../components/ui/Toast';
 import { backendBridge } from '../lib/BackendBridge';
 
 /* ─── 评估项目配置 ─── */
@@ -32,7 +33,7 @@ const ASSESSMENTS = [
     iconColor: '#A8C8B8',
     icon: '/icons/sit-stand.png',
     iconBg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
-    devices: ['sit', 'foot1'],
+    devices: ['sit', 'foot4'],
   },
   {
     key: 'standing',
@@ -46,7 +47,7 @@ const ASSESSMENTS = [
     iconColor: '#BEB0D8',
     icon: '/icons/footprint.png',
     iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
-    devices: ['foot1'],
+    devices: ['foot4'],
   },
   {
     key: 'gait',
@@ -158,7 +159,7 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
   const macEntries = macInfo ? Object.entries(macInfo) : [];
 
   const handleClick = () => {
-    if (isConnected || isError) {
+    if (isConnected) {
       onDisconnect();
     } else if (!isConnecting) {
       onConnect();
@@ -252,6 +253,7 @@ function ConnectButton({ status, onConnect, onDisconnect, onRescan, rescanLoadin
 /* ─── Dashboard 主页 ─── */
 export default function Dashboard() {
   const navigate = useNavigate();
+  const toast = useToast();
   const {
     institution, patientInfo, setPatientInfo, assessments, resetAssessment, startNewSession,
     deviceConnStatus, deviceOnlineMap, macInfo, connectAllDevices, disconnectAllDevices,
@@ -320,6 +322,30 @@ export default function Dashboard() {
     try { await window.electronAPI.installUpdate(); }
     catch (err) { console.error('安装更新失败:', err); }
   }, [isElectron]);
+
+  const handleConnectDevices = useCallback(async () => {
+    const result = await connectAllDevices();
+    if (!result.success) {
+      toast.error(result.error || '连接失败');
+      return result;
+    }
+    if (result.message && result.message !== '连接成功') {
+      toast.info(result.message);
+    }
+    return result;
+  }, [connectAllDevices, toast]);
+
+  const handleRescanDevices = useCallback(async () => {
+    const result = await rescanDevices();
+    if (!result.success) {
+      toast.error(result.error || '重新扫描失败');
+      return result;
+    }
+    if (result.message && result.message !== '重新扫描完成') {
+      toast.info(result.message);
+    }
+    return result;
+  }, [rescanDevices, toast]);
 
   const handleStart = (path) => {
     if (patientInfo) {
@@ -400,9 +426,9 @@ export default function Dashboard() {
           {/* ─── 一键连接按钮 ─── */}
           <ConnectButton
             status={deviceConnStatus}
-            onConnect={connectAllDevices}
+            onConnect={handleConnectDevices}
             onDisconnect={disconnectAllDevices}
-            onRescan={rescanDevices}
+            onRescan={handleRescanDevices}
             rescanLoading={rescanLoading}
             deviceOnlineMap={deviceOnlineMap}
             macInfo={macInfo}

@@ -16,6 +16,18 @@ import {
 
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
 
+function flipMatrixLR(matrix) {
+  return matrix.map(row => [...row].reverse());
+}
+
+function flipMatrixUD(matrix) {
+  return [...matrix].reverse();
+}
+
+function orientStandingDisplayMatrix(matrix) {
+  return flipMatrixUD(flipMatrixLR(matrix));
+}
+
 /* ─── 左侧统一数据面板 ─── */
 function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajectory, timer, fmtTime, isRecording, filterThreshold, onFilterChange }) {
   const chartColors = { text: '#6B7B8D', grid: '#EDF0F4' };
@@ -196,7 +208,6 @@ export default function StandingAssessment() {
         if (typeof cfg.optimizeEnabled === 'boolean') setOptimizeEnabled(cfg.optimizeEnabled);
         if (typeof cfg.optimizeBad === 'number') setStandingOptimizeBad(cfg.optimizeBad);
         if (typeof cfg.optimizeGood === 'number') setStandingOptimizeGood(cfg.optimizeGood);
-        console.log('[StandingAssessment] 已加载持久化滤波参数:', cfg);
       }
     }).catch(e => console.warn('读取滤波参数失败:', e)).finally(() => {
       setFilterParamsLoaded(true);
@@ -347,10 +358,11 @@ export default function StandingAssessment() {
     insoleDataRef.current = null;
     setDeviceStatus('connecting');
     try {
-      serialService.setOnData(handleSerialData);
-      serialService.setOnLog((msg, type) => {
-        console.log(`[Serial ${type}] ${msg}`);
+      serialService.setOnData((matrix) => {
+        currentRawFlat.current = matrix.flat();
+        handleSerialData(orientStandingDisplayMatrix(matrix));
       });
+      serialService.setOnLog(() => {});
       serialService.setOnStatus((status) => {
         if (status === 'connected') setDeviceStatus('connected');
         else if (status === 'disconnected') setDeviceStatus('disconnected');
@@ -434,7 +446,6 @@ export default function StandingAssessment() {
       try {
         const resp = await fetch('/standing_sim_data.json');
         simDataRef.current = await resp.json();
-        console.log(`[模拟] 加载真实数据: ${simDataRef.current.length} 帧`);
       } catch (err) {
         console.error('[模拟] 加载数据失败，使用随机数据:', err);
         simDataRef.current = null;
@@ -487,15 +498,14 @@ export default function StandingAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 设置静态站立模式，后端只推送 foot1 数据，滤波使用 standing 参数
+    // 设置静态站立模式，后端只推送 foot4 数据，滤波使用 standing 参数
     backendBridge.setActiveMode(4).then(() => {
-      console.log('[StandingAssessment] 已设置后端模式 mode=4');
     }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
 
-    // 监听后端推送的脚垫数据（使用 foot1 作为主数据源）
+    // 监听后端推送的脚垫数据（使用 foot4 作为主数据源）
     const handleBackendFootData = (arr) => {
       if (!arr || arr.length === 0) return;
       // 后端推送的是 4096 个值的 flat 数组
@@ -505,14 +515,13 @@ export default function StandingAssessment() {
       handleSerialData(matrix);
     };
 
-    const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
+    const unsubFoot4 = backendBridge.on('foot4Data', handleBackendFootData);
 
     backendCleanupRef.current = () => {
-      unsubFoot1();
+      unsubFoot4();
       setIsBackendMode(false);
     };
 
-    console.log('[StandingAssessment] 后端数据通道已建立');
 
     return () => {
       if (backendCleanupRef.current) {
@@ -546,7 +555,6 @@ export default function StandingAssessment() {
           name: patientInfo?.name || 'test',
           date: new Date().toISOString().split('T')[0],
         });
-        console.log('[Standing] startCol 成功, assessmentId:', aid);
       } catch (e) {
         console.warn('[Standing] startCol 失败:', e.message);
       }
@@ -589,7 +597,6 @@ export default function StandingAssessment() {
     if (isBackendMode) {
       try {
         await backendBridge.endCol();
-        console.log('[Standing] endCol 成功，数据已全部写入');
         setProcessingText('数据保存完成，正在生成报告...');
       } catch (e) {
         console.warn('[Standing] endCol 失败:', e.message);
@@ -606,7 +613,6 @@ export default function StandingAssessment() {
             assessmentId: assessmentIdRef.current,
           });
           if (resp?.code === 0 && resp?.data?.render_data) {
-            console.log('[StandingAssessment] 后端报告数据已获取:', resp.data);
             setReportData(resp.data.render_data);
             setShowCompleteDialog(true);
             return;
@@ -619,7 +625,6 @@ export default function StandingAssessment() {
       // 前端算法 fallback
       if (collectedFrames.current.length > 0) {
         const report = generateFootReport(collectedFrames.current);
-        console.log('分析报告:', report);
         setReportData(report);
       }
       setShowCompleteDialog(true);

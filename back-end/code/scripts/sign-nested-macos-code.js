@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
+const { Atomics, SharedArrayBuffer } = global
 
 function fail(message) {
   console.error(`[sign-nested-code] ${message}`)
@@ -81,6 +82,23 @@ function needsRuntime(targetPath) {
   )
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function isTransientTimestampError(error) {
+  const message = [error?.message, error?.stderr?.toString?.(), error?.stdout?.toString?.()]
+    .filter(Boolean)
+    .join('\n')
+
+  return (
+    message.includes('The timestamp service is not available') ||
+    message.includes('A timestamp was expected but was not found') ||
+    message.includes('timestamp service') ||
+    message.includes('timestamp authority')
+  )
+}
+
 function sign(targetPath, { runtime = false, entitlementsFile = null } = {}) {
   const args = ['--force', '--timestamp']
   if (runtime) {
@@ -90,7 +108,35 @@ function sign(targetPath, { runtime = false, entitlementsFile = null } = {}) {
     args.push('--entitlements', entitlementsFile)
   }
   args.push('--sign', identity, targetPath)
-  execFileSync('codesign', args, { stdio: 'inherit' })
+
+  const retryDelaysMs = [0, 3000, 8000, 15000]
+  let lastError = null
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+    if (retryDelaysMs[attempt] > 0) {
+      console.warn(
+        `[sign-nested-code] retrying codesign after ${retryDelaysMs[attempt]}ms (${attempt + 1}/${retryDelaysMs.length}) for ${targetPath}`
+      )
+      sleep(retryDelaysMs[attempt])
+    }
+
+    try {
+      execFileSync('codesign', args, { encoding: 'utf8' })
+      return
+    } catch (error) {
+      lastError = error
+      if (!isTransientTimestampError(error) || attempt === retryDelaysMs.length - 1) {
+        if (error?.stdout) process.stdout.write(error.stdout)
+        if (error?.stderr) process.stderr.write(error.stderr)
+        throw error
+      }
+      if (error?.stdout) process.stdout.write(error.stdout)
+      if (error?.stderr) process.stderr.write(error.stderr)
+      console.warn(`[sign-nested-code] transient timestamp failure for ${targetPath}`)
+    }
+  }
+
+  throw lastError
 }
 
 if (!fs.existsSync(appPath)) {

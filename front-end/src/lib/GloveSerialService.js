@@ -105,8 +105,6 @@ class GloveSerialService {
     // 控制台输出
     if (type === 'error') {
       console.error(`[Glove] ${message}`);
-    } else {
-      console.log(`[Glove] ${message}`);
     }
   }
 

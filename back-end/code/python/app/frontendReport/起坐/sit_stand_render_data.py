@@ -111,8 +111,8 @@ def _fallback_generate_sit_stand_report(stand_data, sit_data, raw_stand_times=No
     stand_3d[stand_3d <= 4] = 0
     sit_3d[sit_3d <= 10] = 0
 
-    # 旋转脚垫数据（与 generate_sit_stand_pdf_v3 一致）
-    stand_3d = np.rot90(np.flip(stand_3d, axis=2), k=1, axes=(1, 2))
+    # 脚垫上下左右方向已在后端源头修正，这里只保留旋转。
+    stand_3d = np.rot90(stand_3d, k=1, axes=(1, 2))
 
     stand_force = stand_3d.sum(axis=(1, 2))
     sit_force = sit_3d.sum(axis=(1, 2))

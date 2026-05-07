@@ -1,6 +1,7 @@
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 
 function loadPythonRuntimeHelpers() {
   try {
@@ -31,11 +32,14 @@ const RESULT_START = '__PY_RESULT_START__'
 const RESULT_END = '__PY_RESULT_END__'
 
 let _pythonCmd = null
+let _pythonEnv = null
 
 function isPackagedRuntime(base = resourceBase) {
+  const explicitFlag = String(process.env.isPackaged || '').toLowerCase()
+  if (explicitFlag === 'true' || explicitFlag === '1') return true
+  if (explicitFlag === 'false' || explicitFlag === '0') return false
+
   return (
-    String(process.env.isPackaged) === 'true' ||
-    String(process.env.isPackaged) === '1' ||
     (typeof base === 'string' && base.includes(`${path.sep}Contents${path.sep}Resources`))
   )
 }
@@ -70,6 +74,13 @@ function buildPythonEnv(extraEnv = {}, base = resourceBase) {
   }
 }
 
+function buildSelectedPythonEnv(extraEnv = {}) {
+  return {
+    ...(_pythonEnv || buildPythonEnv({}, resourceBase)),
+    ...extraEnv,
+  }
+}
+
 function getProjectVenvPython(isWin = process.platform === 'win32') {
   return path.resolve(
     __dirname,
@@ -80,6 +91,93 @@ function getProjectVenvPython(isWin = process.platform === 'win32') {
     isWin ? 'Scripts' : 'bin',
     isWin ? 'python.exe' : 'python'
   )
+}
+
+function getProjectVenvInfo() {
+  const venvDir = path.resolve(__dirname, '..', '..', 'python', 'venv')
+  const cfgPath = path.join(venvDir, 'pyvenv.cfg')
+  const libDir = path.join(venvDir, 'lib')
+  let version = null
+  let fullVersion = null
+  let home = null
+  let executable = null
+  let sitePackages = null
+
+  try {
+    if (fs.existsSync(cfgPath)) {
+      const cfgText = fs.readFileSync(cfgPath, 'utf8')
+      const versionMatch = cfgText.match(/^version\s*=\s*([0-9]+(?:\.[0-9]+){1,2})/m)
+      if (versionMatch) {
+        fullVersion = versionMatch[1]
+        version = fullVersion.split('.').slice(0, 2).join('.')
+      }
+      const homeMatch = cfgText.match(/^home\s*=\s*(.+)$/m)
+      if (homeMatch) {
+        home = homeMatch[1].trim()
+      }
+      const executableMatch = cfgText.match(/^executable\s*=\s*(.+)$/m)
+      if (executableMatch) {
+        executable = executableMatch[1].trim()
+      }
+    }
+  } catch {}
+
+  try {
+    if (fs.existsSync(libDir)) {
+      const pyLibDir = fs.readdirSync(libDir).find((name) => /^python\d+\.\d+$/.test(name))
+      if (pyLibDir) {
+        version = version || pyLibDir.replace(/^python/, '')
+        const candidate = path.join(libDir, pyLibDir, 'site-packages')
+        if (fs.existsSync(candidate)) {
+          sitePackages = candidate
+        }
+      }
+    }
+  } catch {}
+
+  return { venvDir, version, fullVersion, home, executable, sitePackages }
+}
+
+function prependPythonPath(env, extraPaths = []) {
+  const filtered = extraPaths.filter(Boolean)
+  if (!filtered.length) return env
+
+  const current = env.PYTHONPATH || ''
+  return {
+    ...env,
+    PYTHONPATH: [...filtered, current].filter(Boolean).join(path.delimiter),
+  }
+}
+
+function getHealthyDevPythonCandidates(isWin = process.platform === 'win32') {
+  const { version, fullVersion, home, executable } = getProjectVenvInfo()
+  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir()
+  const pyenvVersions = [...new Set([fullVersion, version].filter(Boolean))]
+  const pyenvVersionDirs = homeDir
+    ? pyenvVersions.map((item) => path.join(homeDir, '.pyenv', 'versions', item))
+    : []
+
+  const candidates = [
+    getProjectVenvPython(isWin),
+    ...(!isWin ? [
+      path.resolve(__dirname, '..', '..', 'python', 'venv', 'bin', 'python3'),
+      path.resolve(__dirname, '..', '..', 'python', 'venv', 'bin', 'python3.11'),
+    ] : []),
+    executable,
+    ...(home ? [
+      path.join(home, isWin ? 'python.exe' : `python${version || '3.11'}`),
+      path.join(home, isWin ? 'python.exe' : 'python3'),
+      path.join(home, isWin ? 'python.exe' : 'python'),
+    ] : []),
+    ...pyenvVersionDirs.flatMap((pyenvVersionDir) => [
+      path.join(pyenvVersionDir, 'bin', `python${version || '3.11'}`),
+      path.join(pyenvVersionDir, 'bin', 'python3'),
+      path.join(pyenvVersionDir, 'bin', 'python'),
+    ]),
+    ...(isWin ? ['python', 'python3', 'py -3', 'py'] : [`python${version || '3.11'}`, 'python3', 'python']),
+  ]
+
+  return [...new Set(candidates.filter(Boolean))]
 }
 
 function getPackagedVenvPython(base = resourceBase, isWin = process.platform === 'win32') {
@@ -125,13 +223,25 @@ function parseCmdParts(cmd) {
   return { cmd: normalized[0] || '', args: normalized.slice(1) }
 }
 
-function probePythonResult(cmd, checkRuntimeDeps = false, env = process.env) {
+function probePythonResult(cmd, checkRuntimeDeps = false, env = process.env, expectedVersion = null) {
   const parts = parseCmdParts(cmd)
   if (!parts.cmd) return { ok: false, reason: 'empty command' }
 
-  const probeCode = checkRuntimeDeps
-    ? 'import sys,numpy,cv2;print(sys.version.split()[0]);print(numpy.__version__)'
-    : 'import sys;print(sys.version.split()[0])'
+  const checks = ['import sys']
+  if (expectedVersion) {
+    const [major, minor] = String(expectedVersion).split('.').map((item) => parseInt(item, 10))
+    if (major && minor) {
+      checks.push(`assert sys.version_info[:2] == (${major}, ${minor}), sys.version`)
+    }
+  }
+  if (checkRuntimeDeps) {
+    checks.push('import numpy,cv2')
+  }
+  checks.push('print(sys.version.split()[0])')
+  if (checkRuntimeDeps) {
+    checks.push('print(numpy.__version__)')
+  }
+  const probeCode = checks.join(';')
 
   const result = spawnSync(parts.cmd, [...parts.args, '-c', probeCode], {
     timeout: PY_PROBE_TIMEOUT_MS,
@@ -162,8 +272,8 @@ function probePythonResult(cmd, checkRuntimeDeps = false, env = process.env) {
   }
 }
 
-function probePython(cmd, checkRuntimeDeps = false, env = process.env) {
-  return probePythonResult(cmd, checkRuntimeDeps, env).ok
+function probePython(cmd, checkRuntimeDeps = false, env = process.env, expectedVersion = null) {
+  return probePythonResult(cmd, checkRuntimeDeps, env, expectedVersion).ok
 }
 
 function getPythonCmd() {
@@ -177,6 +287,7 @@ function getPythonCmd() {
     const envCmd = process.env.PYTHON_CMD
     if (probePython(envCmd, true, packagedEnv)) {
       _pythonCmd = envCmd
+      _pythonEnv = packagedEnv
       console.log(`[Python] using PYTHON_CMD: ${_pythonCmd}`)
       return _pythonCmd
     }
@@ -194,6 +305,7 @@ function getPythonCmd() {
       const probe = probePythonResult(candidate, true, packagedEnv)
       if (probe.ok) {
         _pythonCmd = candidate
+        _pythonEnv = packagedEnv
         console.log(`[Python] using bundled runtime: ${_pythonCmd}`)
         return _pythonCmd
       }
@@ -202,6 +314,7 @@ function getPythonCmd() {
 
     if (packagedCandidates.length > 0) {
       _pythonCmd = packagedCandidates[0]
+      _pythonEnv = packagedEnv
       console.error(`[Python] packaged mode fallback to bundled candidate without probe: ${_pythonCmd}`)
       return _pythonCmd
     }
@@ -209,17 +322,23 @@ function getPythonCmd() {
     throw new Error(`Bundled Python runtime not found in packaged app: ${resourceBase || '<unknown>'}`)
   }
 
-  const localVenvPy = getProjectVenvPython(isWin)
-  if (fs.existsSync(localVenvPy) && probePython(localVenvPy, true, packagedEnv)) {
-    _pythonCmd = localVenvPy
-    console.log(`[Python] using project venv: ${_pythonCmd}`)
-    return _pythonCmd
+  const projectVenvInfo = getProjectVenvInfo()
+  const devEnv = prependPythonPath(packagedEnv, [projectVenvInfo.sitePackages])
+  for (const candidate of getHealthyDevPythonCandidates(isWin)) {
+    const probe = probePythonResult(candidate, true, devEnv, projectVenvInfo.version)
+    if (probe.ok) {
+      _pythonCmd = candidate
+      _pythonEnv = devEnv
+      console.log(`[Python] using dev runtime: ${_pythonCmd}`)
+      return _pythonCmd
+    }
   }
 
   if (isWin) {
     const localLegacyPy = getLegacyWindowsPython()
     if (localLegacyPy && probePython(localLegacyPy, true, packagedEnv)) {
       _pythonCmd = localLegacyPy
+      _pythonEnv = packagedEnv
       console.log(`[Python] using project Python311: ${_pythonCmd}`)
       return _pythonCmd
     }
@@ -232,11 +351,13 @@ function getPythonCmd() {
   for (const candidate of systemCandidates) {
     if (!probePython(candidate, true, packagedEnv)) continue
     _pythonCmd = candidate
+    _pythonEnv = packagedEnv
     console.log(`[Python] using system command: ${_pythonCmd}`)
     return _pythonCmd
   }
 
   _pythonCmd = isWin ? 'python' : 'python3'
+  _pythonEnv = packagedEnv
   console.warn(`[Python] falling back to default command: ${_pythonCmd}`)
   return _pythonCmd
 }
@@ -286,7 +407,7 @@ async function callPython(funcName, params = {}, options = {}) {
       child = spawn(spawnCmd, spawnArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        env: buildPythonEnv({
+        env: buildSelectedPythonEnv({
           PYTHONUNBUFFERED: '1',
           PYTHONIOENCODING: 'utf-8',
           MPLBACKEND: 'Agg',

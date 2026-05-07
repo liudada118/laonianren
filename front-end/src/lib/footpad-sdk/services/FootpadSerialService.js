@@ -11,7 +11,7 @@
  * 
  * // 设置数据回调
  * footpadServices.sensor1.setOnData((matrix) => {
- *   console.log('Sensor 1 data:', matrix); // 64×64 number[][]
+ *   // handle sensor matrix here
  * });
  * 
  * // 连接传感器
@@ -137,7 +137,6 @@ class SingleFootpadSerialService {
 
   log(message, type = 'info') {
     if (this.onLogCallback) this.onLogCallback(message, type);
-    console.log(`[Footpad ${this.label}] ${message}`);
   }
 
   /**

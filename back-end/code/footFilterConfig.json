@@ -9,8 +9,8 @@
   },
   "gait": {
     "filterEnabled": true,
-    "filterThreshold": 10,
-    "filterMinArea": 10,
+    "filterThreshold": 15,
+    "filterMinArea": 12,
     "optimizeEnabled": true,
     "optimizeBad": 40,
     "optimizeGood": 100

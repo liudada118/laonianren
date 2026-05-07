@@ -112,7 +112,6 @@ export async function exportToPdf(container, fileName = 'report', options = {}) 
     // 6. 保存 PDF 文件
     pdf.save(`${fileName}.pdf`);
 
-    console.log('[PDF Export] PDF 生成成功:', `${fileName}.pdf`);
     return true;
   } catch (e) {
     console.error('[PDF Export] PDF 生成失败:', e);

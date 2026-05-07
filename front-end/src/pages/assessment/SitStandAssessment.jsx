@@ -260,7 +260,6 @@ export default function SitStandAssessment() {
           name: patientInfo?.name || 'test',
           date: new Date().toISOString().split('T')[0],
         });
-        console.log('[SitStand] startCol 成功, assessmentId:', aid);
       } catch (e) {
         console.warn('[SitStand] startCol 失败:', e.message);
       }
@@ -299,7 +298,6 @@ export default function SitStandAssessment() {
     if (isBackendMode) {
       try {
         await backendBridge.endCol();
-        console.log('[SitStand] endCol 成功');
       } catch (e) {
         console.warn('[SitStand] endCol 失败:', e.message);
       }
@@ -316,7 +314,6 @@ export default function SitStandAssessment() {
             collectName: patientInfo?.name || 'test',
           });
           if (resp?.code === 0 && resp?.data?.render_data) {
-            console.log('[SitStand] 后端报告数据已获取:', resp.data);
             setSitstandReportData(resp.data.render_data);
             setShowComplete(true);
             return;
@@ -343,7 +340,6 @@ export default function SitStandAssessment() {
             maxDisplayPoints: 48,
           }
         );
-        console.log('[SitStand] 前端报告数据已生成:', report);
         setSitstandReportData(report);
       } catch (e) {
         console.error('[SitStand] 报告生成失败:', e);

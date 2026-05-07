@@ -290,6 +290,38 @@ function flipFoot64x64Vertical(arr) {
   return out
 }
 
+function shiftFoot64x64FirstRowToLast(arr) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  const out = new Array(arr.length)
+  for (let r = 0; r < size - 1; r++) {
+    const srcRowStart = (r + 1) * size
+    const dstRowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[dstRowStart + c] = arr[srcRowStart + c]
+    }
+  }
+  const firstRowStart = 0
+  const lastRowStart = (size - 1) * size
+  for (let c = 0; c < size; c++) {
+    out[lastRowStart + c] = arr[firstRowStart + c]
+  }
+  return out
+}
+
+function flipFoot64x64Horizontal(arr) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const rowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+    }
+  }
+  return out
+}
+
 function zeroBelowThreshold(arr, threshold) {
   if (!Array.isArray(arr)) return arr
   for (let i = 0; i < arr.length; i++) {
@@ -1214,8 +1246,8 @@ const MODE_TYPE_MAP = {
   11: ['HL'],            // 握力评估-左手采集：只推送左手数据
   12: ['HR'],            // 握力评估-右手采集：只推送右手数据
   2: ['HL', 'HR'],
-  3: ['sit', 'foot1'],
-  4: ['foot1'],
+  3: ['sit', 'foot4'],
+  4: ['foot4'],
   5: ['foot1', 'foot2', 'foot3', 'foot4'],
 }
 let sensorHzCache = {}
@@ -1519,7 +1551,7 @@ async function detectBaudRate(path, timeoutMs = 1500, maxRetries = 2) {
 
         const onError = (err) => {
           console.log(`[baud] ${path} @${baudRate} error:`, err?.message || err)
-          cleanup('error')
+          cleanup(isSerialPortBusyError(err) ? 'busy' : 'error')
         }
 
         try {
@@ -1528,7 +1560,7 @@ async function detectBaudRate(path, timeoutMs = 1500, maxRetries = 2) {
           port.on('error', onError)
         } catch (e) {
           console.log(`[baud] ${path} @${baudRate} open failed:`, e?.message || e)
-          cleanup('error')
+          cleanup(isSerialPortBusyError(e) ? 'busy' : 'error')
           return
         }
 
@@ -1546,11 +1578,15 @@ async function detectBaudRate(path, timeoutMs = 1500, maxRetries = 2) {
       // 每次尝试后等待端口锁释放（macOS 需要时间释放文件锁）
       await new Promise(r => setTimeout(r, 300))
 
-      if (result === 'match') return baudRate
+      if (result === 'match') return { baudRate, busy: false }
+      if (result === 'busy') {
+        console.log(`[baud] ${path} busy during detection, skip remaining baud candidates`)
+        return { baudRate: null, busy: true }
+      }
       // mismatch/error/timeout 继续尝试下一个波特率
     }
   }
-  return null
+  return { baudRate: null, busy: false }
 }
 
 
@@ -2023,8 +2059,8 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       [/sit/i]
     )
     const standKey = pickKey(
-      ['foot1'],
-      [/foot1/i, /foot/i, /stand/i, /back/i]
+      ['foot4', 'foot1'],
+      [/foot4/i, /foot1/i, /foot/i, /stand/i, /back/i]
     )
 
     const formatTimestamp = (ts) => {
@@ -2402,11 +2438,20 @@ app.get('/getPort', async (req, res) => {
 // 涓€閿繛鎺?
 app.get('/connPort', async (req, res) => {
   try {
-    let port = await connectPort()
-    res.json(new HttpResult(0, port, '杩炴帴鎴愬姛'));
+    const result = await connectPort()
+    if (result.busyCount > 0) {
+      const busyText = result.busyPorts.join(', ')
+      if (result.connectedCount > 0) {
+        res.json(new HttpResult(0, result, `部分串口被占用: ${busyText}`));
+      } else {
+        res.json(new HttpResult(1, result, `串口被占用: ${busyText}，请关闭占用该端口的软件后重试`));
+      }
+      return
+    }
+    res.json(new HttpResult(0, result, '连接成功'));
 
-  } catch {
-    res.json(new HttpResult(1, {}, '杩炴帴澶辫触'));
+  } catch (e) {
+    res.json(new HttpResult(1, {}, '连接失败: ' + (e?.message || '未知错误')));
   }
 
 })
@@ -2544,7 +2589,17 @@ app.get('/rescanPort', async (req, res) => {
     const ports = await connectPort()
     console.log('[rescanPort] 重新扫描完成，当前连接:', Object.keys(parserArr).length, '个串口')
 
-    res.json(new HttpResult(0, { cleaned: deadPaths, zombie: zombiePaths, ports }, '重新扫描完成'));
+    const data = { cleaned: deadPaths, zombie: zombiePaths, ports }
+    if (ports.busyCount > 0) {
+      const busyText = ports.busyPorts.join(', ')
+      const message = ports.connectedCount > 0
+        ? `重新扫描完成，部分串口被占用: ${busyText}`
+        : `重新扫描失败，串口被占用: ${busyText}`
+      res.json(new HttpResult(ports.connectedCount > 0 ? 0 : 1, data, message));
+      return
+    }
+
+    res.json(new HttpResult(0, data, '重新扫描完成'));
   } catch (e) {
     console.error('[rescanPort] 失败:', e)
     res.json(new HttpResult(1, {}, '重新扫描失败: ' + e.message));
@@ -3147,8 +3202,8 @@ app.post('/getDbHeatmap', async (req, res) => {
       })
     })
 
-    if (dataArr['foot'] || dataArr['foot1']) {
-      const sensor = dataArr['foot'] || dataArr['foot1']
+    if (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']) {
+      const sensor = dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']
       pdfArrData = sensor
       let renderData = null
       try {
@@ -3934,12 +3989,18 @@ const newSerialPortLink = ({ path, parser, baudRate = 1000000 }) => {
   return port
 }
 
+function isSerialPortBusyError(err) {
+  const message = String(err?.message || err || '')
+  return /resource busy|cannot open|cannot lock port|lock|unavailable|EBUSY/i.test(message)
+}
+
 /**
  * 带重试的串口连接，解决 macOS 上 Cannot lock port 问题
  * detectBaudRate 关闭端口后，系统可能还未释放文件锁，立即重新打开会失败
  * 此函数会自动重试最多 maxRetries 次，每次间隔 retryDelay ms
  */
 async function newSerialPortLinkWithRetry({ path, parser, baudRate = 1000000, maxRetries = 3, retryDelay = 500 }) {
+  let busyDetected = false
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
       console.log(`[port] ${path} retry #${attempt} after ${retryDelay}ms`)
@@ -3959,7 +4020,8 @@ async function newSerialPortLinkWithRetry({ path, parser, baudRate = 1000000, ma
         }
         const onErr = (err) => {
           port.off('open', onOpen)
-          if (err && /lock|unavailable|EBUSY/i.test(err.message)) {
+          if (isSerialPortBusyError(err)) {
+            busyDetected = true
             console.log(`[port] ${path} lock error on attempt ${attempt}:`, err.message)
             resolve(false)
           } else {
@@ -3978,14 +4040,14 @@ async function newSerialPortLinkWithRetry({ path, parser, baudRate = 1000000, ma
       })
       if (opened) {
         console.log(`[port] ${path} opened successfully` + (attempt > 0 ? ` (after ${attempt} retries)` : ''))
-        return port
+        return { port, busy: false }
       }
       // 打开失败，关闭后重试
       try { if (port.isOpen) port.close() } catch (e) {}
     }
   }
   console.log(`[port] ${path} failed to open after ${maxRetries} retries`)
-  return null
+  return { port: null, busy: busyDetected }
 }
 
 /**
@@ -4139,6 +4201,8 @@ async function connectPort() {
   // 关键：每次只打开一个端口，探测完关闭后再探测下一个，避免 CH340 驱动端口锁冲突
   // ============================================================
   const baudDetectResults = {}  // path -> detectedBaud
+  const busyPorts = new Set()
+  const failedPorts = new Set()
   console.log('[phase1] Starting baud rate detection for', ports.length, 'ports')
   for (let i = 0; i < ports.length; i++) {
     const { path } = ports[i]
@@ -4148,16 +4212,20 @@ async function connectPort() {
       console.log('[phase1]', path, '=> skipped (already connected, baud:', baudDetectResults[path], ')')
       continue
     }
-    let detectedBaud = null
+    let detectResult = { baudRate: null, busy: false }
     if (process.env.VIRTUAL_SERIAL_TEST === 'true') {
       try {
         const baudMap = JSON.parse(process.env.VIRTUAL_BAUD_MAP || '{}')
-        detectedBaud = baudMap[path] || null
+        detectResult.baudRate = baudMap[path] || null
       } catch (e) {}
-      console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectedBaud || baudRate)
+      console.log('[TEST] Skipping detectBaudRate for', path, '-> using', detectResult.baudRate || baudRate)
     } else {
-      detectedBaud = await detectBaudRate(path)
+      detectResult = await detectBaudRate(path)
     }
+    if (detectResult.busy) {
+      busyPorts.add(path)
+    }
+    const detectedBaud = detectResult.baudRate
     baudDetectResults[path] = detectedBaud
     console.log('[phase1]', path, '=>', detectedBaud || 'null (will use default ' + baudRate + ')')
     // 探测完后等待端口完全释放，再探测下一个
@@ -4184,10 +4252,14 @@ async function connectPort() {
       const dataItem = dataMap[path] = dataMap[path] ? dataMap[path] : {}
       parserItem.baudRate = portBaudRate
       parserItem.parser = new DelimiterParser({ delimiter: splitBuffer })
-
-    const { parser } = parserItem
+      const { parser } = parserItem
 
       if (!(parserItem.port && parserItem.port.isOpen)) {
+        if (busyPorts.has(path)) {
+          console.log('[port] ' + path + ' skipped: busy')
+          failedPorts.add(path)
+          continue
+        }
         console.log('[baud]', path, '=>', portBaudRate, detectedBaud ? '(detected)' : '')
         // 根据探测到的波特率自动设置设备大类
         const deviceCategory = BAUD_DEVICE_MAP[portBaudRate]
@@ -4201,9 +4273,13 @@ async function connectPort() {
           console.log('[device]', path, '=>', deviceCategory, '(by baud', portBaudRate, ')')
         }
         // 使用带重试的端口连接
-        const port = await newSerialPortLinkWithRetry({ path, parser: parserItem.parser, baudRate: portBaudRate })
+        const { port, busy } = await newSerialPortLinkWithRetry({ path, parser: parserItem.parser, baudRate: portBaudRate })
         if (!port) {
+          if (busy) {
+            busyPorts.add(path)
+          }
           console.log('[port] ' + path + ' skipped: unable to open port')
+          failedPorts.add(path)
           continue
         }
 
@@ -4591,8 +4667,21 @@ async function connectPort() {
           if (!dataItem.type) {
             dataItem.type = 'foot'
           }
-          // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
-          const flippedArr = flipFoot64x64Vertical(pointArr)
+          const shiftedArr = shiftFoot64x64FirstRowToLast(pointArr)
+          let normalizedArr = shiftedArr
+          // 起坐/静态模式在后端源头统一做上下+左右翻转，避免前端再补方向。
+          if (activeSampleType === '3' || activeSampleType === '4') {
+            normalizedArr = flipFoot64x64Vertical(normalizedArr)
+            normalizedArr = flipFoot64x64Horizontal(normalizedArr)
+          }
+          // 步道模式额外做一次上下方向处理（垂直于 foot1-foot4 连线）。
+          if (activeSampleType === '5') {
+            normalizedArr = flipFoot64x64Vertical(normalizedArr)
+          }
+          // 步道模式下四块脚垫统一做左右翻转，直接在源头修正线序。
+          if (activeSampleType === '5') {
+            // normalizedArr = flipFoot64x64Horizontal(normalizedArr)
+          }
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
           // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
           let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
@@ -4605,15 +4694,15 @@ async function connectPort() {
             }
           }
           if (filterMode) {
-            applyFootFilter(flippedArr, filterMode, dataItem.type)
+            applyFootFilter(normalizedArr, filterMode, dataItem.type)
           } else {
             console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
           }
-          dataItem.arr = flippedArr
-          if (dataItem.type === 'foot' && lastFootPointArr.length) {
-            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
+          dataItem.arr = normalizedArr
+          if ((dataItem.type === 'foot' || (activeSampleType === '4' && dataItem.type === 'foot4')) && lastFootPointArr.length) {
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: normalizedArr, data_prev: lastFootPointArr })
           }
-          lastFootPointArr = flippedArr
+          lastFootPointArr = normalizedArr
           // console.log(444)
           const stamp = new Date().getTime()
 
@@ -4668,7 +4757,19 @@ async function connectPort() {
 
   }
 
-  return ports
+  const connectedPaths = Object.keys(parserArr).filter((portPath) => {
+    return !!(parserArr[portPath] && parserArr[portPath].port && parserArr[portPath].port.isOpen)
+  })
+
+  return {
+    connectedPaths,
+    connectedCount: connectedPaths.length,
+    busyPorts: Array.from(busyPorts),
+    busyCount: busyPorts.size,
+    failedPorts: Array.from(failedPorts),
+    scannedPorts: ports.map((item) => item.path),
+    detectedBaud: baudDetectResults,
+  }
 }
 
 // 鍏抽棴姝ｅ湪杩炴帴鐨勪覆鍙?

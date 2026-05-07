@@ -270,8 +270,8 @@ def load_stand_data(file_path):
         if max_series[indices].max() <= 150: 
             tensor[indices] = 0
 
-    # 批量旋转（向量化，避免逐帧 rot90+fliplr）
-    tensor = np.rot90(np.flip(tensor, axis=2), k=1, axes=(1, 2))
+    # 脚垫上下左右方向已在后端源头修正，这里只保留旋转。
+    tensor = np.rot90(tensor, k=1, axes=(1, 2))
 
     # 逐帧去噪（仅处理非零帧）
     kernel = np.ones((3, 3), dtype=np.float32)

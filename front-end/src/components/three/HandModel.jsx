@@ -159,7 +159,6 @@ export function HandModel({
       }
     });
     if (meshCount > 0) {
-      console.log(`[HandModel] 热力图叠加材质已应用到 ${meshCount} 个 mesh`);
     }
   }, [createHeatmapOverlayMaterial]);
 
@@ -168,7 +167,6 @@ export function HandModel({
     if (!model) return;
     const sign = leftHand ? 1 : -1;
     model.scale.set(baseScale * sign, baseScale, baseScale);
-    console.log(`[HandModel] scale 已更新: isLeftHand=${leftHand}, scaleX=${baseScale * sign}`);
   }, []);
 
   useEffect(() => {
@@ -218,7 +216,6 @@ export function HandModel({
     // Load GLB model
     const loader = new GLTFLoader();
     const modelUrl = '/assets/hand0423g.glb';
-    console.log('[HandModel] 开始加载模型:', modelUrl);
     loader.load(
       modelUrl,
       (gltf) => {
@@ -237,7 +234,6 @@ export function HandModel({
             });
           }
         });
-        console.log('[HandModel] 模型加载成功, mesh信息:', JSON.stringify(meshInfo));
 
         const box = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3();
@@ -259,7 +255,6 @@ export function HandModel({
 
         // Always apply custom shader to override model's built-in heatmap texture
         if (heatmapTextureRef.current) {
-          console.log('[HandModel] 模型加载完成，应用自定义 shader');
           applyTextureToModel(handGroup, heatmapTextureRef.current);
         }
 
@@ -268,7 +263,6 @@ export function HandModel({
       },
       (progress) => {
         if (progress.total) {
-          console.log(`[HandModel] 模型加载进度: ${Math.round(progress.loaded / progress.total * 100)}%`);
         }
       },
       (err) => {
@@ -383,7 +377,6 @@ export function HandModel({
       // Disable premultiplied alpha to ensure transparent pixels stay transparent
       texture.premultiplyAlpha = false;
       heatmapTextureRef.current = texture;
-      console.log('[HandModel] 创建新的 CanvasTexture, canvas尺寸:', domCanvas.width, 'x', domCanvas.height);
     }
 
     // Apply custom shader to model if not already applied

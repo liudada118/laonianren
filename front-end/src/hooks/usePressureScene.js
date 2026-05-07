@@ -219,7 +219,6 @@ export function usePressureScene(options = {}) {
 
     // 设置后端采集模式
     backendBridge.setActiveMode(mode).then(() => {
-      console.log(`[usePressureScene] 已设置后端模式 mode=${mode}`);
     }).catch(e => console.error('[usePressureScene] setActiveMode failed:', e));
 
     setIsBackendMode(true);
@@ -254,8 +253,8 @@ export function usePressureScene(options = {}) {
     const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
     // 根据当前模式确定需要使用的脚垫类型
     const MODE_FOOT_TYPES = {
-      3: ['foot1'],                              // 起坐评估：只用 foot1
-      4: ['foot1'],                              // 单脚垫模式
+      3: ['foot4'],                              // 起坐评估：只用 foot4
+      4: ['foot4'],                              // 单脚垫模式
       5: ['foot1', 'foot2', 'foot3', 'foot4'],   // 步态评估：4 个脚垫
     };
     const activeFootTypes = MODE_FOOT_TYPES[mode] || ['foot1'];
@@ -275,7 +274,9 @@ export function usePressureScene(options = {}) {
       // 使用过滤后的 buffers 更新场景
       const combined = combineFootpads(filteredBuffers);
       if (combined) {
-        const matrix = denoiseMatrix(flipLR(rotateCCW90(combined)), 3, 12);
+        const rotated = rotateCCW90(combined);
+        const oriented = mode === 3 ? flipLR(rotated) : rotated;
+        const matrix = denoiseMatrix(oriented, 3, 12);
         scene.updateFootpadData(matrix);
         const stats = matrixStats(matrix);
         const cop = calculateCoP(matrix);
@@ -309,7 +310,6 @@ export function usePressureScene(options = {}) {
       setIsBackendMode(false);
     };
 
-    console.log('[usePressureScene] 后端数据通道已建立');
 
     return () => {
       if (backendCleanupRef.current) {
@@ -332,7 +332,6 @@ export function usePressureScene(options = {}) {
     let useRealData = false;
     if (!seatSimDataRef.current || !footSimDataRef.current) {
       try {
-        console.log('[模拟] 正在加载真实坐起数据...');
         const [sitResp, standResp] = await Promise.all([
           fetch('/sit_sim_data.json'),
           fetch('/stand_sim_data.json'),
@@ -341,7 +340,6 @@ export function usePressureScene(options = {}) {
         const standData = await standResp.json();
         seatSimDataRef.current = sitData.frames;
         footSimDataRef.current = standData.frames;
-        console.log(`[模拟] 加载完成: 坐垫 ${sitData.frames.length} 帧, 脚垫 ${standData.frames.length} 帧`);
         useRealData = true;
       } catch (err) {
         console.warn('[模拟] 加载真实数据失败，使用随机模拟:', err);
@@ -389,7 +387,7 @@ export function usePressureScene(options = {}) {
         // 脚垫数据（64×64）
         if (!footpadSensorRef.current?.getIsConnected() && footFrames.length > 0) {
           const footFlat = footFrames[idx % footFrames.length];
-          const footMatrix = denoiseMatrix(rotateCCW90(flatToMatrix(footFlat, 64)), 3, 12);
+          const footMatrix = denoiseMatrix(flipLR(rotateCCW90(flatToMatrix(footFlat, 64))), 3, 12);
           scene.updateFootpadData(footMatrix);
           const stats = matrixStats(footMatrix);
           const cop = calculateCoP(footMatrix);

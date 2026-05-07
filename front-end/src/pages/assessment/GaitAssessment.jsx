@@ -732,7 +732,6 @@ export default function GaitAssessment() {
         if (typeof cfg.optimizeEnabled === 'boolean') setOptimizeEnabled(cfg.optimizeEnabled);
         if (typeof cfg.optimizeBad === 'number') setOptimizeBad(cfg.optimizeBad);
         if (typeof cfg.optimizeGood === 'number') setOptimizeGood(cfg.optimizeGood);
-        console.log('[GaitAssessment] 已加载持久化滤波参数:', cfg);
       }
     }).catch(e => console.warn('读取滤波参数失败:', e)).finally(() => {
       setFilterParamsLoaded(true);

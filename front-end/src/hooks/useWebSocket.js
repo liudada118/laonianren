@@ -15,7 +15,6 @@ export function useWebSocket() {
       
       ws.onopen = () => {
         setIsConnected(true);
-        console.log('WebSocket 已连接');
       };
       
       ws.onmessage = (event) => {
@@ -41,7 +40,6 @@ export function useWebSocket() {
       
       ws.onclose = () => {
         setIsConnected(false);
-        console.log('WebSocket 断开，3秒后重连...');
         reconnectTimerRef.current = setTimeout(connect, 3000);
       };
       

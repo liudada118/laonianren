@@ -111,8 +111,8 @@ function largestBboxesMulti(binaryMat, topN = 3, minSize = 50) {
 function preprocessOriginData(dataArray, options = {}) {
   const {
     rotate90ccw = true,
-    mirroredHorizon = true,
-    mirroredVertical = true,
+    mirroredHorizon = false,
+    mirroredVertical = false,
     applyDenoise = true,
     smallCompMinSize = 3,
     smallCompConnectivity = 4,
@@ -1268,8 +1268,8 @@ function generateStandingReport(dataArray, fps = 42, thresholdRatio = 0.8) {
   // 1. 预处理
   const processedData = preprocessOriginData(dataArray, {
     rotate90ccw: true,
-    mirroredHorizon: true,
-    mirroredVertical: true,
+    mirroredHorizon: false,
+    mirroredVertical: false,
     applyDenoise: true,
     smallCompMinSize: 3,
     smallCompConnectivity: 4,
@@ -1286,7 +1286,7 @@ function generateStandingReport(dataArray, fps = 42, thresholdRatio = 0.8) {
   // 注意: 使用预处理后的数据（与Python一致，preprocess_data_array）
   const processedForCOP = preprocessOriginData(dataArray, {
     rotate90ccw: true,
-    mirroredHorizon: true,
+    mirroredHorizon: false,
     mirroredVertical: false,
     applyDenoise: false,
   });

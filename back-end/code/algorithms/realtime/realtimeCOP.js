@@ -7,7 +7,7 @@
  */
 
 const {
-  reshape2D, rot90, fliplr,
+  reshape2D, rot90,
   connectedComponentsWithStats,
 } = require('../shared/mathUtils');
 
@@ -34,8 +34,8 @@ function parseFrame(data) {
   // reshape 为 64x64
   let frame = reshape2D(data, 64, 64);
 
-  // fliplr + rot90 (与Python一致)
-  frame = rot90(fliplr(frame));
+  // 仅保留旋转，左右方向由后端数据源线序修正统一处理
+  frame = rot90(frame);
 
   // 噪声阈值
   for (let r = 0; r < 64; r++) {

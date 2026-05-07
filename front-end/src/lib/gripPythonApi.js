@@ -14,6 +14,7 @@ let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
 const inFlightAiRequests = new Map();
 let runtimeLlmApiKey = '';
 let ensurePythonAiPromise = null;
+let lastPythonAiEnsureError = '';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,15 +22,26 @@ function sleep(ms) {
 
 async function ensurePythonAiViaElectron() {
   if (typeof window === 'undefined' || !window.electronAPI?.ensurePythonAi) {
+    lastPythonAiEnsureError = 'Electron Python AI bridge is unavailable';
     return false;
   }
 
   try {
     const result = await window.electronAPI.ensurePythonAi();
-    return Boolean(result?.success);
-  } catch {
+    if (result?.success) {
+      lastPythonAiEnsureError = '';
+      return true;
+    }
+    lastPythonAiEnsureError = result?.error || 'Python AI service failed to start';
+    return false;
+  } catch (err) {
+    lastPythonAiEnsureError = err?.message || 'Python AI service failed to start';
     return false;
   }
+}
+
+function getPythonAiUnavailableMessage() {
+  return lastPythonAiEnsureError || 'Python AI service is not running on 127.0.0.1:8765';
 }
 
 async function waitForPythonAiReady({ timeoutMs = 30000, intervalMs = 1000 } = {}) {
@@ -262,7 +274,10 @@ export async function checkPythonBackend() {
 
 export async function fetchLlmConfig() {
   try {
-    await ensurePythonAiReady({ timeoutMs: 10000 });
+    const ready = await ensurePythonAiReady({ timeoutMs: 10000 });
+    if (!ready) {
+      return { success: false, error: getPythonAiUnavailableMessage() };
+    }
 
     const res = await fetchPythonApi('/llm-config', () => ({
       method: 'GET',

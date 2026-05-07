@@ -22,6 +22,35 @@ import os
 import json
 import traceback
 
+
+def _patch_macos_matplotlib_font_scan():
+    if sys.platform != "darwin":
+        return
+
+    import subprocess
+
+    if getattr(subprocess.check_output, "_skip_mpl_macos_fonts", False):
+        return
+
+    original_check_output = subprocess.check_output
+
+    def safe_check_output(cmd, *args, **kwargs):
+        if (
+            isinstance(cmd, (list, tuple))
+            and len(cmd) >= 3
+            and cmd[0] == "system_profiler"
+            and cmd[1] == "-xml"
+            and cmd[2] == "SPFontsDataType"
+        ):
+            raise OSError("Skip macOS system font scan for matplotlib")
+        return original_check_output(cmd, *args, **kwargs)
+
+    safe_check_output._skip_mpl_macos_fonts = True
+    subprocess.check_output = safe_check_output
+
+
+_patch_macos_matplotlib_font_scan()
+
 # ============================================================
 # 路径设置
 # ============================================================

@@ -92,7 +92,6 @@ export function AssessmentProvider({ children }) {
       setWsConnected(false);
     });
     const offMacInfo = backendBridge.on('macInfo', (info) => {
-      console.log('[AssessmentContext] 收到MAC信息:', info);
       setMacInfo(info);
     });
     return () => {
@@ -154,15 +153,26 @@ export function AssessmentProvider({ children }) {
           const off = backendBridge.on('connect', () => { off(); resolve(); });
           setTimeout(() => { off(); resolve(); }, 3000);
         });
-        console.log('[一键连接] WebSocket 已连接');
       }
 
       // 2. 调用后端 connPort 连接所有串口设备（MAC信息会通过 WebSocket 推送）
       const connResult = await backendBridge.connPort();
-      console.log('[一键连接] connPort result:', connResult);
+
+      if (!connResult || connResult.code !== 0) {
+        setDeviceConnStatus('error');
+        return {
+          success: false,
+          error: connResult?.message || '连接失败',
+          data: connResult?.data || {},
+        };
+      }
 
       setDeviceConnStatus('connected');
-      return { success: true, data: connResult };
+      return {
+        success: true,
+        data: connResult.data,
+        message: connResult.message || '连接成功',
+      };
     } catch (err) {
       console.error('[一键连接] 失败:', err);
       setDeviceConnStatus('error');
@@ -175,7 +185,6 @@ export function AssessmentProvider({ children }) {
   const rescanDevices = useCallback(async () => {
     try {
       setRescanLoading(true);
-      console.log('[重新扫描] 开始...');
 
       // 清空设备在线状态，等待后端重新推送
       setDeviceOnlineMap({});
@@ -193,9 +202,20 @@ export function AssessmentProvider({ children }) {
       }
 
       const result = await backendBridge.rescanPort();
-      console.log('[重新扫描] 结果:', result);
+      if (!result || result.code !== 0) {
+        setRescanLoading(false);
+        return {
+          success: false,
+          error: result?.message || '重新扫描失败',
+          data: result?.data || {},
+        };
+      }
       setRescanLoading(false);
-      return { success: true, data: result };
+      return {
+        success: true,
+        data: result.data,
+        message: result.message || '重新扫描完成',
+      };
     } catch (err) {
       console.error('[重新扫描] 失败:', err);
       setRescanLoading(false);
@@ -208,7 +228,6 @@ export function AssessmentProvider({ children }) {
     // 1. 先通知后端关闭所有串口
     try {
       await backendBridge.disconnectAll();
-      console.log('[disconnectAllDevices] 后端串口已全部断开');
     } catch (e) {
       console.warn('[disconnectAllDevices] 后端断开失败:', e);
     }

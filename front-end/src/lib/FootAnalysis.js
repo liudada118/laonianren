@@ -39,21 +39,17 @@ export function parseFrameData(data) {
   }
   // 1) 逆时针旋转90度
   const rotated = rot90(matrix);
-  // 2) 水平镜像
-  const mirrored = flipLR(rotated);
-  // 3) 垂直镜像（与Python mirrored_vertical=True 一致）
-  const flipped = flipUD(mirrored);
-  // 4) 再做一次水平镜像（左右对调）
-  const swapped = flipLR(flipped);
-  // 5) 去噪
+  // 2) 静态站立前端显示需要上下 + 左右翻转
+  const oriented = flipUD(flipLR(rotated));
+  // 3) 去噪
   for (let i = 0; i < 64; i++) {
     for (let j = 0; j < 64; j++) {
-      if (swapped[i][j] <= NOISE_THRESHOLD) {
-        swapped[i][j] = 0;
+      if (oriented[i][j] <= NOISE_THRESHOLD) {
+        oriented[i][j] = 0;
       }
     }
   }
-  return swapped;
+  return oriented;
 }
 
 export function splitLeftRight(matrix) {

@@ -169,8 +169,6 @@ export class PressureSensorSerial {
     if (this.onLogCallback) this.onLogCallback(`${prefix} ${message}`, type);
     if (type === 'error') {
       console.error(`${prefix} ${message}`);
-    } else {
-      console.log(`${prefix} ${message}`);
     }
   }
 

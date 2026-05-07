@@ -158,8 +158,8 @@ function _replayServer({ sensor_data }) {
 let _pyConfig = {
   preprocess: {
     rotate90ccw: true,
-    mirroredHorizon: true,
-    mirroredVertical: true,
+    mirroredHorizon: false,
+    mirroredVertical: false,
     applyDenoise: true,
     smallCompMinSize: 3,
     smallCompConnectivity: 4,
