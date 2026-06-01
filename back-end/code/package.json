@@ -1,6 +1,6 @@
 {
   "name": "samsystem",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
