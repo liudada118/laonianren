@@ -191,7 +191,7 @@ function ensureLlmSettingsFile() {
     }
 
     const fallback = {
-      api_key: '',
+      api_key: 'sk-9aa735c45fe74b2385d310cf7cda1069',
       base_url: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
       max_tokens: 10000,
