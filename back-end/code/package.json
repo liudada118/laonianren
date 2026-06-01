@@ -110,7 +110,13 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/evaluate"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^31.3.0",

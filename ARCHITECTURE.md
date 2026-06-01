@@ -1,12 +1,15 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-04-30 10:00
+**最后更新**: 2026-06-01
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-06-01 | docs | 配置变更 | 将 Electron 自动更新 generic 更新源从 `http://sensor.bodyta.com/shroom1` 调整为 `http://sensor.bodyta.com/evaluate`。同步修改 `back-end/code/package.json` 的 `build.publish.url` 和 `back-end/code/dev-app-update.yml`，确保打包生成的 `latest.yml` 与开发更新检查使用同一更新目录。 |
+| 2026-06-01 | docs | 配置变更 | 修复新打包 Windows 安装包未生成 `latest.yml` 的问题。根因是 `back-end/code/package.json` 的 `build.publish` generic 更新源配置缺失，electron-builder 因此只生成 `exe` 和 `exe.blockmap`，不会生成自动更新元数据。现已恢复 `provider: generic`，最终更新源为 `url: http://sensor.bodyta.com/evaluate`。 |
+| 2026-05-07 | docs | 文档更新 | 将功能系统架构说明抽出为独立 `Arc.md`，按启动、登录配置、设备连接、评估采集、报告生成、历史记录、导出和异常处理梳理每一步做了什么、适用场景和处理策略；`ARCHITECTURE.md` 保留引用入口。 |
 | 2026-04-30 10:00 | ld | 修复缺陷 | 彻底修复设备在线状态灯始终显示 0/7 的问题。根因：`BackendBridge` 构造函数中 `_listeners` 初始化对象缺少 `deviceStatusBatch` 事件类型，导致 `_emit('deviceStatusBatch', snapshot)` 和 `on('deviceStatusBatch', callback)` 均静默失败（因为 `_listeners['deviceStatusBatch']` 为 `undefined`），`AssessmentContext` 中的监听器从未被注册，React 状态 `deviceOnlineMap` 永远不会更新。修复：在 `_listeners` 初始化中添加 `deviceStatusBatch: []`。修改文件：`front-end/src/lib/BackendBridge.js`。 |
 | 2026-04-30 09:30 | ld | 调试支持 | 开发环境默认打开 DevTools 辅助调试。修改 `shouldOpenDevTools` 逻辑为：未打包时（`!isPackaged`）默认打开，打包后需设置环境变量 `OPEN_DEVTOOLS=1` 才打开。DevTools 模式从 `detach`（独立窗口）改为 `right`（嵌入右侧），同时将全屏改为最大化（`win.maximize()`），避免 DevTools 被全屏窗口遮挡。打包后生产环境默认不打开 DevTools，保持全屏。修改文件：`back-end/code/index.js`。 |
 | 2026-04-30 07:55 | ld | 修复缺陷 | 彻底修复设备在线数量与状态灯不一致。`_batchUpdateDeviceStatus` 改为每帧推送所有 7 个设备的完整状态快照（未出现在本帧的设备保持上次状态，默认 offline）；`AssessmentContext` 的 `deviceStatusBatch` 监听器改为用快照直接替换整个 `deviceOnlineMap`，而非合并更新，确保状态灯和在线数始终完全一致。修改文件：`front-end/src/lib/BackendBridge.js`、`front-end/src/contexts/AssessmentContext.jsx`。 |
@@ -140,7 +143,7 @@
     - 在开发模式下，启动 Vite 开发服务器。
     - 启动核心后端服务 `serialServer.js` 作为一个独立的 Node.js 子进程 (`child_process.fork`)。这种隔离可以防止后端服务的崩溃影响到整个应用的稳定性。
 4.  **预加载脚本 (`preload.js`)**: 通过 `contextBridge` 安全地向渲染进程暴露 Node.js API，包括自动更新相关接口（checkForUpdate、downloadUpdate、installUpdate、getAppVersion、onUpdateStatus）。
-5.  **自动更新 (`updater.js`)**: 使用 `electron-updater` 实现应用在线自动更新，当前 generic provider 指向 `http://sensor.bodyta.com/shroom1`。打包链路通过 `back-end/code/package.json` 中的 `build.publish` 生成 `latest.yml` / `latest-mac.yml` 更新元数据，`back-end/code/scripts/inject-release-notes.js` 会在打包后按实际构建平台将 `release-notes/{platform}/{version}.md` 注入对应 yml 的 `releaseNotes` 字段；开发联调时则通过 `back-end/code/dev-app-update.yml` 复用同一更新源。启动后 5 秒自动检查更新，之后每 30 分钟定时检查。支持手动检查、下载进度通知、安装重启等完整更新流程。
+5.  **自动更新 (`updater.js`)**: 使用 `electron-updater` 实现应用在线自动更新，当前 generic provider 指向 `http://sensor.bodyta.com/evaluate`。打包链路通过 `back-end/code/package.json` 中的 `build.publish` 生成 `latest.yml` / `latest-mac.yml` 更新元数据，`back-end/code/scripts/inject-release-notes.js` 会在打包后按实际构建平台将 `release-notes/{platform}/{version}.md` 注入对应 yml 的 `releaseNotes` 字段；开发联调时则通过 `back-end/code/dev-app-update.yml` 复用同一更新源。启动后 5 秒自动检查更新，之后每 30 分钟定时检查。支持手动检查、下载进度通知、安装重启等完整更新流程。
 
 ### 2.2. 前端架构 (`front-end`)
 
@@ -282,11 +285,15 @@
 
 > **注意**: 所有报告组件（GripReport、SitStandReport、StandingReport、GaitReportContent）在未收到真实采集数据时，会显示"暂无报告数据，请先完成XX评估采集"的提示，不再加载任何假数据或 mock 数据。
 
-## 4. 测试架构
+## 4. 功能系统流程与场景处理
+
+详细内容已抽出为独立文档：[Arc.md](Arc.md)。后续功能系统流程、场景处理、异常清单和优化记录优先维护该文件。
+
+## 5. 测试架构
 
 为了确保应用的稳定性和代码质量，项目引入了基于 `Playwright` 的 `electron-ui` 端到端测试框架。测试流程在 `test` 分支中实现，并计划在未来集成到主开发流程中。
 
-### 4.1. 测试技术栈
+### 5.1. 测试技术栈
 
 | 工具 | 用途 |
 |---|---|
@@ -295,7 +302,7 @@
 | **Xvfb** | 虚拟 X-Window 服务，使得测试可以在无头 (headless) 环境中运行。 |
 | **原生 assert** | 用于编写和执行测试断言。 |
 
-### 4.2. 测试流程
+### 5.2. 测试流程
 
 1.  **项目分析**: 在 `test/analysis.md` 中记录了对项目入口、前后端路由、API、WebSocket、数据库和UI组件的全面分析结果。
 2.  **环境搭建**: 通过 `skills/electron-ui/scripts/setup_env.sh` 脚本自动安装 `Xvfb`、`Playwright` 及相关依赖。
@@ -305,10 +312,13 @@
     - **UI 导航**: 遍历所有前端路由，并进行截图，确保页面能正常加载。
 4.  **执行与报告**: 测试在 `Xvfb` 虚拟桌面中运行，并将截图和结果输出到 `test/screenshots` 目录。
 
-## 5. 项目进度
+## 6. 项目进度
 
 | 完成日期 | 完成的功能/工作 | 简要说明 |
 |---|---|---|
+| 2026-06-01 | 自动更新地址调整 | 将 Windows 打包发布地址和开发更新地址统一为 `http://sensor.bodyta.com/evaluate`，下次构建生成的 `latest.yml` 应上传到该目录。 |
+| 2026-06-01 | Windows 自动更新元数据配置恢复 | 在 `back-end/code/package.json` 中恢复 `build.publish` generic 配置，确保 Windows NSIS 打包后重新生成 `dist/latest.yml`，供 `electron-updater` 检查更新使用。 |
+| 2026-05-07 | 功能系统架构文档抽出 | 新增独立 `Arc.md`，按用户操作链路组织功能系统流程与场景处理说明，覆盖启动、登录配置、设备连接、四类评估采集、报告生成、历史记录、导出、AI 解读、自动更新和异常处理，作为后续持续优化的记录模板。 |
 | 2026-03-03 | viewReport 路由 state 支持 | GripAssessment 和 StandingAssessment 现在支持从 Dashboard "查看报告"按钮直接跳转到报告页面，与 SitStandAssessment 和 GaitAssessment 保持一致。 |
 | 2026-03-03 | 采集按钮 UX 修复 | 所有 4 个评估页面的采集按钮（开始/结束采集）已将 onClick 事件从 button 移至外层 div 容器，确保点击文字标签也能触发操作。 |
 | 2026-03-03 | HistoryReportView onClose 修复 | SitStandReport 和 GaitReportContent 组件在历史报告查看页面中现在有正确的 onClose 回调，支持返回历史记录列表。 |
@@ -355,7 +365,7 @@
 
 | 2026-04-15 17:10 | main | 自动更新元数据生成修复 | 恢复 `electron-builder` 的 `build.publish` 配置后，Windows 打包重新产出 `dist/latest.yml`，并已验证 `scripts/inject-release-notes.js` 可自动注入 `releaseNotes`；同时将 `dev-app-update.yml` 的更新源与生产环境统一到 `http://sensor.bodyta.com/shroom1`。|
 
-## 6. 未来维护与更新
+## 7. 未来维护与更新
 
 根据用户要求，本文档将作为项目核心参考，并在每次功能优化或架构调整后进行同步更新。
 
