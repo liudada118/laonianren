@@ -12,7 +12,7 @@ const requirementsPath = path.join(pythonDir, 'requirements-electron.txt');
 const requirementsStampPath = path.join(pythonVenvDir, '.requirements.sha256');
 const llmConfigDir = path.join(__dirname, '..', 'python', 'app', 'algorithms');
 const llmSettingsPath = path.join(llmConfigDir, 'llm_settings.json');
-const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings.example.json');
+const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings_example.json');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 // ─── Node.js 依赖检查（来自 ld 分支，更完善） ───
@@ -192,9 +192,10 @@ function ensureLlmSettingsFile() {
 
     const fallback = {
       api_key: '',
-      base_url: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2.5',
-      thinking: { type: 'disabled' },
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      max_tokens: 10000,
+      extra_body: { enable_thinking: false },
     };
     fs.writeFileSync(llmSettingsPath, JSON.stringify(fallback, null, 2), 'utf8');
     console.log('[start] Created llm_settings.json with fallback defaults.');

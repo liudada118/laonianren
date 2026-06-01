@@ -12,11 +12,14 @@ import GaitAverageChart from '../../components/ui/GaitAverageChart';
 import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
 import AssessmentAiPanel from '../../components/report/AssessmentAiPanel';
+import ReportSummaryCard, { BasisNote } from '../../components/report/ReportSummaryCard';
+import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
 import {
   ASSESSMENT_AI_SECTION_CONFIG,
   buildGaitAiPayload,
   requestAssessmentAIReport,
 } from '../../lib/assessmentAi';
+import { scoreGait, scoreToAiContext } from '../../lib/assessmentScoring';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -156,7 +159,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     { id: 'partcurves', title: '8. 分区曲线' },
     { id: 'support', title: '9. 单脚支撑相' },
     { id: 'cycle', title: '10. 步态周期' },
-    { id: 'conclusion', title: '综合评估' },
+    { id: 'conclusion', title: 'AI分项分析' },
   ];
   const [activeSection, setActiveSection] = useState('spatiotemporal');
   const scrollToSection = (id) => {
@@ -334,6 +337,8 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
   const supportThStyle = 'px-2 py-2 text-left font-semibold text-[12px] whitespace-nowrap';
   const supportTdStyle = 'px-2 py-2 text-[12px] whitespace-nowrap';
   const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
+  const scoreResult = useMemo(() => realData ? scoreGait(realData) : null, [realData]);
+  const cleanAiReport = useMemo(() => sanitizeAiReport(aiReport), [aiReport]);
 
   useEffect(() => {
     // 当报告数据切换时，允许重新发起一次 AI 请求
@@ -352,7 +357,10 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     requestAssessmentAIReport(
       'gait',
       patientInfo || { name: '未知' },
-      aiPayload,
+      {
+        ...aiPayload,
+        score_context: scoreToAiContext(scoreResult),
+      },
     ).then(res => {
       if (res.success) {
         if (!cancelled) {
@@ -373,7 +381,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     return () => {
       cancelled = true;
     };
-  }, [aiPayload, patientInfo, aiReport, externalResult?.aiReport]);
+  }, [aiPayload, patientInfo, aiReport, externalResult?.aiReport, scoreResult]);
 
   // Hooks 必须在所有条件分支之前调用
   const gaitContentRef = React.useRef(null);
@@ -442,6 +450,13 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
       </nav>
 
       <div ref={gaitContentRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+        <ReportSummaryCard
+          scoreResult={scoreResult}
+          title="项目评分"
+          aiLoading={aiLoading}
+          aiIntro={cleanAiReport?.overview}
+        />
+
         {/* 1. 步态时空参数 */}
         <section id="gait-spatiotemporal">
           <div className="zeiss-section-title">1. 步态时空参数</div>
@@ -682,16 +697,18 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
         {/* 综合评估 */}
         <section id="gait-conclusion">
-          <div className="zeiss-section-title">AI综合评估</div>
+          <div className="zeiss-section-title">AI分项分析</div>
           <div className="zeiss-card-inner p-5 mt-3">
             <AssessmentAiPanel
               aiLoading={aiLoading}
               aiError={aiError}
               aiReport={aiReport}
               sections={ASSESSMENT_AI_SECTION_CONFIG.gait}
+              excludeKeys={['overview']}
             />
           </div>
         </section>
+        <BasisNote className="pb-6 text-center" />
       </div>
     </div>
     </div>

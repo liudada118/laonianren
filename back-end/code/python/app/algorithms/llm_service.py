@@ -5,11 +5,45 @@ LLM service for assessment reports.
 import asyncio
 import json
 import os
+import re
 
 from openai import OpenAI
 
 from llm_config import get_llm_config
 from prompts import ASSESSMENT_PROMPTS, append_common_user_rules
+
+
+_EMPTY_PRAISE_PATTERNS = [
+    r"^老人家今天[^。！？\n]{0,30}(?:挺认真|很认真)[，,。！!\s]*",
+    r"^今天[^。！？\n]{0,30}(?:挺认真|很认真)[，,。！!\s]*",
+    r"^(?:这次)?测试[^。！？\n]{0,12}顺利完成(?:了)?[，,。！!\s]*",
+    r"^先给您点个赞[，,。！!\s]*",
+    r"^先点个赞[，,。！!\s]*",
+    r"^先表扬一下[，,。！!\s]*",
+]
+
+
+def _strip_empty_praise(text):
+    if not isinstance(text, str):
+        return text
+    cleaned = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        for pattern in _EMPTY_PRAISE_PATTERNS:
+            new_text = re.sub(pattern, "", cleaned)
+            if new_text != cleaned:
+                cleaned = new_text.lstrip(" ，,。！!；;")
+                changed = True
+    return cleaned
+
+
+def _sanitize_ai_report(report):
+    if isinstance(report, dict):
+        return {key: _sanitize_ai_report(value) for key, value in report.items()}
+    if isinstance(report, list):
+        return [_sanitize_ai_report(item) for item in report]
+    return _strip_empty_praise(report)
 
 
 def _normalize_optional_text(value):
@@ -185,7 +219,7 @@ async def call_assessment_ai_report(
     # OpenAI Python SDK here is sync; offload to thread to avoid blocking FastAPI event loop.
     response = await asyncio.to_thread(_create_completion_with_fallback, client, request_kwargs)
     content = response.choices[0].message.content
-    return _parse_json_response(content)
+    return _sanitize_ai_report(_parse_json_response(content))
 
 
 def stream_assessment_ai_report(

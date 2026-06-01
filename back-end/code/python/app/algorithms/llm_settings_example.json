@@ -1,6 +1,7 @@
 {
   "api_key": "",
-  "base_url": "https://api.moonshot.cn/v1",
-  "model": "kimi-k2.5",
-  "thinking": { "type": "disabled" }
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "max_tokens": 10000,
+  "extra_body": { "enable_thinking": false }
 }

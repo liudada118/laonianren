@@ -1,26 +1,207 @@
-/**
- * PDF 导出工具
- * 
- * 使用 html2canvas + jsPDF 将 DOM 内容渲染为真实 PDF 文件并触发下载
- * 支持长页面自动分页（单页滑动模式）
- */
 import React from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-/**
- * 将指定容器内容导出为 PDF 文件
- * @param {HTMLElement} container - 要导出的 DOM 容器
- * @param {string} fileName - 文件名（不含扩展名）
- * @param {object} options - 配置选项
- * @param {string} options.title - PDF 标题（元数据）
- * @param {string} options.orientation - 'portrait' | 'landscape'
- * @param {number} options.scale - 渲染缩放比例，默认 2
- * @param {number} options.quality - JPEG 质量 0-1，默认 0.95
- */
+const TEMP_EXPORT_ATTR = 'data-pdf-export-id';
+const DEFAULT_PAGE_BREAK_SELECTORS = [
+  'section',
+  '.zeiss-card',
+  '.zeiss-card-inner',
+  'table',
+  '[data-pdf-keep-intact]',
+  '[class*="overflow-x-auto"]',
+].join(', ');
+const MAX_RENDER_PIXELS = 32_000_000;
+
+function getCaptureBounds(container) {
+  const rect = container.getBoundingClientRect();
+  let estimatedHeight = Math.max(
+    container.scrollHeight || 0,
+    container.clientHeight || 0,
+    rect.height || 0,
+  );
+
+  container.querySelectorAll('*').forEach((element) => {
+    const elementRect = element.getBoundingClientRect();
+    const overflowHeight = Math.max(0, element.scrollHeight - element.clientHeight);
+    const bottom = elementRect.bottom - rect.top + container.scrollTop + overflowHeight;
+    estimatedHeight = Math.max(estimatedHeight, Math.ceil(bottom));
+  });
+
+  return {
+    width: Math.max(1, Math.ceil(rect.width || container.clientWidth || container.offsetWidth || 0)),
+    height: Math.max(1, estimatedHeight),
+  };
+}
+
+function limitRenderScale(width, height, requestedScale) {
+  const safeScale = Math.max(1, requestedScale || 1);
+  const pixelCount = width * height * safeScale * safeScale;
+
+  if (!pixelCount || pixelCount <= MAX_RENDER_PIXELS) {
+    return safeScale;
+  }
+
+  const reducedScale = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, width * height));
+  return Math.max(1, Math.min(safeScale, reducedScale));
+}
+
+function collectPageBreakRanges(root, selectors) {
+  if (!root) return [];
+
+  const rootRect = root.getBoundingClientRect();
+  const elements = Array.from(root.querySelectorAll(selectors));
+  const seen = new Set();
+  const ranges = [];
+
+  elements.forEach((element) => {
+    const rect = element.getBoundingClientRect();
+    const top = Math.max(0, Math.round(rect.top - rootRect.top));
+    const bottom = Math.max(top, Math.round(rect.bottom - rootRect.top));
+    const height = bottom - top;
+
+    if (height < 24) return;
+
+    const key = `${top}:${bottom}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    ranges.push({ top, bottom, height });
+  });
+
+  ranges.sort((a, b) => (a.top - b.top) || (a.bottom - b.bottom));
+  return ranges;
+}
+
+function prepareCloneForCapture(root, captureWidth, captureHeight, selectors) {
+  if (!root) return [];
+
+  const doc = root.ownerDocument;
+  const win = doc.defaultView;
+  const styleTag = doc.createElement('style');
+
+  styleTag.textContent = `
+    * {
+      animation: none !important;
+      transition: none !important;
+      caret-color: transparent !important;
+      scroll-behavior: auto !important;
+    }
+  `;
+  doc.head.appendChild(styleTag);
+
+  root.scrollTop = 0;
+  root.scrollLeft = 0;
+  root.style.width = `${captureWidth}px`;
+  root.style.minWidth = `${captureWidth}px`;
+  root.style.maxWidth = `${captureWidth}px`;
+  root.style.height = 'auto';
+  root.style.maxHeight = 'none';
+  root.style.minHeight = `${captureHeight}px`;
+  root.style.overflow = 'visible';
+  root.style.background = '#ffffff';
+
+  root.querySelectorAll('*').forEach((element) => {
+    const computed = win.getComputedStyle(element);
+    const hasVerticalOverflow = element.scrollHeight > element.clientHeight + 1;
+
+    if (computed.position === 'sticky') {
+      element.style.position = 'static';
+      element.style.top = 'auto';
+    }
+
+    if (hasVerticalOverflow) {
+      element.scrollTop = 0;
+      element.style.height = 'auto';
+      element.style.maxHeight = 'none';
+      element.style.overflowY = 'visible';
+    }
+  });
+
+  return collectPageBreakRanges(root, selectors);
+}
+
+function computePageSlices(totalHeight, pageHeight, ranges) {
+  if (totalHeight <= pageHeight) {
+    return [{ start: 0, end: totalHeight }];
+  }
+
+  const minFill = Math.max(160, Math.floor(pageHeight * 0.55));
+  const slices = [];
+  let start = 0;
+
+  while (start < totalHeight) {
+    let end = Math.min(start + pageHeight, totalHeight);
+
+    if (end >= totalHeight) {
+      slices.push({ start, end: totalHeight });
+      break;
+    }
+
+    const crossingRanges = ranges
+      .filter((range) => range.top < end && range.bottom > end && range.top > start + 20)
+      .sort((a, b) => (b.top - a.top) || (a.height - b.height));
+
+    const safeStart = crossingRanges.find(
+      (range) => (range.top - start) >= minFill && range.height <= pageHeight,
+    );
+
+    if (safeStart) {
+      end = safeStart.top;
+    } else {
+      const nearestBottom = ranges
+        .filter((range) => range.bottom > start + minFill && range.bottom <= end)
+        .map((range) => range.bottom)
+        .sort((a, b) => b - a)[0];
+
+      if (nearestBottom) {
+        end = nearestBottom;
+      }
+    }
+
+    if (end <= start + 20) {
+      end = Math.min(start + pageHeight, totalHeight);
+    }
+
+    slices.push({ start, end });
+    start = end;
+  }
+
+  return slices;
+}
+
+function renderCanvasSlice(sourceCanvas, startY, endY, quality) {
+  const sliceHeight = Math.max(1, endY - startY);
+  const pageCanvas = document.createElement('canvas');
+  pageCanvas.width = sourceCanvas.width;
+  pageCanvas.height = sliceHeight;
+
+  const ctx = pageCanvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('无法创建 PDF 页面画布');
+  }
+
+  ctx.drawImage(
+    sourceCanvas,
+    0,
+    startY,
+    sourceCanvas.width,
+    sliceHeight,
+    0,
+    0,
+    sourceCanvas.width,
+    sliceHeight,
+  );
+
+  return {
+    dataUrl: pageCanvas.toDataURL('image/jpeg', quality),
+    height: sliceHeight,
+  };
+}
+
 export async function exportToPdf(container, fileName = 'report', options = {}) {
   if (!container) {
-    console.error('[PDF Export] 容器不存在');
+    console.error('[PDF Export] container is missing');
     return false;
   }
 
@@ -29,106 +210,117 @@ export async function exportToPdf(container, fileName = 'report', options = {}) 
     orientation = 'portrait',
     scale = 2,
     quality = 0.95,
+    pageBreakSelectors = DEFAULT_PAGE_BREAK_SELECTORS,
   } = options;
 
+  const previousExportId = container.getAttribute(TEMP_EXPORT_ATTR);
+  const exportId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
   try {
-    // 1. 使用 html2canvas 将 DOM 渲染为 canvas
+    const { width: captureWidth, height: captureHeight } = getCaptureBounds(container);
+    const viewportWidth = Math.max(
+      document.documentElement.clientWidth || 0,
+      window.innerWidth || 0,
+      captureWidth,
+    );
+    const viewportHeight = Math.max(
+      document.documentElement.clientHeight || 0,
+      window.innerHeight || 0,
+      captureHeight,
+    );
+    const effectiveScale = limitRenderScale(captureWidth, captureHeight, scale);
+    let pageBreakRanges = [];
+
+    container.setAttribute(TEMP_EXPORT_ATTR, exportId);
+
     const canvas = await html2canvas(container, {
-      scale,
+      scale: effectiveScale,
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
       logging: false,
-      // 滚动容器需要完整渲染
+      width: captureWidth,
+      height: captureHeight,
       scrollX: 0,
       scrollY: 0,
-      windowWidth: container.scrollWidth,
-      windowHeight: container.scrollHeight,
+      windowWidth: viewportWidth,
+      windowHeight: viewportHeight,
+      onclone: (clonedDoc) => {
+        const clonedContainer = clonedDoc.querySelector(`[${TEMP_EXPORT_ATTR}="${exportId}"]`);
+        pageBreakRanges = prepareCloneForCapture(
+          clonedContainer,
+          captureWidth,
+          captureHeight,
+          pageBreakSelectors,
+        );
+      },
     });
 
-    // 2. 计算 PDF 尺寸（A4: 210mm x 297mm）
     const isLandscape = orientation === 'landscape';
     const pageWidth = isLandscape ? 297 : 210;
     const pageHeight = isLandscape ? 210 : 297;
-    const margin = 5; // mm
+    const margin = 5;
     const contentWidth = pageWidth - margin * 2;
     const contentHeight = pageHeight - margin * 2;
-
-    // 图片宽度适配到 PDF 内容区域宽度
     const imgWidth = contentWidth;
     const imgHeight = (canvas.height * contentWidth) / canvas.width;
+    const pageHeightPx = Math.max(1, Math.floor((contentHeight / contentWidth) * canvas.width));
+    const rangeScale = canvas.height / Math.max(1, captureHeight);
+    const scaledBreakRanges = pageBreakRanges.map((range) => ({
+      top: Math.round(range.top * rangeScale),
+      bottom: Math.round(range.bottom * rangeScale),
+      height: Math.round(range.height * rangeScale),
+    }));
+    const pageSlices = computePageSlices(canvas.height, pageHeightPx, scaledBreakRanges);
 
-    // 3. 创建 jsPDF 实例
     const pdf = new jsPDF({
       orientation: isLandscape ? 'l' : 'p',
       unit: 'mm',
       format: 'a4',
     });
 
-    // 设置 PDF 元数据
     pdf.setProperties({
       title: `${title} - ${fileName}`,
       creator: '老年人筛查系统',
     });
 
-    // 4. 将 canvas 转为图片数据
-    const imgData = canvas.toDataURL('image/jpeg', quality);
-
-    // 5. 单页滑动模式：如果内容超过一页，自动分页
-    if (imgHeight <= contentHeight) {
-      // 内容不超过一页，直接放置
+    if (imgHeight <= contentHeight || pageSlices.length <= 1) {
+      const imgData = canvas.toDataURL('image/jpeg', quality);
       pdf.addImage(imgData, 'JPEG', margin, margin, imgWidth, imgHeight);
     } else {
-      // 内容超过一页，按页高裁切分页
-      let remainingHeight = imgHeight;
-      let position = 0; // 当前在图片中的 mm 偏移
-
-      while (remainingHeight > 0) {
-        if (position > 0) {
+      pageSlices.forEach((slice, index) => {
+        if (index > 0) {
           pdf.addPage();
         }
 
-        // 计算当前页应该显示的图片区域
-        // 使用 canvas 裁切来实现精确分页
-        const sliceHeight = Math.min(contentHeight, remainingHeight);
-        const sourceY = (position / imgHeight) * canvas.height;
-        const sourceH = (sliceHeight / imgHeight) * canvas.height;
-
-        // 创建当前页的 canvas 切片
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = sourceH;
-        const ctx = pageCanvas.getContext('2d');
-        ctx.drawImage(canvas, 0, sourceY, canvas.width, sourceH, 0, 0, canvas.width, sourceH);
-
-        const pageImgData = pageCanvas.toDataURL('image/jpeg', quality);
-        pdf.addImage(pageImgData, 'JPEG', margin, margin, imgWidth, sliceHeight);
-
-        position += sliceHeight;
-        remainingHeight -= sliceHeight;
-      }
+        const page = renderCanvasSlice(canvas, slice.start, slice.end, quality);
+        const sliceHeightMm = (page.height * imgWidth) / canvas.width;
+        pdf.addImage(page.dataUrl, 'JPEG', margin, margin, imgWidth, sliceHeightMm);
+      });
     }
 
-    // 6. 保存 PDF 文件
     pdf.save(`${fileName}.pdf`);
-
     return true;
-  } catch (e) {
-    console.error('[PDF Export] PDF 生成失败:', e);
-    alert('PDF 生成失败: ' + e.message);
+  } catch (error) {
+    console.error('[PDF Export] failed:', error);
+    alert(`PDF 生成失败: ${error.message}`);
     return false;
+  } finally {
+    if (previousExportId == null) {
+      container.removeAttribute(TEMP_EXPORT_ATTR);
+    } else {
+      container.setAttribute(TEMP_EXPORT_ATTR, previousExportId);
+    }
   }
 }
 
-/**
- * 简单的 PDF 导出按钮组件（可复用）
- */
 export function PdfExportButton({ containerRef, fileName, title, className, style, children }) {
   const [exporting, setExporting] = React.useState(false);
 
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
+
     try {
       await exportToPdf(containerRef?.current, fileName, { title });
     } finally {
@@ -140,7 +332,7 @@ export function PdfExportButton({ containerRef, fileName, title, className, styl
     <button
       onClick={handleExport}
       disabled={exporting}
-      className={className || "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"}
+      className={className || 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all'}
       style={style || {
         color: exporting ? 'var(--text-muted)' : '#DC2626',
         background: exporting ? 'var(--bg-tertiary)' : '#FEF2F2',

@@ -331,17 +331,57 @@ def calculate_nonzero_count(sensor_data, indices):
     return count
 
 
-def detect_grip_start(total_forces, times, threshold_ratio=0.1):
+def detect_grip_window(total_forces, times, threshold_ratio=0.1):
     if len(total_forces) == 0:
-        return 0, 0
+        return {
+            'start_idx': 0,
+            'start_time': 0,
+            'end_idx': 0,
+            'end_time': 0,
+            'duration': 0,
+            'threshold': 0,
+        }
     max_force = np.max(total_forces)
     if max_force <= 0:
-        return 0, times[0] if len(times) > 0 else 0
+        t0 = times[0] if len(times) > 0 else 0
+        return {
+            'start_idx': 0,
+            'start_time': t0,
+            'end_idx': 0,
+            'end_time': t0,
+            'duration': 0,
+            'threshold': 0,
+        }
     threshold = max_force * threshold_ratio
-    for i, force in enumerate(total_forces):
-        if force > threshold:
-            return i, times[i]
-    return 0, times[0]
+    above_indices = np.where(total_forces > threshold)[0]
+    if len(above_indices) == 0:
+        t0 = times[0] if len(times) > 0 else 0
+        return {
+            'start_idx': 0,
+            'start_time': t0,
+            'end_idx': 0,
+            'end_time': t0,
+            'duration': 0,
+            'threshold': threshold,
+        }
+
+    start_idx = int(above_indices[0])
+    end_idx = int(above_indices[-1])
+    start_time = float(times[start_idx])
+    end_time = float(times[end_idx])
+    return {
+        'start_idx': start_idx,
+        'start_time': start_time,
+        'end_idx': end_idx,
+        'end_time': end_time,
+        'duration': max(0.0, end_time - start_time),
+        'threshold': float(threshold),
+    }
+
+
+def detect_grip_start(total_forces, times, threshold_ratio=0.1):
+    grip_window = detect_grip_window(total_forces, times, threshold_ratio)
+    return grip_window['start_idx'], grip_window['start_time']
 
 
 def detect_peak_region(total_forces, times, threshold_ratio=0.95):
@@ -420,8 +460,11 @@ def create_pdf_report(output_path, hand_type, input_file, times, force_data, eul
         ax_table1.set_title('时间分析', fontsize=13, fontweight='bold', loc='left',
                             fontproperties=font_prop, pad=5)
 
+        grip_window = detect_grip_window(force_data['total'], times, GRIP_START_THRESHOLD_RATIO)
         time_data = [
-            ['抓握开始时间', f'{grip_start_time:.3f} s'],
+            ['开始发力时刻', f'{grip_window["start_time"]:.3f} s'],
+            ['结束发力时刻', f'{grip_window["end_time"]:.3f} s'],
+            ['有效抓握时长', f'{grip_window["duration"]:.3f} s'],
         ]
         if peak_info:
             time_data.extend([
@@ -549,7 +592,7 @@ def create_pdf_report(output_path, hand_type, input_file, times, force_data, eul
                        color='red', s=150, zorder=5, marker='*',
                        label=f'峰值: {peak_info["peak_force"]:.1f}N')
             ax2.axvline(x=grip_start_time, color='green', linestyle=':',
-                       linewidth=2, alpha=0.7, label=f'抓握开始 ({grip_start_time:.2f}s)')
+                       linewidth=2, alpha=0.7, label=f'开始发力 ({grip_start_time:.2f}s)')
 
         ax2.set_xlabel('时间 (秒)', fontsize=12, fontproperties=font_prop)
         ax2.set_ylabel('力 (N)', fontsize=12, fontproperties=font_prop)
@@ -862,9 +905,13 @@ def _process_glove_data_core(input_csv, output_csv, hand_type):
         quaternions, times, window_size=ANGULAR_VELOCITY_WINDOW_SIZE
     )
 
-    grip_start_idx, grip_start_time = detect_grip_start(
+    grip_window = detect_grip_window(
         force_data['total'], times, GRIP_START_THRESHOLD_RATIO
     )
+    grip_start_idx = grip_window['start_idx']
+    grip_start_time = grip_window['start_time']
+    grip_end_time = grip_window['end_time']
+    grip_duration = grip_window['duration']
 
     peak_info = detect_peak_region(force_data['total'], times, PEAK_FORCE_THRESHOLD_RATIO)
 
@@ -911,7 +958,9 @@ def _process_glove_data_core(input_csv, output_csv, hand_type):
 
     # 构建返回结果（与 GripReport.jsx 的 reportData 格式对齐）
     time_analysis = [
-        {'label': '抓握开始时间', 'value': f'{grip_start_time:.3f} s'},
+        {'label': '开始发力时刻', 'value': f'{grip_start_time:.3f} s'},
+        {'label': '结束发力时刻', 'value': f'{grip_end_time:.3f} s'},
+        {'label': '有效抓握时长', 'value': f'{grip_duration:.3f} s'},
     ]
     if peak_info:
         time_analysis.extend([
@@ -965,7 +1014,15 @@ def _process_glove_data_core(input_csv, output_csv, hand_type):
         'peakInfo': {
             'peak_force': round(float(peak_info['peak_force']), 2),
             'peak_time': round(float(peak_info['peak_time']), 3),
+            'start_idx': int(peak_info['start_idx']),
+            'end_idx': int(peak_info['end_idx']),
+            'start_time': round(float(peak_info['start_time']), 3),
+            'end_time': round(float(peak_info['end_time']), 3),
+            'duration': round(float(peak_info['duration']), 3),
         } if peak_info else None,
+        'gripStartTime': round(float(grip_start_time), 3),
+        'gripEndTime': round(float(grip_end_time), 3),
+        'gripDuration': round(float(grip_duration), 3),
         'timeAnalysis': time_analysis,
         'fingers': fingers,
         'totalForce': round(total_force, 2),
@@ -1101,9 +1158,11 @@ def process_glove_data(input_csv, output_csv):
         quaternions, times, window_size=ANGULAR_VELOCITY_WINDOW_SIZE
     )
 
-    grip_start_idx, grip_start_time = detect_grip_start(
+    grip_window = detect_grip_window(
         force_data['total'], times, GRIP_START_THRESHOLD_RATIO
     )
+    grip_start_idx = grip_window['start_idx']
+    grip_start_time = grip_window['start_time']
 
     peak_info = detect_peak_region(force_data['total'], times, PEAK_FORCE_THRESHOLD_RATIO)
 

@@ -4,10 +4,13 @@ import InteractiveArchChart from './InteractiveArchChart';
 import InteractiveCOPChart from './InteractiveCOPChart';
 import { exportToPdf } from '../../lib/pdfExport';
 import AssessmentAiPanel from './AssessmentAiPanel';
+import ReportSummaryCard, { BasisNote } from './ReportSummaryCard';
+import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
 import {
   ASSESSMENT_AI_SECTION_CONFIG,
   buildStandingAiPayload,
 } from '../../lib/assessmentAi';
+import { scoreStanding, scoreToAiContext } from '../../lib/assessmentScoring';
 
 /* ─── 蔡司风格 EChart 封装（增量更新，避免闪烁） ─── */
 function EChart({ option, height = 280 }) {
@@ -38,7 +41,7 @@ const SECTIONS = [
   { id: 'cop-velocity', label: 'COP 速度与加速度' },
   { id: 'cop-params', label: 'COP 参数' },
   { id: 'annotation', label: '医师注释' },
-  { id: 'summary', label: 'AI 报告' },
+  { id: 'summary', label: 'AI分项分析' },
 ];
 
 const STANDING_SPACING_MM = 14;
@@ -411,6 +414,11 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
       }
     };
   }, [reportData]);
+  const scoreResult = useMemo(
+    () => reportData ? scoreStanding(reportData) : null,
+    [reportData],
+  );
+  const cleanAiReport = useMemo(() => sanitizeAiReport(aiReport), [aiReport]);
 
   useEffect(() => {
     onAiReportReadyRef.current = onAiReportReady;
@@ -443,7 +451,10 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
         const { generateStandingAIReport } = await import('../../lib/gripPythonApi');
         const res = await generateStandingAIReport(
           patientInfo || { name: '未知' },
-          payload,
+          {
+            ...payload,
+            score_context: scoreToAiContext(scoreResult),
+          },
         );
 
         if (res.success) {
@@ -489,7 +500,7 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
     return () => {
       cancelled = true;
     };
-  }, [data, patientInfo, aiReport, reportData?.aiReport]);
+  }, [data, patientInfo, aiReport, reportData?.aiReport, scoreResult]);
 
   const scrollToSection = (id) => {
     const el = document.getElementById(`standing-${id}`);
@@ -630,7 +641,7 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
     { name: '前/中/后足压力', desc: '各区域压力占总压力百分比。', normal: '正常前足40~50%，中足5~10%，后足40~50%。' },
     { name: 'COP距整体中心', desc: '单脚压力中心到双脚总压力中心的距离。距离越小，该脚承重越接近身体重心。' },
     { name: '左右脚前后差', desc: '左脚COP相对右脚的前后位置差。正值：左脚靠前；负值：右脚靠前。', normal: '绝对值>2cm提示站姿不对称。' },
-    { name: '压力中心轨迹长度', desc: 'COP移动的总路径长度。数值越大说明身体摆动越频繁，平衡控制越差。', normal: '正常站立30秒内<1000mm。' },
+    { name: '压力中心轨迹长度', desc: 'COP移动的总路径长度。数值越大说明身体摆动越频繁，平衡控制越差。', normal: '第1阶段双脚站立实际采集30秒：≤1000mm较好，1001-1500mm轻度增加，1501-2200mm需关注，>2200mm重点关注。' },
     { name: '压力中心活动总面积', desc: 'COP活动范围的面积。数值越大说明摆动幅度越大，姿势稳定性越差。', normal: '老年人通常比年轻人大20~30%。' },
     { name: '压力中心摆动幅度系数', desc: 'COP椭圆的长轴与短轴之比。比值越大说明摆动方向性越明显。' },
     { name: '压力中心摆动均匀系数', desc: '椭圆偏离圆形的程度(0~1)。越接近1说明摆动越呈线性，越接近0说明各方向摆动均匀。' },
@@ -711,6 +722,12 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
           <div className="max-w-[1100px] mx-auto space-y-8">
 
             {/* ═══════════ 综合评估（置顶） ═══════════ */}
+            <ReportSummaryCard
+              scoreResult={scoreResult}
+              title="项目评分"
+              aiLoading={aiLoading}
+              aiIntro={cleanAiReport?.overview}
+            />
 
             {/* ═══════════ 第1页：基本信息与足弓指标 ═══════════ */}
             <section id="standing-overview">
@@ -745,7 +762,7 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
 
             {/* ═══════════ 区域压力分布 ═══════════ */}
             <section id="standing-pressure">
-              <SectionHeader title="区域压力分布" />
+              <SectionHeader title="区域压力分布" subtitle="Regional Pressure Distribution" />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="zeiss-card p-4">
                   <div className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>左脚区域压力</div>
@@ -857,18 +874,20 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
             </section>
 
             <section id="standing-summary">
-              <SectionHeader title="AI综合评估" subtitle="AI Comprehensive Assessment" />
+              <SectionHeader title="AI分项分析" subtitle="AI Sub-Analysis" />
               <div className="zeiss-card p-5">
                 <AssessmentAiPanel
                   aiLoading={aiLoading}
                   aiError={aiError}
                   aiReport={aiReport}
                   sections={ASSESSMENT_AI_SECTION_CONFIG.standing}
+                  excludeKeys={['overview']}
                 />
               </div>
             </section>
 
             <div className="h-8" />
+            <BasisNote className="pb-6 text-center" />
           </div>
         </div>
       </div>
@@ -919,7 +938,18 @@ function MetricCapsule({ index, label, leftVal, rightVal, leftExtra, rightExtra 
       </div>
       {/* 标签 */}
       <div className="flex-1 min-w-0">
-        <div className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>{label}</div>
+        <div
+          className="font-semibold whitespace-nowrap"
+          style={{
+            color: 'var(--text-primary)',
+            fontSize: '14px',
+            lineHeight: 1.4,
+            paddingTop: '1px',
+            paddingBottom: '2px',
+          }}
+        >
+          {label}
+        </div>
         {leftExtra && (
           <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
             L: {leftExtra} {rightExtra ? `/ R: ${rightExtra}` : ''}
@@ -955,7 +985,9 @@ function AssessmentSummary({ data, diff }) {
   if (diff > 15) findings.push('左右脚压力不平衡');
   const ts = data.copTimeSeries || {};
   if (ts.contactArea && ts.contactArea > 500) findings.push('站立稳定性偏低');
-  if (ts.pathLength && ts.pathLength > 1000) findings.push('COP轨迹长度偏高，平衡控制较差');
+  if (ts.pathLength > 2200) findings.push('COP轨迹长度明显偏高，平衡控制需重点关注');
+  else if (ts.pathLength > 1500) findings.push('COP轨迹长度偏高，平衡控制较差');
+  else if (ts.pathLength > 1000) findings.push('COP轨迹长度轻度偏高，建议观察站立稳定性');
 
   const scores = {
     arch: leftType === '正常足弓' && rightType === '正常足弓' ? 90 : 60,

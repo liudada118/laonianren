@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as echarts from 'echarts';
 import { exportToPdf } from '../../lib/pdfExport';
 import AssessmentAiPanel from './AssessmentAiPanel';
+import ReportSummaryCard, { BasisNote } from './ReportSummaryCard';
+import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
 import {
   ASSESSMENT_AI_SECTION_CONFIG,
   buildSitStandAiPayload,
   requestAssessmentAIReport,
 } from '../../lib/assessmentAi';
+import { scoreSitStand, scoreToAiContext } from '../../lib/assessmentScoring';
 
 /* ═══════════════════════════════════════════════════════════
    样式常量 & 工具
@@ -604,7 +607,7 @@ const SECTIONS = [
   { id: 'sit-evo',     label: '坐姿压力演变', icon: '🪑' },
   { id: 'sit-cop',     label: '坐姿COP轨迹', icon: '🎯' },
   { id: 'pressure',    label: '压力统计',     icon: '📉' },
-  { id: 'conclusion',  label: '综合评估',     icon: '✅' },
+  { id: 'conclusion',  label: 'AI分项分析',   icon: '✅' },
 ];
 
 /* ═══════════════════════════════════════════════════════════
@@ -639,6 +642,12 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   useEffect(() => {
     onAiReportReadyRef.current = onAiReportReady;
   }, [onAiReportReady]);
+
+  const scoreResult = useMemo(
+    () => reportData ? scoreSitStand(reportData) : null,
+    [reportData],
+  );
+  const cleanAiReport = useMemo(() => sanitizeAiReport(aiReport), [aiReport]);
 
   useEffect(() => {
     aiRequestStartedRef.current = false;
@@ -692,7 +701,10 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     requestAssessmentAIReport(
       'sitstand',
       patientInfo || { name: reportData.username || '未知' },
-      payload,
+      {
+        ...payload,
+        score_context: scoreToAiContext(scoreResult),
+      },
     ).then(res => {
       if (res.success) {
         if (!cancelled) {
@@ -713,7 +725,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     return () => {
       cancelled = true;
     };
-  }, [reportData, patientInfo, aiReport]);
+  }, [reportData, patientInfo, aiReport, scoreResult]);
 
   const d = useMemo(() => {
     const base = reportData || {};
@@ -858,6 +870,13 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
         {/* ═══ 右侧内容 ═══ */}
         <div ref={contentRef} className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1100px] mx-auto space-y-8">
+
+            <ReportSummaryCard
+              scoreResult={scoreResult}
+              title="项目评分"
+              aiLoading={aiLoading}
+              aiIntro={cleanAiReport?.overview}
+            />
 
             {/* ═══════════ 1. 基本信息 ═══════════ */}
             <section id="ss-overview">
@@ -1163,17 +1182,19 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
 
             {/* ═══════════ 11. 综合评估 ═══════════ */}
             <section id="ss-conclusion">
-              <SectionHeader title="AI综合评估" subtitle="AI Comprehensive Assessment" />
+              <SectionHeader title="AI分项分析" subtitle="AI Sub-Analysis" />
               <div className="zeiss-card p-5 mb-4">
                 <AssessmentAiPanel
                   aiLoading={aiLoading}
                   aiError={aiError}
                   aiReport={aiReport}
                   sections={ASSESSMENT_AI_SECTION_CONFIG.sitstand}
+                  excludeKeys={['overview']}
                 />
               </div>
             </section>
 
+            <BasisNote className="pb-6 text-center" />
           </div>
         </div>
       </div>

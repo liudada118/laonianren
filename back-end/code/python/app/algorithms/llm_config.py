@@ -22,11 +22,12 @@ if not os.path.exists(_CONFIG_FILE) and os.path.exists(_EXAMPLE_FILE):
 
 _DEFAULT = {
     "api_key": "",
-    "base_url": "",
-    "model": "kimi-k2.5",
-    "max_tokens": None,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "max_tokens": 10000,
     "timeout": 120,
     "thinking": {"type": "disabled"},
+    "extra_body": {"enable_thinking": False},
 }
 
 
@@ -68,17 +69,19 @@ def get_llm_config():
         except Exception:
             pass
 
-    if os.environ.get("MOONSHOT_API_KEY"):
-        config["api_key"] = os.environ["MOONSHOT_API_KEY"]
-    if os.environ.get("MOONSHOT_BASE_URL"):
-        config["base_url"] = os.environ["MOONSHOT_BASE_URL"]
-    if os.environ.get("MOONSHOT_MODEL"):
-        config["model"] = os.environ["MOONSHOT_MODEL"]
-    if os.environ.get("MOONSHOT_THINKING"):
-        config["thinking"] = os.environ["MOONSHOT_THINKING"]
-    if os.environ.get("MOONSHOT_EXTRA_BODY"):
+    if os.environ.get("LLM_API_KEY") or os.environ.get("MOONSHOT_API_KEY"):
+        config["api_key"] = os.environ.get("LLM_API_KEY") or os.environ["MOONSHOT_API_KEY"]
+    if os.environ.get("LLM_BASE_URL") or os.environ.get("MOONSHOT_BASE_URL"):
+        config["base_url"] = os.environ.get("LLM_BASE_URL") or os.environ["MOONSHOT_BASE_URL"]
+    if os.environ.get("LLM_MODEL") or os.environ.get("MOONSHOT_MODEL"):
+        config["model"] = os.environ.get("LLM_MODEL") or os.environ["MOONSHOT_MODEL"]
+    if os.environ.get("LLM_THINKING") or os.environ.get("MOONSHOT_THINKING"):
+        config["thinking"] = os.environ.get("LLM_THINKING") or os.environ["MOONSHOT_THINKING"]
+
+    extra_body_env = os.environ.get("LLM_EXTRA_BODY") or os.environ.get("MOONSHOT_EXTRA_BODY")
+    if extra_body_env:
         try:
-            config["extra_body"] = json.loads(os.environ["MOONSHOT_EXTRA_BODY"])
+            config["extra_body"] = json.loads(extra_body_env)
         except Exception:
             config["extra_body"] = {}
 

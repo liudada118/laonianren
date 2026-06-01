@@ -28,6 +28,186 @@ function orientStandingDisplayMatrix(matrix) {
   return flipMatrixUD(flipMatrixLR(matrix));
 }
 
+const STANDING_BALANCE_STAGES = [
+  {
+    level: 1,
+    title: '双脚站立',
+    requirement: '双脚站立 30 秒',
+    durationSec: 30,
+    result: '基础站立能力尚可',
+    instruction: '双脚自然站在传感器中心，双足完整踩在有效区域内，目视前方，保持身体稳定。',
+    posture: 'parallel',
+  },
+  {
+    level: 2,
+    title: '半串联站立',
+    requirement: '半串联站立 10 秒',
+    durationSec: 10,
+    result: '有一定平衡控制能力',
+    instruction: '一只脚略微向前，前脚脚跟靠近后脚大脚趾内侧，双脚错开成半串联姿势。',
+    posture: 'semi',
+  },
+  {
+    level: 3,
+    title: '串联站立',
+    requirement: '脚跟脚尖一条线站立 10 秒',
+    durationSec: 10,
+    result: '达到较关键的平衡筛查要求',
+    instruction: '一只脚脚跟紧贴另一只脚脚尖，双脚前后成一条直线，目视前方保持稳定。',
+    posture: 'tandem',
+  },
+  {
+    level: 4,
+    title: '单脚站立',
+    requirement: '单脚站立 10 秒',
+    durationSec: 10,
+    result: '平衡能力较好',
+    instruction: '任选一侧单脚站立，另一只脚离开地面，可在旁边安排保护人员防止跌倒。',
+    posture: 'single',
+  },
+];
+
+function StandingStageIndicator({ currentIndex, results }) {
+  return (
+    <div className="flex items-center gap-1">
+      {STANDING_BALANCE_STAGES.map((stage, index) => {
+        const result = results[index];
+        const done = result != null;
+        const active = index === currentIndex && !done;
+        const color = result === true ? 'var(--success)' : result === false ? '#DC2626' : active ? 'var(--zeiss-blue)' : 'var(--text-muted)';
+        return (
+          <div key={stage.level} className="flex items-center gap-1">
+            {index > 0 && <div className="w-5 h-px" style={{ background: results[index - 1] != null ? 'var(--border-medium)' : 'var(--border-light)' }} />}
+            <div className="flex flex-col items-center gap-1">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold"
+                style={{ background: active ? 'var(--zeiss-blue-light)' : 'var(--bg-tertiary)', color, border: `1px solid ${color}33` }}
+              >
+                {done ? (result ? '✓' : '×') : stage.level}
+              </div>
+              <span className="text-[9px] font-medium whitespace-nowrap" style={{ color }}>
+                {stage.title}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FootShape({ className = '', style = {} }) {
+  return (
+    <div
+      className={`absolute ${className}`}
+      style={{
+        width: 24,
+        height: 56,
+        borderRadius: '55% 45% 45% 55% / 65% 65% 35% 35%',
+        background: 'linear-gradient(180deg, #E8F2FF, #BFDFFF)',
+        border: '1px solid rgba(0,102,204,0.25)',
+        boxShadow: '0 6px 14px rgba(0,102,204,0.12)',
+        ...style,
+      }}
+    />
+  );
+}
+
+function StandingPostureDiagram({ posture }) {
+  const content = {
+    parallel: (
+      <>
+        <FootShape style={{ left: 46, top: 24, transform: 'rotate(-3deg)' }} />
+        <FootShape style={{ left: 86, top: 24, transform: 'rotate(3deg)' }} />
+      </>
+    ),
+    semi: (
+      <>
+        <FootShape style={{ left: 48, top: 36, transform: 'rotate(-3deg)' }} />
+        <FootShape style={{ left: 84, top: 18, transform: 'rotate(3deg)' }} />
+      </>
+    ),
+    tandem: (
+      <>
+        <FootShape style={{ left: 68, top: 48 }} />
+        <FootShape style={{ left: 68, top: 4 }} />
+      </>
+    ),
+    single: (
+      <>
+        <FootShape style={{ left: 68, top: 26 }} />
+        <FootShape style={{ left: 98, top: 14, opacity: 0.28, transform: 'rotate(22deg)', borderStyle: 'dashed' }} />
+      </>
+    ),
+  }[posture];
+
+  return (
+    <div className="relative w-40 h-28 mx-auto rounded-lg" style={{ background: 'linear-gradient(180deg, #F8FAFC, #EEF5FF)', border: '1px solid var(--border-light)' }}>
+      <div className="absolute inset-x-5 top-4 bottom-4 rounded-md" style={{ border: '1px dashed rgba(0,102,204,0.22)' }} />
+      {content}
+    </div>
+  );
+}
+
+function makeStagePayload(results) {
+  return STANDING_BALANCE_STAGES.map((stage, index) => ({
+    level: stage.level,
+    title: stage.title,
+    requirement: stage.requirement,
+    completed: results[index] === true,
+    failed: results[index] === false,
+  }));
+}
+
+function getFourStageLevel(results) {
+  let level = 0;
+  for (let index = 0; index < STANDING_BALANCE_STAGES.length; index += 1) {
+    if (results[index] === true) {
+      level = index + 1;
+    } else {
+      break;
+    }
+  }
+  return level;
+}
+
+function stageResultsFromReport(reportData) {
+  const saved = reportData?.four_stage_results;
+  if (!Array.isArray(saved)) return [];
+  return STANDING_BALANCE_STAGES.map((_, index) => {
+    const item = saved[index];
+    if (item?.completed === true) return true;
+    if (item?.failed === true) return false;
+    return undefined;
+  });
+}
+
+function attachStandingStageScore(reportData, results) {
+  const level = getFourStageLevel(results);
+  const base = reportData && typeof reportData === 'object' ? reportData : {};
+  return {
+    ...base,
+    score_inputs: {
+      ...(base.score_inputs || {}),
+      four_stage_level: level,
+    },
+    standing_score: {
+      ...(base.standing_score || {}),
+      balanceLevel: level,
+    },
+    four_stage_balance_level: level,
+    four_stage_results: makeStagePayload(results),
+  };
+}
+
+function makeMinimalStandingReport(results) {
+  return attachStandingStageScore({
+    bilateral: { leftPressureRatio: 50, rightPressureRatio: 50 },
+    left: { archAnalysis: {}, footData: {}, regionPressure: {} },
+    right: { archAnalysis: {}, footData: {}, regionPressure: {} },
+  }, results);
+}
+
 /* ─── 左侧统一数据面板 ─── */
 function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajectory, timer, fmtTime, isRecording, filterThreshold, onFilterChange }) {
   const chartColors = { text: '#6B7B8D', grid: '#EDF0F4' };
@@ -181,8 +361,15 @@ export default function StandingAssessment() {
   const [phase, setPhase] = useState(viewReportMode ? 'report' : 'idle'); // idle | recording | processing | report
   const [timer, setTimer] = useState(0);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
+  const [showStageResultDialog, setShowStageResultDialog] = useState(false);
+  const [showStopDialog, setShowStopDialog] = useState(false);
   const timerRef = useRef(null);
   const [showGuideTip, setShowGuideTip] = useState(!viewReportMode);
+  const [currentStageIndex, setCurrentStageIndex] = useState(0);
+  const [stageResults, setStageResults] = useState(() => (
+    viewReportMode ? stageResultsFromReport(assessments.standing?.report?.reportData) : []
+  ));
+  const [baseStandingReportData, setBaseStandingReportData] = useState(null);
 
   // 3D 场景参数
   const [showHeatmap, setShowHeatmap] = useState(true);
@@ -272,6 +459,8 @@ export default function StandingAssessment() {
   );
   const [csvExporting, setCsvExporting] = useState(false);
   const [processingText, setProcessingText] = useState('正在保存采集数据...');
+  const activeStage = STANDING_BALANCE_STAGES[currentStageIndex] || STANDING_BALANCE_STAGES[0];
+  const isFinalStageRecorded = currentStageIndex >= STANDING_BALANCE_STAGES.length;
 
   // 后端模式
   const [isBackendMode, setIsBackendMode] = useState(false);
@@ -538,14 +727,20 @@ export default function StandingAssessment() {
 
   // ─── 开始采集 ───
   const startRecording = async () => {
+    if (isFinalStageRecorded) return;
     setPhase('recording');
     setTimer(0);
     setCopTrajectory([]);
-    collectedFrames.current = [];
+    if (currentStageIndex === 0) {
+      collectedFrames.current = [];
+      setBaseStandingReportData(null);
+      setReportData(null);
+      setStageResults([]);
+    }
     isRecordingRef.current = true;
 
-    // 后端模式：开始数据采集
-    if (isBackendMode) {
+    // 只有第一阶段双脚站立数据进入 Python 指标计算；后续阶段只记录人为完成等级。
+    if (isBackendMode && currentStageIndex === 0) {
       const aid = `standing_${Date.now()}`;
       assessmentIdRef.current = aid;
       try {
@@ -563,14 +758,15 @@ export default function StandingAssessment() {
     timerRef.current = setInterval(() => {
       setTimer(p => {
         const next = p + 1;
-        // 10秒自动停止（timer每100ms+1，100 = 10秒）
-        if (next === 100) {
+        const targetTicks = (activeStage.durationSec || 10) * 10;
+        // timer每100ms+1；第1阶段30秒，其余阶段10秒。
+        if (next === targetTicks) {
           // 立即清除定时器，确保只触发一次
           clearInterval(timerRef.current);
           timerRef.current = null;
           setTimeout(() => {
             if (isRecordingRef.current) {
-              stopRecording();
+              finishStageRecording();
             }
           }, 0);
         }
@@ -579,57 +775,73 @@ export default function StandingAssessment() {
     }, 100);
   };
 
-  // ─── 结束采集 ───
-  const stopRecording = async () => {
+  const generateBaseStandingReport = async () => {
+    // 四阶段全部判定完成后，再使用第1阶段双脚站立数据生成 Python/前端报告指标。
+    // 后续阶段只记录人为完成等级，不参与 COP、足弓、左右负荷等指标计算。
+    try {
+      if (isBackendMode) {
+        setProcessingText('四阶段已完成，正在分析第1阶段双脚站立数据...');
+        const resp = await backendBridge.getStandingReport({
+          timestamp: Date.now(),
+          assessmentId: assessmentIdRef.current,
+        });
+        if (resp?.code === 0 && resp?.data?.render_data) {
+          console.log('[StandingAssessment] 第一阶段后端报告数据已获取:', resp.data);
+          setBaseStandingReportData(resp.data.render_data);
+          return resp.data.render_data;
+        }
+        console.warn('[StandingAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+      }
+    } catch (e) {
+      console.warn('[StandingAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
+    }
+
+    if (collectedFrames.current.length > 0) {
+      const report = generateFootReport(collectedFrames.current);
+      console.log('第一阶段分析报告:', report);
+      setBaseStandingReportData(report);
+      return report;
+    }
+    return null;
+  };
+
+  const finishStageRecording = async () => {
     clearInterval(timerRef.current);
     timerRef.current = null;
     isRecordingRef.current = false;
-    setProcessingText('正在保存采集数据...');
-    setPhase('processing');
 
-    // 停止模拟
-    if (simIntervalRef.current) {
-      clearInterval(simIntervalRef.current);
-      simIntervalRef.current = null;
-    }
+    if (currentStageIndex === 0) {
+      setProcessingText('正在保存第一阶段双脚站立数据...');
+      setPhase('processing');
 
-    // 后端模式：结束数据采集（后端会等待数据全部写入数据库后才返回）
-    if (isBackendMode) {
-      try {
-        await backendBridge.endCol();
-        setProcessingText('数据保存完成，正在生成报告...');
-      } catch (e) {
-        console.warn('[Standing] endCol 失败:', e.message);
+      // 停止模拟
+      if (simIntervalRef.current) {
+        clearInterval(simIntervalRef.current);
+        simIntervalRef.current = null;
       }
-    }
 
-    // 生成报告：优先调用后端Python算法接口，失败时回退到前端算法
-    const generateReport = async () => {
-      try {
-        if (isBackendMode) {
-          setProcessingText('正在分析足底压力数据，请稍候...');
-          const resp = await backendBridge.getStandingReport({
-            timestamp: Date.now(),
-            assessmentId: assessmentIdRef.current,
-          });
-          if (resp?.code === 0 && resp?.data?.render_data) {
-            setReportData(resp.data.render_data);
-            setShowCompleteDialog(true);
-            return;
-          }
-          console.warn('[StandingAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+      // 后端模式：只结束第一阶段数据采集
+      if (isBackendMode) {
+        try {
+          await backendBridge.endCol();
+          setProcessingText('数据保存完成，等待阶段判定...');
+        } catch (e) {
+          console.warn('[Standing] endCol 失败:', e.message);
         }
-      } catch (e) {
-        console.warn('[StandingAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
       }
-      // 前端算法 fallback
-      if (collectedFrames.current.length > 0) {
-        const report = generateFootReport(collectedFrames.current);
-        setReportData(report);
-      }
-      setShowCompleteDialog(true);
-    };
-    generateReport();
+    }
+
+    setPhase('idle');
+    setShowStageResultDialog(true);
+  };
+
+  // ─── 手动停止采集 ───
+  const stopRecording = () => {
+    if (!isRecordingRef.current) return;
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+    isRecordingRef.current = false;
+    setShowStopDialog(true);
   };
 
   /* ─── 导出CSV ─── */
@@ -652,7 +864,71 @@ export default function StandingAssessment() {
     setCsvExporting(false);
   };
 
-  const viewReport = () => { setShowCompleteDialog(false); setPhase('report'); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); };
+  const completeStandingAssessment = (finalReportData = reportData) => {
+    if (!finalReportData) return;
+    completeAssessment('standing', { completed: true, reportData: finalReportData }, null, assessmentIdRef.current);
+  };
+
+  const advanceAfterStageResult = async (completed) => {
+    const nextResults = [...stageResults];
+    nextResults[currentStageIndex] = completed;
+    const shouldStop = currentStageIndex >= STANDING_BALANCE_STAGES.length - 1;
+    setStageResults(nextResults);
+    setShowStageResultDialog(false);
+
+    if (shouldStop) {
+      setProcessingText('四阶段已完成，正在生成静态站立报告...');
+      setPhase('processing');
+      const finalBase = await generateBaseStandingReport() || baseStandingReportData || makeMinimalStandingReport(nextResults);
+      const finalReport = attachStandingStageScore(finalBase, nextResults);
+      setReportData(finalReport);
+      setCurrentStageIndex(STANDING_BALANCE_STAGES.length);
+      setPhase('idle');
+      setShowCompleteDialog(true);
+      return;
+    }
+
+    setCurrentStageIndex(currentStageIndex + 1);
+    setTimer(0);
+    setPhase('idle');
+    setShowGuideTip(true);
+  };
+
+  const retryCurrentStage = async () => {
+    setShowStopDialog(false);
+    setTimer(0);
+    if (currentStageIndex === 0) {
+      if (isBackendMode) {
+        try {
+          await backendBridge.endCol();
+        } catch (e) {
+          console.warn('[Standing] 重新采集前 endCol 失败:', e.message);
+        }
+      }
+      collectedFrames.current = [];
+      setBaseStandingReportData(null);
+    }
+    startRecording();
+  };
+
+  const markCurrentStageUnable = async () => {
+    setShowStopDialog(false);
+    if (currentStageIndex === 0 && isBackendMode) {
+      try {
+        await backendBridge.endCol();
+      } catch (e) {
+        console.warn('[Standing] 无法完成时 endCol 失败:', e.message);
+      }
+    }
+    advanceAfterStageResult(false);
+  };
+
+  const viewReport = () => {
+    if (!reportData) return;
+    setShowCompleteDialog(false);
+    setPhase('report');
+    completeStandingAssessment(reportData);
+  };
   const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
   const handleStandingAiReportReady = useCallback((aiData) => {
@@ -681,8 +957,9 @@ export default function StandingAssessment() {
             </h1>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
-            <button onClick={handleExportCsv} disabled={csvExporting}
+          <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+          <StandingStageIndicator currentIndex={STANDING_BALANCE_STAGES.length} results={stageResults.length ? stageResults : [true, true, true, true]} />
+          <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-ghost text-xs flex items-center gap-1"
               style={csvExporting ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -732,6 +1009,7 @@ export default function StandingAssessment() {
             )}
           </div>
           <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
+          <StandingStageIndicator currentIndex={currentStageIndex} results={stageResults} />
           <button onClick={() => navigate('/history')} className="zeiss-btn-ghost text-xs hidden lg:inline-flex">历史记录</button>
         </div>
       </header>
@@ -739,16 +1017,27 @@ export default function StandingAssessment() {
       {/* ── 站立评估指导弹窗 ── */}
       {showGuideTip && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 w-[420px] max-w-[90vw] animate-scaleIn text-center">
+          <div className="zeiss-dialog p-8 w-[520px] max-w-[90vw] animate-scaleIn text-center">
             <div className="w-14 h-14 mx-auto mb-4 rounded-full flex items-center justify-center"
               style={{ background: '#E8F2FF' }}>
               <svg className="w-7 h-7" style={{ color: '#0066CC' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>静态站立评估指导</h3>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>四阶段平衡评估指导</h3>
+            <div className="mb-4">
+              <StandingPostureDiagram posture={activeStage.posture} />
+            </div>
+            <div className="mb-3 text-sm font-bold" style={{ color: 'var(--zeiss-blue)' }}>
+              第 {activeStage.level} 阶段：{activeStage.requirement}
+            </div>
             <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
-              点击屏幕下方采集按钮后，请被评估者站在<span className="font-bold" style={{ color: '#0066CC' }}>足底压力传感器中心</span>，<span className="font-bold" style={{ color: '#0066CC' }}>自然站立状态</span>，保持<span className="font-bold" style={{ color: '#0066CC' }}>10秒以上</span>，10秒后系统会自动结束采集。
+              {activeStage.instruction}
+              {currentStageIndex === 0 && (
+                <span className="block mt-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+                  本阶段会采集足底压力数据；四阶段全部完成后，系统会统一生成 COP、足弓、左右负荷等指标。
+                </span>
+              )}
             </p>
             <button
               onClick={() => setShowGuideTip(false)}
@@ -760,6 +1049,48 @@ export default function StandingAssessment() {
         </div>
       )}
 
+      {/* 阶段完成判定弹窗 */}
+      {showStageResultDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 w-[420px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
+              <svg className="w-7 h-7" style={{ color: 'var(--success)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>第 {activeStage.level} 阶段采集完成</h3>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{activeStage.requirement}</p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <button onClick={() => advanceAfterStageResult(false)}
+                className="zeiss-btn-secondary flex-1 py-3 text-sm">无法完成</button>
+              <button onClick={() => advanceAfterStageResult(true)}
+                className="zeiss-btn-primary flex-1 py-3 text-sm">顺利完成</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 手动停止判定弹窗 */}
+      {showStopDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 w-[420px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#FFF7ED' }}>
+              <svg className="w-7 h-7" style={{ color: '#D97706' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" /></svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>已停止第 {activeStage.level} 阶段采集</h3>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>请选择重新采集本阶段，或记录为无法完成。</p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <button onClick={markCurrentStageUnable}
+                className="zeiss-btn-secondary flex-1 py-3 text-sm">无法完成</button>
+              <button onClick={retryCurrentStage}
+                className="zeiss-btn-primary flex-1 py-3 text-sm">重新采集</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 完成弹窗 */}
       {showCompleteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
@@ -767,10 +1098,10 @@ export default function StandingAssessment() {
             <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
               <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>共采集 {collectedFrames.current.length} 帧数据</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>四阶段评估完成，报告已生成</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>四阶段平衡等级：{getFourStageLevel(stageResults)}/4</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('standing', { completed: true, reportData }, null, assessmentIdRef.current); navigate('/dashboard'); }}
+              <button onClick={() => { setShowCompleteDialog(false); completeStandingAssessment(reportData); navigate('/dashboard'); }}
                 className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               <button onClick={viewReport}
                 className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
@@ -879,7 +1210,7 @@ export default function StandingAssessment() {
                   <button className="w-16 h-16 rounded-full border-4 flex items-center justify-center hover:scale-105 transition-transform" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="w-11 h-11 rounded-full" style={{ background: 'linear-gradient(135deg, #F8F9FA, #E8ECF0)' }} />
                   </button>
-                  <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集</span>
+                  <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>开始采集第 {activeStage.level} 阶段</span>
                 </div>
               )}
               {phase === 'idle' && deviceStatus !== 'connected' && (
@@ -893,7 +1224,7 @@ export default function StandingAssessment() {
                     <div className="w-7 h-7 rounded-sm" style={{ background: 'var(--zeiss-blue)' }} />
                   </button>
                   <div className="flex items-center gap-3 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-                    <span>结束采集</span>
+                    <span>停止采集</span>
                     <span className="font-mono px-3 py-1 rounded-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-light)', color: 'var(--zeiss-blue)' }}>{fmtTime(timer)}</span>
                   </div>
                 </div>

@@ -102,8 +102,15 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
   }
   const gripStartTime = times[gripStartIdx] || 0;
 
+  let gripEndIdx = gripStartIdx;
+  for (let i = pressureValues.length - 1; i >= 0; i--) {
+    if (pressureValues[i] > threshold) { gripEndIdx = i; break; }
+  }
+  const gripEndTime = times[gripEndIdx] || gripStartTime;
+  const gripDuration = Math.max(0, gripEndTime - gripStartTime);
+
   // 峰值区间
-  const peakThreshold = peakValue * 0.9;
+  const peakThreshold = peakValue * 0.95;
   let peakStartIdx = peakIdx, peakEndIdx = peakIdx;
   for (let i = peakIdx; i >= 0; i--) {
     if (pressureValues[i] >= peakThreshold) peakStartIdx = i; else break;
@@ -203,7 +210,9 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
   const maxAngVel = angularVelocity.length > 0 ? parseFloat(Math.max(...angularVelocity).toFixed(2)) : 0;
 
   const timeAnalysis = [
-    { label: '抓握开始时间', value: `${gripStartTime.toFixed(3)} s` },
+    { label: '开始发力时刻', value: `${gripStartTime.toFixed(3)} s` },
+    { label: '结束发力时刻', value: `${gripEndTime.toFixed(3)} s` },
+    { label: '有效抓握时长', value: `${gripDuration.toFixed(3)} s` },
     { label: '峰值力时间', value: `${peakTime.toFixed(3)} s` },
     { label: '到达峰值耗时', value: `${(peakTime - gripStartTime).toFixed(3)} s` },
     { label: '峰值区间开始', value: `${(times[peakStartIdx] || 0).toFixed(3)} s` },
@@ -232,6 +241,8 @@ function generateSingleHandReport(data, rawFrames, handLabel) {
       duration: parseFloat(((times[peakEndIdx] || 0) - (times[peakStartIdx] || 0)).toFixed(3)),
     },
     gripStartTime,
+    gripEndTime: parseFloat(gripEndTime.toFixed(3)),
+    gripDuration: parseFloat(gripDuration.toFixed(3)),
     shakeCount: shakeTimesArr.length,
     shakeTimes: shakeTimesArr,
     avgAngularVelocity: avgAngVel,

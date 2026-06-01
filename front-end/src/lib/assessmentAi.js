@@ -6,26 +6,26 @@ import {
 
 export const ASSESSMENT_AI_SECTION_CONFIG = {
   sitstand: [
-    { key: 'overview', label: '测试概况' },
-    { key: 'performance_analysis', label: '起坐能力分析' },
-    { key: 'symmetry_analysis', label: '对称性分析' },
-    { key: 'force_analysis', label: '力学表现分析' },
-    { key: 'clinical_suggestion', label: '临床建议' },
+    { key: 'overview', label: '综合判读' },
+    { key: 'performance_analysis', label: '下肢功能表现' },
+    { key: 'symmetry_analysis', label: '双侧负荷对称性' },
+    { key: 'force_analysis', label: '起立-坐下动力学特征' },
+    { key: 'clinical_suggestion', label: '分层干预建议' },
   ],
   standing: [
-    { key: 'overview', label: '测试概况' },
+    { key: 'overview', label: '综合判读' },
     { key: 'arch_analysis', label: '足弓结构分析' },
-    { key: 'pressure_balance_analysis', label: '压力平衡分析' },
-    { key: 'stability_analysis', label: '稳定性分析' },
-    { key: 'clinical_suggestion', label: '临床建议' },
+    { key: 'pressure_balance_analysis', label: '静态负荷分布' },
+    { key: 'stability_analysis', label: '姿势控制稳定性' },
+    { key: 'clinical_suggestion', label: '分层干预建议' },
   ],
   gait: [
-    { key: 'overview', label: '步态概况' },
-    { key: 'spatiotemporal_analysis', label: '时空参数分析' },
-    { key: 'symmetry_analysis', label: '对称性分析' },
-    { key: 'posture_analysis', label: '姿势特征分析' },
-    { key: 'stability_analysis', label: '稳定性分析' },
-    { key: 'clinical_suggestion', label: '临床建议' },
+    { key: 'overview', label: '综合判读' },
+    { key: 'spatiotemporal_analysis', label: '步态时空参数' },
+    { key: 'symmetry_analysis', label: '步态对称性' },
+    { key: 'posture_analysis', label: '足姿与推进特征' },
+    { key: 'stability_analysis', label: '步行稳定性' },
+    { key: 'clinical_suggestion', label: '分层干预建议' },
   ],
 };
 
@@ -47,6 +47,18 @@ function pickPhaseValue(container, phaseName, field) {
   const phase = container?.[phaseName];
   if (!phase) return null;
   return toNumber(phase[field]);
+}
+
+function buildCopPayload(cop = {}) {
+  const pathLength = toNumber(cop.pathLength ?? cop.path_length, null);
+  return {
+    path_length: roundValue(pathLength, 2),
+    avg_velocity: roundValue(cop.avgVelocity ?? cop.avg_velocity, 2),
+    max_displacement: roundValue(cop.maxDisplacement ?? cop.max_displacement, 2),
+    contact_area: roundValue(cop.contactArea ?? cop.contact_area, 2),
+    ls_ratio: roundValue(cop.lsRatio ?? cop.ls_ratio, 2),
+    eccentricity: roundValue(cop.eccentricity, 3),
+  };
 }
 
 export function buildSitStandAiPayload(reportData) {
@@ -117,30 +129,9 @@ export function buildStandingAiPayload(data) {
       pressure_diff: pressureDiff,
     },
     balance_status: balanceStatus,
-    overall_cop: {
-      path_length: roundValue(overallCop.pathLength, 2),
-      avg_velocity: roundValue(overallCop.avgVelocity, 2),
-      max_displacement: roundValue(overallCop.maxDisplacement, 2),
-      contact_area: roundValue(overallCop.contactArea, 2),
-      ls_ratio: roundValue(overallCop.lsRatio, 2),
-      eccentricity: roundValue(overallCop.eccentricity, 3),
-    },
-    left_cop: {
-      path_length: roundValue(leftCop.pathLength, 2),
-      avg_velocity: roundValue(leftCop.avgVelocity, 2),
-      max_displacement: roundValue(leftCop.maxDisplacement, 2),
-      contact_area: roundValue(leftCop.contactArea, 2),
-      ls_ratio: roundValue(leftCop.lsRatio, 2),
-      eccentricity: roundValue(leftCop.eccentricity, 3),
-    },
-    right_cop: {
-      path_length: roundValue(rightCop.pathLength, 2),
-      avg_velocity: roundValue(rightCop.avgVelocity, 2),
-      max_displacement: roundValue(rightCop.maxDisplacement, 2),
-      contact_area: roundValue(rightCop.contactArea, 2),
-      ls_ratio: roundValue(rightCop.lsRatio, 2),
-      eccentricity: roundValue(rightCop.eccentricity, 3),
-    },
+    overall_cop: buildCopPayload(overallCop),
+    left_cop: buildCopPayload(leftCop),
+    right_cop: buildCopPayload(rightCop),
     cop_results: {
       dist_left_to_center: roundValue(data.additionalData?.copResults?.distLeftToBoth, 2),
       dist_right_to_center: roundValue(data.additionalData?.copResults?.distRightToBoth, 2),

@@ -69,12 +69,12 @@ const PART_INDICES_RIGHT = {
 const PART_KEYS = ['thumb', 'index_finger', 'middle_finger', 'ring_finger', 'little_finger', 'palm'];
 
 const PART_NAMES = {
-  thumb: 'Thumb',
-  index_finger: 'Index',
-  middle_finger: 'Middle',
-  ring_finger: 'Ring',
-  little_finger: 'Little',
-  palm: 'Palm',
+  thumb: '大拇指',
+  index_finger: '食指',
+  middle_finger: '中指',
+  ring_finger: '无名指',
+  little_finger: '小拇指',
+  palm: '手掌',
 };
 
 // ============================================================
@@ -252,15 +252,38 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
   const peakForce = n > 0 ? totalForceSeries[peakIdx] : 0;
   const peakTime = n > 0 ? t[peakIdx] : 0;
 
-  // ---- 3. 握力开始时间 ----
+  // ---- 3. 握力时间窗与峰值平台 ----
   const threshold = peakForce * GRIP_START_THRESHOLD_RATIO;
-  let gripStartTime = t[0];
+  let gripStartIdx = 0;
+  let gripEndIdx = 0;
   for (let i = 0; i < n; i++) {
     if (totalForceSeries[i] >= threshold) {
-      gripStartTime = t[i];
+      gripStartIdx = i;
       break;
     }
   }
+  for (let i = n - 1; i >= 0; i--) {
+    if (totalForceSeries[i] >= threshold) {
+      gripEndIdx = i;
+      break;
+    }
+  }
+  const gripStartTime = n > 0 ? t[gripStartIdx] : 0;
+  const gripEndTime = n > 0 ? t[gripEndIdx] : gripStartTime;
+  const gripDuration = Math.max(0, gripEndTime - gripStartTime);
+
+  const peakThreshold = peakForce * PEAK_FORCE_THRESHOLD_RATIO;
+  let peakStartIdx = peakIdx;
+  let peakEndIdx = peakIdx;
+  while (peakStartIdx > 0 && totalForceSeries[peakStartIdx - 1] >= peakThreshold) {
+    peakStartIdx -= 1;
+  }
+  while (peakEndIdx < n - 1 && totalForceSeries[peakEndIdx + 1] >= peakThreshold) {
+    peakEndIdx += 1;
+  }
+  const peakStartTime = n > 0 ? t[peakStartIdx] : 0;
+  const peakEndTime = n > 0 ? t[peakEndIdx] : 0;
+  const peakDuration = Math.max(0, peakEndTime - peakStartTime);
 
   // ---- 4. IMU: 欧拉角和角速度 ----
   let eulerRoll = new Float64Array(n);
@@ -376,17 +399,30 @@ function generateGripReport(sensorData, handType, times = null, imuData = null) 
     peakInfo: {
       peak_force: parseFloat(peakForce.toFixed(2)),
       peak_time: parseFloat(peakTime.toFixed(3)),
+      start_idx: peakStartIdx,
+      end_idx: peakEndIdx,
+      start_time: parseFloat(peakStartTime.toFixed(3)),
+      end_time: parseFloat(peakEndTime.toFixed(3)),
+      duration: parseFloat(peakDuration.toFixed(3)),
     },
     timeAnalysis: [
-      { label: 'Grip Start', value: `${gripStartTime.toFixed(3)} s` },
-      { label: 'Peak Time', value: `${peakTime.toFixed(3)} s` },
-      { label: 'Time To Peak', value: `${(peakTime - gripStartTime).toFixed(3)} s` },
-      { label: 'Peak Force', value: `${peakForce.toFixed(2)} N` },
-      { label: 'Shake Threshold', value: `${SHAKE_ANGULAR_VELOCITY_THRESHOLD.toFixed(1)} deg/s` },
-      { label: 'Shake Count', value: `${shakeResult.count}` },
-      { label: 'Avg Angular Velocity', value: `${mean(Array.from(angularVelocity)).toFixed(2)} deg/s` },
-      { label: 'Max Angular Velocity', value: `${Math.max(...angularVelocity).toFixed(2)} deg/s` },
+      { label: '开始发力时刻', value: `${gripStartTime.toFixed(3)} s` },
+      { label: '结束发力时刻', value: `${gripEndTime.toFixed(3)} s` },
+      { label: '有效抓握时长', value: `${gripDuration.toFixed(3)} s` },
+      { label: '峰值力时间', value: `${peakTime.toFixed(3)} s` },
+      { label: '到达峰值耗时', value: `${(peakTime - gripStartTime).toFixed(3)} s` },
+      { label: '峰值区间开始', value: `${peakStartTime.toFixed(3)} s` },
+      { label: '峰值区间结束', value: `${peakEndTime.toFixed(3)} s` },
+      { label: '峰值持续时间', value: `${peakDuration.toFixed(3)} s` },
+      { label: '峰值力', value: `${peakForce.toFixed(2)} N` },
+      { label: '检测阈值', value: `${SHAKE_ANGULAR_VELOCITY_THRESHOLD.toFixed(1)}°/s` },
+      { label: '抖动次数', value: `${shakeResult.count} 次` },
+      { label: '平均角速度', value: `${mean(Array.from(angularVelocity)).toFixed(2)}°/s` },
+      { label: '最大角速度', value: `${Math.max(...angularVelocity).toFixed(2)}°/s` },
     ],
+    gripStartTime: parseFloat(gripStartTime.toFixed(3)),
+    gripEndTime: parseFloat(gripEndTime.toFixed(3)),
+    gripDuration: parseFloat(gripDuration.toFixed(3)),
     fingers: fingers,
     totalForce: parseFloat(totalForce.toFixed(2)),
     totalArea: Math.round(totalArea),

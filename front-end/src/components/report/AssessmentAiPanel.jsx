@@ -1,4 +1,5 @@
 import React from 'react';
+import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
 
 function getLevelStyle(levelText = '') {
   if (/(优秀|正常|良好)/.test(levelText)) {
@@ -15,6 +16,7 @@ export default function AssessmentAiPanel({
   aiError,
   aiReport,
   sections = [],
+  excludeKeys = [],
   loadingText = 'AI 正在分析评估数据...',
   emptyText = '暂无 AI 分析数据',
 }) {
@@ -49,26 +51,28 @@ export default function AssessmentAiPanel({
     );
   }
 
-  const visibleSections = sections.filter(section => aiReport[section.key]);
+  const cleanReport = sanitizeAiReport(aiReport);
+  const excludedSectionKeys = new Set(excludeKeys);
+  const visibleSections = sections.filter(section => !excludedSectionKeys.has(section.key) && cleanReport[section.key]);
 
   return (
     <>
-      {aiReport.eval_level && (
+      {cleanReport.eval_level && (
         <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: '1px solid var(--border-light)' }}>
           <div
             className="px-4 py-2 rounded-lg text-sm font-bold"
-            style={getLevelStyle(aiReport.eval_level.text)}
+            style={getLevelStyle(cleanReport.eval_level.text)}
           >
-            评估等级: {aiReport.eval_level.text}
+            评估等级: {cleanReport.eval_level.text}
           </div>
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            {aiReport.eval_level.standard}
+            {cleanReport.eval_level.standard}
           </div>
         </div>
       )}
 
       <div className="space-y-3">
-        {aiReport.data_quality && !aiReport.data_quality.is_valid && (
+        {cleanReport.data_quality && !cleanReport.data_quality.is_valid && (
           <div className="p-4 rounded-lg" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
             <h5 className="text-xs font-bold mb-2 flex items-center gap-1.5" style={{ color: '#DC2626' }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -76,9 +80,9 @@ export default function AssessmentAiPanel({
               </svg>
               数据质量提醒
             </h5>
-            {Array.isArray(aiReport.data_quality.issues) && aiReport.data_quality.issues.length > 0 && (
+            {Array.isArray(cleanReport.data_quality.issues) && cleanReport.data_quality.issues.length > 0 && (
               <ul className="text-sm leading-relaxed mb-2 space-y-1" style={{ color: '#991B1B' }}>
-                {aiReport.data_quality.issues.map((issue, index) => (
+                {cleanReport.data_quality.issues.map((issue, index) => (
                   <li key={index} className="flex items-start gap-1.5">
                     <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#DC2626' }} />
                     {issue}
@@ -86,9 +90,9 @@ export default function AssessmentAiPanel({
                 ))}
               </ul>
             )}
-            {aiReport.data_quality.suggestion && (
+            {cleanReport.data_quality.suggestion && (
               <p className="text-sm font-medium" style={{ color: '#B91C1C' }}>
-                {aiReport.data_quality.suggestion}
+                {cleanReport.data_quality.suggestion}
               </p>
             )}
           </div>
@@ -100,15 +104,15 @@ export default function AssessmentAiPanel({
               {section.label}
             </h5>
             <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              {aiReport[section.key]}
+              {cleanReport[section.key]}
             </p>
           </div>
         ))}
 
-        {aiReport.disclaimer && (
+        {cleanReport.disclaimer && (
           <div className="text-center pt-3">
             <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              {aiReport.disclaimer}
+              {cleanReport.disclaimer}
             </p>
           </div>
         )}

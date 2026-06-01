@@ -26,8 +26,8 @@ from matplotlib.colors import LinearSegmentedColormap
 
 #33
 # ================= 配置参数 =================
-# 每秒帧数（硬件采样率；白色步道约 40Hz，黑色步道约 77Hz，请按实际硬件设置）
-FPS = 40
+# 每秒帧数（硬件采样率；实测白色步道 45Hz，黑色步道约 77Hz，请按实际硬件设置）
+FPS = 45
 # ===========================================
 MY_FONT_NAME = 'SimSun'  
 try:
@@ -1659,10 +1659,13 @@ def calculate_overall_velocity(peak_indices, heel_positions, sensor_pitch_mm, fp
     """
     计算全程平均速度 (Total Distance / Total Time)
     逻辑：找到第一次有效落地和最后一次有效落地，计算两者的时间差与距离差。
+    并扣除起步反应误差（默认 0.5s），避免老人启动时的反应延迟拖低平均速度。
     """
+    REACTION_TIME_OFFSET_S = 0.3  # 起步/收尾加减速补偿（秒，扣除首末步的加减速干扰）
+
     if not peak_indices or not heel_positions:
         return 0.0
-    
+
     # 1. 清洗数据：剔除无效的脚跟坐标 (NaN)
     # peak_indices 是帧索引，heel_positions 是对应的物理坐标
     valid_data = []
@@ -1671,25 +1674,26 @@ def calculate_overall_velocity(peak_indices, heel_positions, sensor_pitch_mm, fp
         h_pos = heel_positions[i]
         if not np.isnan(h_pos):
             valid_data.append((p_idx, h_pos))
-            
+
     if len(valid_data) < 2:
         return 0.0
-        
+
     # 2. 获取首尾数据
     start_frame, start_pos = valid_data[0]
     end_frame, end_pos = valid_data[-1]
-    
-    # 3. 计算总时间 (秒)
-    total_time_s = (end_frame - start_frame) / fps
-    
+
+    # 3. 计算总时间 (秒)，并扣除起步反应误差
+    raw_time_s = (end_frame - start_frame) / fps
+    total_time_s = raw_time_s - REACTION_TIME_OFFSET_S
+
     # 4. 计算总距离 (米)
     total_dist_pixels = abs(end_pos - start_pos)
     total_dist_m = (total_dist_pixels * sensor_pitch_mm) / 1000.0
-    
+
     # 5. 计算速度
-    if total_time_s <= 0.1: # 避免除以0或时间过短
+    if total_time_s <= 0.1: # 避免除以0或时间过短（扣除后仍要保证下限）
         return 0.0
-        
+
     return total_dist_m / total_time_s
 
 
