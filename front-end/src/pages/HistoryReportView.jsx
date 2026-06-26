@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getRecord, updateAssessmentAiReport } from '../lib/historyService';
+import { getRecord } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
 import GripReport from '../components/report/GripReport';
 import StandingReport from '../components/report/StandingReport';
@@ -64,40 +64,6 @@ export default function HistoryReportView() {
   const reportData = assessmentData?.report?.reportData || null;
 
   const handleBack = () => navigate('/history');
-
-  // AI 报告生成完成后，补存到历史记录
-  const handleAiReportReady = useCallback((aiData) => {
-    if (!record || !assessmentType) return;
-    try {
-      // 更新后端数据库
-      const ok = updateAssessmentAiReport(record.id, assessmentType, aiData);
-      if (!ok) return;
-
-      if (isPageMountedRef.current) {
-        setRecord(prev => {
-          if (!prev?.assessments?.[assessmentType]) return prev;
-          return {
-            ...prev,
-            assessments: {
-              ...prev.assessments,
-              [assessmentType]: {
-                ...prev.assessments[assessmentType],
-                report: {
-                  ...(prev.assessments[assessmentType].report || {}),
-                  reportData: {
-                    ...(prev.assessments[assessmentType].report?.reportData || {}),
-                    aiReport: aiData,
-                  },
-                },
-              },
-            },
-          };
-        });
-      }
-    } catch (e) {
-      console.error('AI 报告补存失败:', e);
-    }
-  }, [record, assessmentType]);
 
   // CSV 导出
   const [csvExporting, setCsvExporting] = useState(false);
@@ -173,13 +139,13 @@ export default function HistoryReportView() {
 
     switch (assessmentType) {
       case 'grip':
-        return <GripReport patientName={patientName} patientInfo={patientInfo} onClose={handleBack} reportData={reportData} onAiReportReady={handleAiReportReady} />;
+        return <GripReport patientName={patientName} patientInfo={patientInfo} onClose={handleBack} reportData={reportData} />;
       case 'standing':
-        return <StandingReport patientInfo={patientInfo} onClose={handleBack} reportData={reportData} onAiReportReady={handleAiReportReady} />;
+        return <StandingReport patientInfo={patientInfo} onClose={handleBack} reportData={reportData} />;
       case 'sitstand':
-        return <SitStandReport patientInfo={patientInfo} reportData={reportData} onClose={handleBack} onAiReportReady={handleAiReportReady} />;
+        return <SitStandReport patientInfo={patientInfo} reportData={reportData} onClose={handleBack} />;
       case 'gait':
-        return <GaitReportContent patientInfo={patientInfo} pythonResult={reportData} onClose={handleBack} onAiReportReady={handleAiReportReady} />;
+        return <GaitReportContent patientInfo={patientInfo} pythonResult={reportData} onClose={handleBack} />;
       default:
         return (
           <div className="flex-1 flex items-center justify-center">

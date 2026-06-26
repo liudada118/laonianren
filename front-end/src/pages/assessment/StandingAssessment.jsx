@@ -341,7 +341,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 export default function StandingAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, updateAssessmentAiReport, deviceConnStatus, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.standing?.completed;
   const isGlobalConnected = deviceConnStatus === 'connected';
@@ -904,10 +904,6 @@ export default function StandingAssessment() {
   };
   const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
-  const handleStandingAiReportReady = useCallback((aiData) => {
-    updateAssessmentAiReport('standing', aiData, assessmentIdRef.current);
-  }, [updateAssessmentAiReport]);
-
   // 组件卸载时清理定时器
   useEffect(() => {
     return () => {
@@ -945,7 +941,6 @@ export default function StandingAssessment() {
           <StandingReport
               reportData={reportData}
               patientInfo={patientInfo}
-              onAiReportReady={handleStandingAiReportReady}
             />
         </main>
       </div>

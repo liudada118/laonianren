@@ -139,7 +139,7 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 export default function GripAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, updateAssessmentAiReport, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   // 如果首页已一键连接，自动进入后端模式
@@ -826,15 +826,6 @@ export default function GripAssessment() {
     setCsvExporting(false);
   };
 
-  const handleGripAiReportReady = useCallback((aiData) => {
-    const baseReportData = gripReportData || assessments.grip?.report?.reportData || {};
-    const nextReportData = { ...baseReportData, aiReport: aiData };
-    if (isPageMountedRef.current) {
-      setGripReportData(nextReportData);
-    }
-    updateAssessmentAiReport('grip', aiData, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
-  }, [assessments.grip?.report?.reportData, gripReportData, updateAssessmentAiReport]);
-
   /* ─── 报告模式 ─── */
   if (phase === 'report') {
     return (
@@ -866,8 +857,7 @@ export default function GripAssessment() {
           </div>
         </header>
         <main className="flex-1 min-h-0 z-10">
-          <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} reportData={gripReportData}
-            onAiReportReady={handleGripAiReportReady} />
+          <GripReport patientName={patientInfo?.name || '未知'} patientInfo={patientInfo} onClose={handleClose} reportData={gripReportData} />
         </main>
       </div>
     );

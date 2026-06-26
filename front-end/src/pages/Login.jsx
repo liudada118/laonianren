@@ -1,14 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
-import { fetchLlmConfig } from '../lib/gripPythonApi';
 import { backendBridge } from '../lib/BackendBridge';
 
 export default function Login() {
   const [secretKey, setSecretKey] = useState('');
   const [institution, setInstitution] = useState('');
-  const [llmApiKey, setLlmApiKey] = useState('');
-  const [showLlmApiKey, setShowLlmApiKey] = useState(false);
   const { login } = useAssessment();
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,28 +37,20 @@ export default function Login() {
 
     (async () => {
       try {
-        // 同时获取 serial.txt 缓存和 LLM 配置
-        const [cacheRes, configRes] = await Promise.all([
-          fetch(`${backendBridge.httpUrl}/serialCache`).then(r => r.json()).catch(() => null),
-          fetchLlmConfig().catch(() => null),
-        ]);
+        // 获取 serial.txt 缓存
+        const cacheRes = await fetch(`${backendBridge.httpUrl}/serialCache`)
+          .then(r => r.json())
+          .catch(() => null);
 
         if (cancelled) return;
-
-        // 从服务器获取 LLM API key 作为默认值
-        const serverApiKey = configRes?.success && configRes?.data?.api_key
-          ? configRes.data.api_key.trim()
-          : '';
 
         if (cacheRes && cacheRes.code === 0 && cacheRes.data && cacheRes.data.hasCache) {
           const cached = cacheRes.data;
           const cachedKey = cached.key || '';
           const cachedOrg = cached.orgName || '';
-          const cachedLlm = cached.llmApiKey || serverApiKey || '';
 
           setSecretKey(cachedKey);
           setInstitution(cachedOrg);
-          setLlmApiKey(cachedLlm);
 
           if (editMode) {
             // 编辑模式：预填数据，显示表单让用户修改
@@ -72,14 +61,13 @@ export default function Login() {
             setPageState('auto');
             setTimeout(() => {
               if (!cancelled) {
-                login(cachedKey, cachedOrg, cachedLlm);
+                login(cachedKey, cachedOrg);
                 navigate('/dashboard');
               }
             }, 600);
           }
         } else {
           // 无缓存，显示表单
-          if (serverApiKey) setLlmApiKey(serverApiKey);
           setPageState('ready');
         }
       } catch {
@@ -98,20 +86,19 @@ export default function Login() {
 
     const trimmedKey = secretKey.trim();
     const trimmedOrg = institution.trim();
-    const trimmedLlm = llmApiKey.trim();
 
     // 保存到 serial.txt
     try {
       await fetch(`${backendBridge.httpUrl}/serialCache`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: trimmedKey, orgName: trimmedOrg, llmApiKey: trimmedLlm }),
+        body: JSON.stringify({ key: trimmedKey, orgName: trimmedOrg }),
       });
     } catch {
       // 保存失败不阻塞登录
     }
 
-    login(trimmedKey, trimmedOrg, trimmedLlm);
+    login(trimmedKey, trimmedOrg);
     navigate('/dashboard');
   };
 
@@ -198,43 +185,6 @@ export default function Login() {
                 className="zeiss-input"
                 style={{ padding: '12px 16px' }}
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                大模型的API-key
-              </label>
-              <div className="relative">
-                <input
-                  type={showLlmApiKey ? 'text' : 'password'}
-                  value={llmApiKey}
-                  onChange={(e) => setLlmApiKey(e.target.value)}
-                  placeholder="请输入调用大模型的API-key（非必填）"
-                  className="zeiss-input pr-20"
-                  style={{ padding: '12px 72px 12px 16px' }}
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md"
-                  style={{ color: 'var(--zeiss-blue)' }}
-                  onClick={() => setShowLlmApiKey((prev) => !prev)}
-                  aria-label={showLlmApiKey ? '隐藏 API key' : '显示 API key'}
-                  title={showLlmApiKey ? '隐藏' : '显示'}
-                >
-                  {showLlmApiKey ? (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.58 10.58A2 2 0 0012 14a2 2 0 001.42-.58" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.88 5.09A10.94 10.94 0 0112 4.91c5 0 9.27 3.11 11 7.5a11.67 11.67 0 01-4.29 5.37M6.61 6.61A11.65 11.65 0 001 12.41a11.66 11.66 0 004.29 5.37A10.94 10.94 0 0012 20.09c1.76 0 3.42-.41 4.91-1.09" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
-                      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth={2} />
-                    </svg>
-                  )}
-                </button>
-              </div>
             </div>
 
             <button

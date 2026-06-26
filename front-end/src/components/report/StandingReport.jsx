@@ -3,14 +3,8 @@ import * as echarts from 'echarts';
 import InteractiveArchChart from './InteractiveArchChart';
 import InteractiveCOPChart from './InteractiveCOPChart';
 import { exportToPdf } from '../../lib/pdfExport';
-import AssessmentAiPanel from './AssessmentAiPanel';
 import ReportSummaryCard, { BasisNote } from './ReportSummaryCard';
-import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
-import {
-  ASSESSMENT_AI_SECTION_CONFIG,
-  buildStandingAiPayload,
-} from '../../lib/assessmentAi';
-import { scoreStanding, scoreToAiContext } from '../../lib/assessmentScoring';
+import { scoreStanding } from '../../lib/assessmentScoring';
 
 /* ─── 蔡司风格 EChart 封装（增量更新，避免闪烁） ─── */
 function EChart({ option, height = 280 }) {
@@ -41,20 +35,14 @@ const SECTIONS = [
   { id: 'cop-velocity', label: 'COP 速度与加速度' },
   { id: 'cop-params', label: 'COP 参数' },
   { id: 'annotation', label: '医师注释' },
-  { id: 'summary', label: 'AI分项分析' },
 ];
 
 const STANDING_SPACING_MM = 14;
 const STANDING_SPACING_CM = STANDING_SPACING_MM / 10;
 
-export default function StandingReport({ reportData, patientInfo, onClose, onAiReportReady }) {
-  const [activeSection, setActiveSection] = useState('summary');
-  const [aiReport, setAiReport] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState(null);
+export default function StandingReport({ reportData, patientInfo, onClose }) {
+  const [activeSection, setActiveSection] = useState('overview');
   const contentRef = useRef(null);
-  const aiRequestStartedRef = useRef(false);
-  const onAiReportReadyRef = useRef(onAiReportReady);
   // 缓存报告生成时间，避免每次渲染时重新生成
   const reportTime = useMemo(() => new Date().toLocaleString('zh-CN'), []);
   const data = useMemo(() => {
@@ -418,89 +406,6 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
     () => reportData ? scoreStanding(reportData) : null,
     [reportData],
   );
-  const cleanAiReport = useMemo(() => sanitizeAiReport(aiReport), [aiReport]);
-
-  useEffect(() => {
-    onAiReportReadyRef.current = onAiReportReady;
-  }, [onAiReportReady]);
-
-  useEffect(() => {
-    if (reportData?.aiReport && !aiReport) {
-      setAiReport(reportData.aiReport);
-    }
-  }, [reportData, aiReport]);
-
-  useEffect(() => {
-    aiRequestStartedRef.current = false;
-  }, [data, reportData?.aiReport]);
-
-  useEffect(() => {
-    if (!data || aiReport || reportData?.aiReport) return;
-    if (aiRequestStartedRef.current) return;
-    aiRequestStartedRef.current = true;
-
-    let cancelled = false;
-    setAiLoading(true);
-    setAiError(null);
-
-    const runAiAnalysis = async () => {
-      try {
-        const payload = buildStandingAiPayload(data);
-        if (!payload) return;
-
-        const { generateStandingAIReport } = await import('../../lib/gripPythonApi');
-        const res = await generateStandingAIReport(
-          patientInfo || { name: '未知' },
-          {
-            ...payload,
-            score_context: scoreToAiContext(scoreResult),
-          },
-        );
-
-        if (res.success) {
-          if (!cancelled) {
-            setAiReport(res.data);
-          }
-          if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
-        } else {
-          if (!cancelled) {
-            setAiError(res.error || 'AI 分析失败');
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setAiError(err?.message || 'AI 分析失败');
-        }
-      } finally {
-        if (!cancelled) setAiLoading(false);
-      }
-    };
-
-    runAiAnalysis();
-
-    if (false) { /*
-      // legacy fallback removed
-      patientInfo || { name: '未知' },
-      payload,
-    ).then(res => {
-      if (cancelled) return;
-      if (res.success) {
-        setAiReport(res.data);
-        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
-      } else {
-        setAiError(res.error || 'AI 分析失败');
-      }
-    }).catch(err => {
-      if (!cancelled) setAiError(err.message);
-    }).finally(() => {
-      if (!cancelled) setAiLoading(false);
-    });
-    */ }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [data, patientInfo, aiReport, reportData?.aiReport, scoreResult]);
 
   const scrollToSection = (id) => {
     const el = document.getElementById(`standing-${id}`);
@@ -725,8 +630,6 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
             <ReportSummaryCard
               scoreResult={scoreResult}
               title="项目评分"
-              aiLoading={aiLoading}
-              aiIntro={cleanAiReport?.overview}
             />
 
             {/* ═══════════ 第1页：基本信息与足弓指标 ═══════════ */}
@@ -870,20 +773,6 @@ export default function StandingReport({ reportData, patientInfo, onClose, onAiR
                     </div>
                   ))}
                 </div>
-              </div>
-            </section>
-
-            <section id="standing-summary">
-              <SectionHeader title="AI分项分析" subtitle="AI Sub-Analysis" />
-              <div className="zeiss-card p-5">
-                <AssessmentAiPanel
-                  aiLoading={aiLoading}
-                  aiError={aiError}
-                  aiReport={aiReport}
-                  systemLevel={scoreResult ? { text: scoreResult.level, score: scoreResult.score, maxScore: scoreResult.maxScore } : null}
-                  sections={ASSESSMENT_AI_SECTION_CONFIG.standing}
-                  excludeKeys={['overview']}
-                />
               </div>
             </section>
 

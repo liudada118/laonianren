@@ -4,8 +4,6 @@
  * proxy cannot reach the Python service.
  */
 
-import { sanitizeAiReport } from './aiTextSanitizer';
-
 const DIRECT_PYTHON_API_BASE = 'http://127.0.0.1:8765';
 const PYTHON_API_BASE_CANDIDATES = [
   '/pyapi',
@@ -13,8 +11,6 @@ const PYTHON_API_BASE_CANDIDATES = [
 ];
 
 let preferredPythonApiBase = PYTHON_API_BASE_CANDIDATES[0];
-const inFlightAiRequests = new Map();
-let runtimeLlmApiKey = '';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,18 +18,6 @@ function sleep(ms) {
 
 function getPythonApiBases() {
   return [...new Set([preferredPythonApiBase, ...PYTHON_API_BASE_CANDIDATES])];
-}
-
-async function isPythonAiServiceRunning() {
-  try {
-    const res = await fetch(`${DIRECT_PYTHON_API_BASE}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
 }
 
 async function fetchPythonApi(path, buildInit, options = {}) {
@@ -86,93 +70,6 @@ async function fetchPythonApi(path, buildInit, options = {}) {
   throw lastError || new Error('Python backend is unavailable');
 }
 
-async function parseErrorResponse(res) {
-  let detail = `HTTP ${res.status}`;
-
-  try {
-    const body = await res.json();
-    detail = body.error || body.detail || body.message || detail;
-  } catch {
-    try {
-      detail = await res.text();
-    } catch {}
-  }
-
-  if (
-    res.status >= 500 &&
-    (
-      !detail ||
-      detail === `HTTP ${res.status}` ||
-      /ECONNREFUSED|proxy error|cannot connect/i.test(detail)
-    )
-  ) {
-    const isRunning = await isPythonAiServiceRunning();
-    if (!isRunning) {
-      return 'Python AI service is not running on 127.0.0.1:8765';
-    }
-    return detail && detail !== `HTTP ${res.status}`
-      ? detail
-      : `Python AI service returned HTTP ${res.status}`;
-  }
-
-  return detail;
-}
-
-export function setRuntimeLlmApiKey(apiKey) {
-  runtimeLlmApiKey = (apiKey || '').trim();
-}
-
-function withOptionalLlmApiKey(body) {
-  if (!runtimeLlmApiKey) {
-    return body;
-  }
-  return {
-    ...body,
-    llm_api_key: runtimeLlmApiKey,
-  };
-}
-
-async function postAiReport(path, body) {
-  const payload = JSON.stringify(body);
-  const requestKey = `${path}::${payload}`;
-
-  if (inFlightAiRequests.has(requestKey)) {
-    return inFlightAiRequests.get(requestKey);
-  }
-
-  const requestPromise = (async () => {
-    try {
-      const res = await fetchPythonApi(path, () => ({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-        signal: AbortSignal.timeout(120000),
-      }), {
-        maxAttempts: 2,
-        retryDelayMs: 500,
-      });
-
-      if (!res.ok) {
-        return { success: false, error: await parseErrorResponse(res) };
-      }
-
-      const data = await res.json();
-      return data?.success ? { ...data, data: sanitizeAiReport(data.data) } : data;
-    } catch (err) {
-      const isRunning = await isPythonAiServiceRunning();
-      return {
-        success: false,
-        error: isRunning ? err.message : 'Python AI service is not running on 127.0.0.1:8765',
-      };
-    } finally {
-      inFlightAiRequests.delete(requestKey);
-    }
-  })();
-
-  inFlightAiRequests.set(requestKey, requestPromise);
-  return requestPromise;
-}
-
 export async function checkPythonBackend() {
   try {
     const res = await fetchPythonApi('/health', () => ({
@@ -183,28 +80,6 @@ export async function checkPythonBackend() {
     return data.status === 'ok';
   } catch {
     return false;
-  }
-}
-
-export async function fetchLlmConfig() {
-  try {
-    const res = await fetchPythonApi('/llm-config', () => ({
-      method: 'GET',
-      signal: AbortSignal.timeout(3000),
-    }));
-
-    if (!res.ok) {
-      return { success: false, error: await parseErrorResponse(res) };
-    }
-
-    const data = await res.json();
-    if (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'success')) {
-      return data;
-    }
-
-    return { success: true, data };
-  } catch (err) {
-    return { success: false, error: err.message };
   }
 }
 
@@ -266,83 +141,6 @@ export async function analyzeStandingCSV(csvContent, fps = 42, thresholdRatio = 
   }
 
   return res.json();
-}
-
-export async function generateGripAIReport(patientInfo, gripData) {
-  return postAiReport('/generate-grip-ai-report', withOptionalLlmApiKey({
-    patient_info: patientInfo,
-    grip_data: gripData,
-  }));
-}
-
-export async function generateSitStandAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-sitstand-ai-report', withOptionalLlmApiKey({
-    patient_info: patientInfo,
-    assessment_data: assessmentData,
-  }));
-}
-
-export async function generateStandingAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-standing-ai-report', withOptionalLlmApiKey({
-    patient_info: patientInfo,
-    assessment_data: assessmentData,
-  }));
-}
-
-export async function generateGaitAIReport(patientInfo, assessmentData) {
-  return postAiReport('/generate-gait-ai-report', withOptionalLlmApiKey({
-    patient_info: patientInfo,
-    assessment_data: assessmentData,
-  }));
-}
-
-export async function streamGripAIReport(patientInfo, gripData, onChunk) {
-  try {
-    const payload = JSON.stringify(withOptionalLlmApiKey({
-      patient_info: patientInfo,
-      grip_data: gripData,
-    }));
-    const res = await fetchPythonApi('/stream-grip-ai-report', () => ({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      signal: AbortSignal.timeout(120000),
-    }));
-
-    if (!res.ok) {
-      return { success: false, error: await parseErrorResponse(res) };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const text = decoder.decode(value, { stream: true });
-      const lines = text.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const payloadChunk = JSON.parse(line.slice(6));
-          if (payloadChunk.error) {
-            return { success: false, error: payloadChunk.error };
-          }
-          if (payloadChunk.chunk) {
-            fullText += payloadChunk.chunk;
-            onChunk(fullText);
-          }
-        } catch {}
-      }
-    }
-
-    const data = JSON.parse(fullText);
-    return { success: true, data };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
 }
 
 export async function analyzeGaitCSV(csvContents) {

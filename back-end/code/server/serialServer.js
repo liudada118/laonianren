@@ -661,7 +661,6 @@ function writeSerialCache(payload) {
   const data = {
     key: payload.key || '',
     orgName: payload.orgName || '',
-    llmApiKey: payload.llmApiKey || '',
     updatedAt: new Date().toISOString(),
   }
   fs.writeFileSync(serialPath, JSON.stringify(data, null, 2), 'utf-8')
@@ -1324,12 +1323,12 @@ app.get('/serialCache', (req, res) => {
 
 app.post('/serialCache', (req, res) => {
   try {
-    const { key, orgName, llmApiKey } = req.body || {}
+    const { key, orgName } = req.body || {}
     if (!key) {
       res.json(new HttpResult(1, {}, 'missing key'))
       return
     }
-    const saved = writeSerialCache({ key, orgName, llmApiKey })
+    const saved = writeSerialCache({ key, orgName })
     const reapplied = reapplySerialTypeMappings()
     res.json(new HttpResult(0, { ...saved, reapplied }, 'success'))
   } catch (err) {

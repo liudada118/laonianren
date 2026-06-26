@@ -11,15 +11,8 @@ import FootprintHeatmapChart from '../../components/ui/FootprintHeatmapChart';
 import GaitAverageChart from '../../components/ui/GaitAverageChart';
 import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
-import AssessmentAiPanel from '../../components/report/AssessmentAiPanel';
 import ReportSummaryCard, { BasisNote } from '../../components/report/ReportSummaryCard';
-import { sanitizeAiReport } from '../../lib/aiTextSanitizer';
-import {
-  ASSESSMENT_AI_SECTION_CONFIG,
-  buildGaitAiPayload,
-  requestAssessmentAIReport,
-} from '../../lib/assessmentAi';
-import { scoreGait, scoreToAiContext } from '../../lib/assessmentScoring';
+import { scoreGait } from '../../lib/assessmentScoring';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -118,18 +111,9 @@ function LeftDataPanel({ sensorStats, timer, fmtTime, isRecording, isConnected }
 }
 
 /* ─── 步态报告组件（使用真实数据） ─── */
-export function GaitReportContent({ patientInfo, pythonResult: externalResult, onClose, onAiReportReady }) {
+export function GaitReportContent({ patientInfo, pythonResult: externalResult, onClose }) {
   const [realData, setRealData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [aiReport, setAiReport] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState(null);
-  const aiRequestStartedRef = useRef(false);
-  const onAiReportReadyRef = useRef(onAiReportReady);
-
-  useEffect(() => {
-    onAiReportReadyRef.current = onAiReportReady;
-  }, [onAiReportReady]);
 
   useEffect(() => {
     if (externalResult) {
@@ -142,12 +126,6 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     setLoading(false);
   }, [externalResult]);
 
-  useEffect(() => {
-    if (externalResult?.aiReport && !aiReport) {
-      setAiReport(externalResult.aiReport);
-    }
-  }, [externalResult, aiReport]);
-
   const sections = [
     { id: 'spatiotemporal', title: '1. 步态时空参数' },
     { id: 'balance', title: '2. 足底平衡分析' },
@@ -159,7 +137,6 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
     { id: 'partcurves', title: '8. 分区曲线' },
     { id: 'support', title: '9. 单脚支撑相' },
     { id: 'cycle', title: '10. 步态周期' },
-    { id: 'conclusion', title: 'AI分项分析' },
   ];
   const [activeSection, setActiveSection] = useState('spatiotemporal');
   const scrollToSection = (id) => {
@@ -334,52 +311,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 
   const thStyle = 'px-3 py-2 text-left font-semibold text-[14px]';
   const tdStyle = 'px-3 py-2 text-[14px]';
-  const aiPayload = useMemo(() => buildGaitAiPayload(realData), [realData]);
   const scoreResult = useMemo(() => realData ? scoreGait(realData) : null, [realData]);
-  const cleanAiReport = useMemo(() => sanitizeAiReport(aiReport), [aiReport]);
-
-  useEffect(() => {
-    // 当报告数据切换时，允许重新发起一次 AI 请求
-    aiRequestStartedRef.current = false;
-  }, [aiPayload, externalResult?.aiReport]);
-
-  useEffect(() => {
-    if (!aiPayload || aiReport || externalResult?.aiReport) return;
-    if (aiRequestStartedRef.current) return;
-    aiRequestStartedRef.current = true;
-
-    let cancelled = false;
-    setAiLoading(true);
-    setAiError(null);
-
-    requestAssessmentAIReport(
-      'gait',
-      patientInfo || { name: '未知' },
-      {
-        ...aiPayload,
-        score_context: scoreToAiContext(scoreResult),
-      },
-    ).then(res => {
-      if (res.success) {
-        if (!cancelled) {
-          setAiReport(res.data);
-        }
-        if (onAiReportReadyRef.current) onAiReportReadyRef.current(res.data);
-      } else {
-        if (!cancelled) {
-          setAiError(res.error || 'AI 分析失败');
-        }
-      }
-    }).catch(err => {
-      if (!cancelled) setAiError(err.message);
-    }).finally(() => {
-      if (!cancelled) setAiLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [aiPayload, patientInfo, aiReport, externalResult?.aiReport, scoreResult]);
 
   // Hooks 必须在所有条件分支之前调用
   const gaitContentRef = React.useRef(null);
@@ -451,8 +383,6 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
         <ReportSummaryCard
           scoreResult={scoreResult}
           title="项目评分"
-          aiLoading={aiLoading}
-          aiIntro={cleanAiReport?.overview}
         />
 
         {/* 1. 步态时空参数 */}
@@ -685,20 +615,6 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
           </div>
         </section>
 
-        {/* 综合评估 */}
-        <section id="gait-conclusion">
-          <div className="zeiss-section-title">AI分项分析</div>
-          <div className="zeiss-card-inner p-5 mt-3">
-            <AssessmentAiPanel
-              aiLoading={aiLoading}
-              aiError={aiError}
-              aiReport={aiReport}
-              systemLevel={scoreResult ? { text: scoreResult.level, score: scoreResult.score, maxScore: scoreResult.maxScore } : null}
-              sections={ASSESSMENT_AI_SECTION_CONFIG.gait}
-              excludeKeys={['overview']}
-            />
-          </div>
-        </section>
         <BasisNote className="pb-6 text-center" />
       </div>
     </div>
@@ -712,7 +628,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, completeAssessment, updateAssessmentAiReport, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
@@ -1086,10 +1002,6 @@ export default function GaitAssessment() {
     completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
   };
 
-  const handleGaitAiReportReady = useCallback((aiData) => {
-    updateAssessmentAiReport('gait', aiData, assessmentIdRef.current);
-  }, [updateAssessmentAiReport]);
-
   // 清理
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -1121,7 +1033,6 @@ export default function GaitAssessment() {
           <GaitReportContent
               patientInfo={patientInfo}
               pythonResult={pythonResult}
-              onAiReportReady={handleGaitAiReportReady}
             />
         </main>
       </div>
