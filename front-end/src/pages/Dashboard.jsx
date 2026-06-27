@@ -432,7 +432,6 @@ export default function Dashboard() {
     sessionId, roster, rosterCurrentId, importRoster, switchToPatient, updateCurrentExtra, clearRoster,
   } = useAssessment();
   const [showResetConfirm, setShowResetConfirm] = useState(null);
-  const [showNewSessionConfirm, setShowNewSessionConfirm] = useState(false);
   const [showGripTip, setShowGripTip] = useState(false);
   const [gripTipPath, setGripTipPath] = useState('');
   const [showSitStandTip, setShowSitStandTip] = useState(false);
@@ -593,17 +592,6 @@ export default function Dashboard() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
               </svg>
               <span className="hidden sm:inline">名单 {roster.length}</span>
-            </button>
-          )}
-          {/* 新评估按钮 */}
-          {patientInfo && (
-            <button onClick={() => setShowNewSessionConfirm(true)}
-              className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm px-3 py-1.5 rounded-lg font-semibold transition-all"
-              style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930' }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              <span className="hidden sm:inline">新建用户</span>
             </button>
           )}
           <button onClick={() => navigate('/history')}
@@ -915,36 +903,6 @@ export default function Dashboard() {
                 className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer"
                 style={{ background: 'var(--warning)' }}>
                 确认重新评估
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 新评估确认弹窗 */}
-      {showNewSessionConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 w-[420px] max-w-[90vw] animate-scaleIn text-center">
-            <div className="w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center"
-              style={{ background: '#ECFDF5' }}>
-              <svg className="w-6 h-6" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>创建新用户</h3>
-            <p className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>
-              当前评估对象是<span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name}</span>，已评估的数据将自动保存到历史记录中。
-            </p>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-              确认创建新的用户？
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setShowNewSessionConfirm(false)} className="zeiss-btn-secondary py-3 text-sm">取消</button>
-              <button
-                onClick={() => { setShowNewSessionConfirm(false); startNewSession(); }}
-                className="py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer transition-all"
-                style={{ background: '#059669' }}>
-                确认创建
               </button>
             </div>
           </div>
