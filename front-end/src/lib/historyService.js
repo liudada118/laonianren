@@ -109,6 +109,8 @@ export function saveAssessmentSession(patientInfo, institution, assessments, ses
         id: generateId(),
         sessionId: sessionId || generateId(),
         patientName: patientInfo.name,
+        patientId: patientInfo.id || '',
+        patientRegion: patientInfo.region || '',
         patientGender: patientInfo.gender,
         patientAge: patientInfo.age,
         patientWeight: patientInfo.weight,
@@ -121,9 +123,9 @@ export function saveAssessmentSession(patientInfo, institution, assessments, ses
       history.unshift(newRecord);
     }
 
-    // 最多保存200条记录
-    if (history.length > 200) {
-      history.length = 200;
+    // 最多保存2000条记录（街道大规模采集）
+    if (history.length > 2000) {
+      history.length = 2000;
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
@@ -158,7 +160,9 @@ export async function searchHistory({ keyword, date, page = 1, pageSize = 10 }) 
   if (keyword) {
     records = records.filter(r =>
       r.patientName?.includes(keyword) ||
-      r.institution?.includes(keyword)
+      r.institution?.includes(keyword) ||
+      String(r.patientId || '').includes(keyword) ||
+      r.patientRegion?.includes(keyword)
     );
   }
 

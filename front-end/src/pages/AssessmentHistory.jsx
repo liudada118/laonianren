@@ -36,11 +36,11 @@ const ASSESSMENT_ICONS = {
   ),
 };
 
-const ASSESSMENT_KEYS = ['grip', 'sitstand', 'standing', 'gait'];
+const ASSESSMENT_KEYS = ['gait', 'standing', 'grip', 'sitstand'];
 
 export default function AssessmentHistory() {
   const navigate = useNavigate();
-  const { institution, patientInfo } = useAssessment();
+  const { institution, patientInfo, resumeSession } = useAssessment();
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -149,7 +149,7 @@ export default function AssessmentHistory() {
             <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
               <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 160 }} />
-              <input type="text" placeholder="搜索姓名或机构" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              <input type="text" placeholder="搜索姓名 / 编号 / 地区" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 180 }} />
               {total > 0 && (
                 <button onClick={() => setShowClearConfirm(true)}
@@ -166,10 +166,10 @@ export default function AssessmentHistory() {
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>序号</div>
             <div className="col-span-2" style={{ color: 'var(--text-tertiary)' }}>患者信息</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>日期</div>
+            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>步态</div>
+            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>站立</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>握力</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>起坐</div>
-            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>站立</div>
-            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>步态</div>
             <div className="col-span-2 text-center" style={{ color: 'var(--text-tertiary)' }}>完成度</div>
             <div className="col-span-2 text-center" style={{ color: 'var(--text-tertiary)' }}>操作</div>
           </div>
@@ -205,7 +205,12 @@ export default function AssessmentHistory() {
                       <div className="col-span-2 min-w-0">
                         <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.patientName}</div>
                         <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
-                          {item.patientGender} · {item.patientAge}岁 · {item.patientWeight}kg
+                          {[
+                            item.patientId && `编号${item.patientId}`,
+                            item.patientRegion,
+                            item.patientGender,
+                            (item.patientAge !== '' && item.patientAge != null) && `${item.patientAge}岁`,
+                          ].filter(Boolean).join(' · ') || '—'}
                         </div>
                       </div>
                       <div className="col-span-1 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
@@ -220,8 +225,10 @@ export default function AssessmentHistory() {
                               </svg>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full" style={{ background: 'var(--bg-tertiary)' }}>
-                              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--border-medium)' }} />
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full" style={{ background: '#FEE2E2' }} title="未测">
+                              <svg className="w-3.5 h-3.5" style={{ color: '#DC2626' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
                             </span>
                           )}
                         </div>
@@ -277,7 +284,7 @@ export default function AssessmentHistory() {
                                   {completed ? (
                                     <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--success-light)', color: 'var(--success)' }}>已完成</span>
                                   ) : (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>未完成</span>
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: '#FEE2E2', color: '#DC2626' }}>未测</span>
                                   )}
                                 </div>
                                 {completed && assessment.completedAt && (
@@ -286,7 +293,7 @@ export default function AssessmentHistory() {
                                   </p>
                                 )}
                                 {!completed && (
-                                  <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>暂未完成此项评估</p>
+                                  <p className="text-[11px] mb-3" style={{ color: '#DC2626' }}>该项未测，可点下方补测</p>
                                 )}
                                 {/* 查看报告按钮 */}
                                 {completed ? (
@@ -300,10 +307,14 @@ export default function AssessmentHistory() {
                                     查看报告
                                   </button>
                                 ) : (
-                                  <button disabled
-                                    className="mt-auto w-full py-2 rounded-lg text-xs font-medium"
-                                    style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border-light)', cursor: 'not-allowed' }}>
-                                    暂无报告
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); resumeSession(item); navigate(`/assessment/${key}`); }}
+                                    className="mt-auto w-full py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+                                    style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FCA5A5', cursor: 'pointer' }}>
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    去补测
                                   </button>
                                 )}
                               </div>

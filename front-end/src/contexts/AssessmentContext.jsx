@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { saveAssessmentSession } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
+import * as rosterService from '../lib/rosterService';
 
 const AssessmentContext = createContext(null);
 
@@ -28,6 +29,10 @@ const INITIAL_STATE = {
   // 当前评估对象（全局共享，只输入一次）
   patientInfo: null,
 
+  // 导入的评估名单与当前对象编号（街道快速采集）
+  roster: [],
+  rosterCurrentId: null,
+
   // 当前评估会话 ID（区分同名患者的不同评估）
   sessionId: generateSessionId(),
   
@@ -41,7 +46,11 @@ const INITIAL_STATE = {
 };
 
 export function AssessmentProvider({ children }) {
-  const [state, setState] = useState(INITIAL_STATE);
+  const [state, setState] = useState(() => ({
+    ...INITIAL_STATE,
+    roster: rosterService.getRoster(),
+    rosterCurrentId: rosterService.getCurrentId(),
+  }));
 
   // ─── 全局设备连接状态 ───
   // 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -202,7 +211,8 @@ export function AssessmentProvider({ children }) {
 
   const logout = useCallback(() => {
     disconnectAllDevices();
-    setState(INITIAL_STATE);
+    // 退出登录保留已导入的名单（持久化在 localStorage）
+    setState(prev => ({ ...INITIAL_STATE, roster: prev.roster, rosterCurrentId: prev.rosterCurrentId }));
   }, [disconnectAllDevices]);
 
   const setPatientInfo = useCallback((info) => {
@@ -260,6 +270,91 @@ export function AssessmentProvider({ children }) {
     }));
   }, []);
 
+  // ─── 名单导入与依次筛查（街道快速采集）───
+  const importRoster = useCallback((list) => {
+    rosterService.saveRoster(list || []);
+    rosterService.setCurrentId(null);
+    setState(prev => ({ ...prev, roster: list || [], rosterCurrentId: null }));
+  }, []);
+
+  const clearRoster = useCallback(() => {
+    rosterService.clearRoster();
+    setState(prev => ({ ...prev, roster: [], rosterCurrentId: null }));
+  }, []);
+
+  // 切换到名单中的某个对象：设置 patientInfo + 新会话 + 重置评估
+  const switchToPatient = useCallback((p) => {
+    if (!p) return;
+    rosterService.setCurrentId(p.id || null);
+    setState(prev => ({
+      ...prev,
+      patientInfo: {
+        name: p.name || '',
+        id: p.id || '',
+        region: p.region || '',
+        gender: p.gender || '',
+        age: (p.age ?? '') === '' ? '' : p.age,
+        weight: (p.weight ?? '') === '' ? '' : p.weight,
+      },
+      rosterCurrentId: p.id || null,
+      sessionId: generateSessionId(),
+      assessments: {
+        grip: { completed: false, report: null, data: null },
+        sitstand: { completed: false, report: null, data: null },
+        standing: { completed: false, report: null, data: null },
+        gait: { completed: false, report: null, data: null },
+      },
+    }));
+  }, []);
+
+  // 切换弹窗里补填性别/年龄/体重，并同步到名单项
+  const updateCurrentExtra = useCallback(({ gender, age, weight }) => {
+    setState(prev => {
+      if (!prev.patientInfo) return prev;
+      const updated = { ...prev.patientInfo };
+      if (gender !== undefined) updated.gender = gender;
+      if (age !== undefined) updated.age = age;
+      if (weight !== undefined) updated.weight = weight;
+      let roster = prev.roster;
+      if (updated.id) {
+        roster = prev.roster.map(r =>
+          r.id === updated.id
+            ? { ...r, gender: updated.gender, age: updated.age, weight: updated.weight }
+            : r
+        );
+        rosterService.saveRoster(roster);
+      }
+      return { ...prev, patientInfo: updated, roster };
+    });
+  }, []);
+
+  // 从历史记录恢复一次评估会话（用于历史记录里单项补测：沿用同一 sessionId，补测完成后写回同一条记录）
+  const resumeSession = useCallback((record) => {
+    if (!record) return;
+    const KEYS = ['grip', 'sitstand', 'standing', 'gait'];
+    const assessments = {};
+    for (const k of KEYS) {
+      const a = record.assessments?.[k];
+      assessments[k] = a?.completed
+        ? { completed: true, report: a.report, data: null, assessmentId: a.assessmentId || null }
+        : { completed: false, report: null, data: null };
+    }
+    setState(prev => ({
+      ...prev,
+      patientInfo: {
+        name: record.patientName || '',
+        id: record.patientId || '',
+        region: record.patientRegion || '',
+        gender: record.patientGender || '',
+        age: (record.patientAge ?? '') === '' ? '' : record.patientAge,
+        weight: (record.patientWeight ?? '') === '' ? '' : record.patientWeight,
+      },
+      sessionId: record.sessionId || generateSessionId(),
+      assessments,
+      rosterCurrentId: record.patientId || prev.rosterCurrentId,
+    }));
+  }, []);
+
   const value = {
     ...state,
     login,
@@ -268,6 +363,11 @@ export function AssessmentProvider({ children }) {
     completeAssessment,
     resetAssessment,
     startNewSession,
+    importRoster,
+    clearRoster,
+    switchToPatient,
+    updateCurrentExtra,
+    resumeSession,
     // 设备连接相关
     deviceConnStatus,
     deviceOnlineMap,

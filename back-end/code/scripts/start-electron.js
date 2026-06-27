@@ -10,9 +10,6 @@ const pythonDir = path.join(backendDir, 'python');
 const pythonVenvDir = path.join(pythonDir, 'venv');
 const requirementsPath = path.join(pythonDir, 'app', 'algorithms', 'requirements.txt');
 const requirementsStampPath = path.join(pythonVenvDir, '.requirements.sha256');
-const llmConfigDir = path.join(__dirname, '..', 'python', 'app', 'algorithms');
-const llmSettingsPath = path.join(llmConfigDir, 'llm_settings.json');
-const llmSettingsExamplePath = path.join(llmConfigDir, 'llm_settings_example.json');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 // ─── Node.js 依赖检查（来自 ld 分支，更完善） ───
@@ -176,38 +173,9 @@ function ensurePythonDeps() {
   console.log('[start] Python dependencies installed.');
 }
 
-// ─── LLM 配置文件（来自 python3 分支） ───
-
-function ensureLlmSettingsFile() {
-  try {
-    if (fs.existsSync(llmSettingsPath)) {
-      return;
-    }
-
-    if (fs.existsSync(llmSettingsExamplePath)) {
-      fs.copyFileSync(llmSettingsExamplePath, llmSettingsPath);
-      console.log('[start] Created llm_settings.json from llm_settings.example.json.');
-      return;
-    }
-
-    const fallback = {
-      api_key: '',
-      base_url: 'https://api.deepseek.com',
-      model: 'deepseek-v4-flash',
-      max_tokens: 10000,
-      extra_body: { enable_thinking: false },
-    };
-    fs.writeFileSync(llmSettingsPath, JSON.stringify(fallback, null, 2), 'utf8');
-    console.log('[start] Created llm_settings.json with fallback defaults.');
-  } catch (e) {
-    console.error('[start] Failed to ensure llm_settings.json:', e.message);
-  }
-}
-
 // ─── 启动前检查 ───
 ensureProjectDeps(backendDir, '后端');
 ensureProjectDeps(frontendDir, '前端');
-ensureLlmSettingsFile();
 ensurePythonDeps();
 
 const env = { ...process.env };

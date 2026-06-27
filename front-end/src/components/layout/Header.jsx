@@ -3,10 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssessment } from '../../contexts/AssessmentContext';
 
 const ASSESSMENT_TITLES = {
-  grip: '1.握力评估',
-  sitstand: '2.起坐能力评估',
-  standing: '3.静态站立评估',
-  gait: '4.行走步态评估'
+  gait: '1.行走步态评估',
+  standing: '2.静态站立评估',
+  grip: '3.握力评估',
+  sitstand: '4.起坐能力评估'
 };
 
 export default function Header({ title, showHistory = true, steps, currentStep }) {
@@ -63,7 +63,14 @@ export default function Header({ title, showHistory = true, steps, currentStep }
       {/* 右侧信息 */}
       <div className="flex items-center gap-4">
         {patientInfo && (
-          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo.name}</span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{patientInfo.name}</span>
+            {(patientInfo.id || patientInfo.region) && (
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                {[patientInfo.id, patientInfo.region].filter(Boolean).join(' · ')}
+              </span>
+            )}
+          </div>
         )}
         {institution && (
           <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{institution}</span>

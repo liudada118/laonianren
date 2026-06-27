@@ -1,14 +1,45 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import ComprehensiveReport from '../components/report/ComprehensiveReport';
 import { buildComprehensiveScoreResult } from '../lib/assessmentScoring';
+import { parseRosterFile } from '../lib/rosterImport';
+import { deriveStatusMap } from '../lib/rosterService';
+import { getHistory } from '../lib/historyService';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
   {
-    key: 'grip',
+    key: 'gait',
     num: '1',
+    title: '行走步态评估',
+    subtitle: 'Gait Analysis',
+    desc: '分析行走过程中的步态参数，评估步频、步幅和足底压力变化',
+    path: '/assessment/gait',
+    accent: '#D97706',
+    accentBg: '#FFFBEB',
+    iconColor: '#D4C4A0',
+    icon: '/icons/walking.png',
+    iconBg: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+    devices: ['foot1', 'foot2', 'foot3', 'foot4'],
+  },
+  {
+    key: 'standing',
+    num: '2',
+    title: '静态站立评估',
+    subtitle: 'Static Standing',
+    desc: '通过足底压力传感器分析站立时的重心分布和平衡稳定性',
+    path: '/assessment/standing',
+    accent: '#7C3AED',
+    accentBg: '#F3EEFF',
+    iconColor: '#BEB0D8',
+    icon: '/icons/footprint.png',
+    iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
+    devices: ['foot1'],
+  },
+  {
+    key: 'grip',
+    num: '3',
     title: '握力评估',
     subtitle: 'Grip Strength',
     desc: '通过传感器采集手部握力数据，分析各手指力量分布和抓握模式',
@@ -22,7 +53,7 @@ const ASSESSMENTS = [
   },
   {
     key: 'sitstand',
-    num: '2',
+    num: '4',
     title: '起坐能力评估',
     subtitle: 'Sit-to-Stand',
     desc: '评估从坐到站的运动能力，分析起坐过程中的力量和平衡',
@@ -33,34 +64,6 @@ const ASSESSMENTS = [
     icon: '/icons/sit-stand.png',
     iconBg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
     devices: ['sit', 'foot1'],
-  },
-  {
-    key: 'standing',
-    num: '3',
-    title: '静态站立评估',
-    subtitle: 'Static Standing',
-    desc: '通过足底压力传感器分析站立时的重心分布和平衡稳定性',
-    path: '/assessment/standing',
-    accent: '#7C3AED',
-    accentBg: '#F3EEFF',
-    iconColor: '#BEB0D8',
-    icon: '/icons/footprint.png',
-    iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
-    devices: ['foot1'],
-  },
-  {
-    key: 'gait',
-    num: '4',
-    title: '行走步态评估',
-    subtitle: 'Gait Analysis',
-    desc: '分析行走过程中的步态参数，评估步频、步幅和足底压力变化',
-    path: '/assessment/gait',
-    accent: '#D97706',
-    accentBg: '#FFFBEB',
-    iconColor: '#D4C4A0',
-    icon: '/icons/walking.png',
-    iconBg: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
-    devices: ['foot1', 'foot2', 'foot3', 'foot4'],
   }
 ];
 
@@ -75,68 +78,238 @@ const DEVICE_LABELS = {
   foot4: '脚垫4',
 };
 
-/* ─── 患者信息弹窗 ─── */
-function PatientDialog({ open, onClose, onConfirm }) {
-  const [name, setName] = useState('');
-  const [gender, setGender] = useState('男');
-  const [age, setAge] = useState('65');
-  const [weight, setWeight] = useState('70');
+/* ─── 切换/补填评估对象弹窗（名单模式）─── */
+function PatientSwitchDialog({ open, patient, onClose, onConfirm }) {
+  const [gender, setGender] = useState('');
+  const [age, setAge] = useState('');
 
-  if (!open) return null;
+  useEffect(() => {
+    if (open && patient) {
+      setGender(patient.gender || '');
+      setAge(patient.age != null && patient.age !== '' ? String(patient.age) : '');
+    }
+  }, [open, patient]);
+
+  if (!open || !patient) return null;
+
+  const info = [patient.id && `编号 ${patient.id}`, patient.region].filter(Boolean).join('   ·   ') || '—';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-      <div className="zeiss-dialog p-8 w-[480px] max-w-[90vw] animate-scaleIn">
-        <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>评估对象信息</h3>
-        <p className="text-sm mb-6" style={{ color: 'var(--text-tertiary)' }}>请输入被评估者的基本信息</p>
+      <div className="zeiss-dialog p-8 w-[460px] max-w-[90vw] animate-scaleIn">
+        <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>当前评估对象</h3>
+        <p className="text-sm mb-5" style={{ color: 'var(--text-tertiary)' }}>请核对对象信息，并补充性别 / 年龄（可留空）</p>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>姓名 *</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="请输入姓名"
-              className="zeiss-input" />
+        {/* 只读信息卡 */}
+        <div className="rounded-xl p-4 mb-5 flex items-center gap-3" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+          <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-lg font-bold shrink-0" style={{ background: 'var(--zeiss-blue)' }}>
+            {(patient.name || '?')[0]}
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>性别</label>
-              <select value={gender} onChange={e => setGender(e.target.value)} className="zeiss-select">
-                <option value="男">男</option>
-                <option value="女">女</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>年龄</label>
-              <select value={age} onChange={e => setAge(e.target.value)} className="zeiss-select">
-                {Array.from({ length: 61 }, (_, i) => i + 40).map(a => (
-                  <option key={a} value={a}>{a}岁</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>体重(kg)</label>
-              <select value={weight} onChange={e => setWeight(e.target.value)} className="zeiss-select">
-                {Array.from({ length: 81 }, (_, i) => i + 30).map(w => (
-                  <option key={w} value={w}>{w}kg</option>
-                ))}
-              </select>
-            </div>
+          <div className="min-w-0">
+            <div className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{patient.name || '（未命名）'}</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{info}</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-8">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>性别</label>
+            <select value={gender} onChange={e => setGender(e.target.value)} className="zeiss-select">
+              <option value="">未填</option>
+              <option value="男">男</option>
+              <option value="女">女</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>年龄</label>
+            <input type="number" min="0" max="120" value={age} onChange={e => setAge(e.target.value)}
+              placeholder="可留空" className="zeiss-input" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mt-7">
           <button onClick={onClose} className="zeiss-btn-secondary py-3">取消</button>
           <button
-            onClick={() => { if (name.trim()) onConfirm({ name: name.trim(), gender, age: +age, weight: +weight }); }}
-            disabled={!name.trim()}
-            className="py-3 rounded-[10px] font-semibold text-sm transition-all"
-            style={{
-              background: name.trim() ? 'var(--zeiss-blue)' : '#E8ECF0',
-              color: name.trim() ? 'white' : 'var(--text-muted)',
-              cursor: name.trim() ? 'pointer' : 'not-allowed',
-              border: 'none',
-            }}>
-            开始评估
+            onClick={() => onConfirm({ gender: gender || '', age: age === '' ? '' : (Number(age) || '') })}
+            className="py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all"
+            style={{ background: 'var(--zeiss-blue)' }}>
+            进入评估
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 名单导入弹窗 ─── */
+const DETECT_LABELS = { id: '编号', name: '姓名', region: '地区', gender: '性别', age: '年龄', weight: '体重' };
+function RosterImportDialog({ open, hasExisting, onClose, onImported }) {
+  const [parsing, setParsing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) { setParsing(false); setResult(null); setError(''); }
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setParsing(true); setError(''); setResult(null);
+    try {
+      const r = await parseRosterFile(file);
+      if (!r.list.length) setError('未解析到有效名单行，请检查表格是否有“姓名 / 编号”列。');
+      else setResult(r);
+    } catch (err) {
+      setError('解析失败：' + (err?.message || String(err)));
+    } finally {
+      setParsing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+      <div className="zeiss-dialog p-8 w-[560px] max-w-[92vw] animate-scaleIn">
+        <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>导入评估名单</h3>
+        <p className="text-sm mb-5" style={{ color: 'var(--text-tertiary)' }}>
+          选择 Excel 文件（.xlsx），自动识别 编号 / 姓名 / 地点 等列{hasExisting ? '；导入将替换当前名单' : ''}
+        </p>
+
+        <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" id="roster-file-input" />
+        <label htmlFor="roster-file-input"
+          className="block rounded-xl border-2 border-dashed p-6 text-center cursor-pointer mb-4 transition-all"
+          style={{ borderColor: 'var(--border-light)', background: 'var(--bg-tertiary)' }}>
+          <span className="text-sm font-medium" style={{ color: 'var(--zeiss-blue)' }}>点击选择 Excel 文件</span>
+        </label>
+
+        {parsing && <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>解析中…</p>}
+        {error && <p className="text-sm" style={{ color: '#DC2626' }}>{error}</p>}
+
+        {result && (
+          <div className="rounded-xl p-4 mb-4" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+            <div className="text-sm font-semibold mb-2 flex flex-wrap items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+              共 {result.total} 人 · 识别列：
+              {Object.keys(result.detected).map(k => (
+                <span key={k} className="px-2 py-0.5 rounded text-[11px]" style={{ background: '#E8F2FF', color: '#0066CC' }}>
+                  {DETECT_LABELS[k] || k}={result.detected[k]}
+                </span>
+              ))}
+            </div>
+            <div className="text-xs max-h-32 overflow-y-auto" style={{ color: 'var(--text-tertiary)' }}>
+              {result.list.slice(0, 5).map((p, i) => (
+                <div key={i} className="py-0.5">
+                  {[p.id, p.name, p.region, p.gender, p.age && `${p.age}岁`].filter(Boolean).join(' · ')}
+                </div>
+              ))}
+              {result.total > 5 && <div className="py-0.5 opacity-60">…… 其余 {result.total - 5} 人</div>}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mt-2">
+          <button onClick={onClose} className="zeiss-btn-secondary py-3">取消</button>
+          <button onClick={() => result && onImported(result.list)} disabled={!result}
+            className="py-3 rounded-[10px] font-semibold text-sm transition-all border-none"
+            style={{ background: result ? 'var(--zeiss-blue)' : '#E8ECF0', color: result ? 'white' : 'var(--text-muted)', cursor: result ? 'pointer' : 'not-allowed' }}>
+            确认导入{result ? `（${result.total}）` : ''}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 名单管理面板 ─── */
+function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
+  const [keyword, setKeyword] = useState('');
+  const [sortBy, setSortBy] = useState('id');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const statusMap = useMemo(() => deriveStatusMap(roster, getHistory()), [roster, open]);
+
+  if (!open) return null;
+
+  const catOf = (p) => {
+    const c = statusMap[p.id]?.completed || 0;
+    return c === 4 ? 'done' : c > 0 ? 'partial' : 'notStarted';
+  };
+  const doneCount = roster.filter(p => catOf(p) === 'done').length;
+  const partialCount = roster.filter(p => catOf(p) === 'partial').length;
+  const notStartedCount = roster.filter(p => catOf(p) === 'notStarted').length;
+
+  const filtered = roster.filter(p => {
+    if (keyword && !((p.name || '').includes(keyword) || String(p.id || '').includes(keyword))) return false;
+    if (statusFilter !== 'all' && catOf(p) !== statusFilter) return false;
+    return true;
+  });
+  const items = [...filtered].sort((a, b) => {
+    if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '', 'zh');
+    if (sortBy === 'status') return (statusMap[b.id]?.completed || 0) - (statusMap[a.id]?.completed || 0);
+    return String(a.id || '').localeCompare(String(b.id || ''), 'zh', { numeric: true });
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end zeiss-overlay animate-fadeIn" onClick={onClose}>
+      <div className="h-full w-[420px] max-w-[92vw] flex flex-col" style={{ background: 'var(--bg-secondary)' }} onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border-light)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>评估名单 · {roster.length} 人</h3>
+            <button onClick={onClose} className="zeiss-btn-ghost text-xs">关闭</button>
+          </div>
+          <div className="flex items-center gap-3 text-xs mb-2">
+            <span style={{ color: 'var(--success)' }}>已完成 {doneCount}</span>
+            <span style={{ color: '#D97706' }}>部分未完成 {partialCount}</span>
+            <span style={{ color: 'var(--text-muted)' }}>未开始 {notStartedCount}</span>
+          </div>
+          <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="按姓名 / 编号搜索" className="zeiss-input mb-2" />
+          <div className="flex items-center gap-1.5 text-xs mb-2 flex-wrap">
+            <span style={{ color: 'var(--text-tertiary)' }}>筛选：</span>
+            {[['all', '全部'], ['notStarted', '未开始'], ['partial', '部分未完成'], ['done', '已完成']].map(([k, label]) => (
+              <button key={k} onClick={() => setStatusFilter(k)} className="px-2 py-1 rounded transition-all"
+                style={{ background: statusFilter === k ? '#E8F2FF' : 'transparent', color: statusFilter === k ? '#0066CC' : 'var(--text-tertiary)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span style={{ color: 'var(--text-tertiary)' }}>排序：</span>
+            {[['id', '编号'], ['name', '姓名'], ['status', '状态']].map(([k, label]) => (
+              <button key={k} onClick={() => setSortBy(k)} className="px-2 py-1 rounded transition-all"
+                style={{ background: sortBy === k ? '#E8F2FF' : 'transparent', color: sortBy === k ? '#0066CC' : 'var(--text-tertiary)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {items.map((p) => {
+            const st = statusMap[p.id] || { completed: 0, total: 4 };
+            const isCurrent = p.id === currentId && currentId != null;
+            const statusColor = st.completed === 4 ? 'var(--success)' : st.completed > 0 ? '#D97706' : 'var(--text-muted)';
+            const statusText = st.completed === 4 ? '已完成' : st.completed > 0 ? `进行中 ${st.completed}/4` : '未开始';
+            return (
+              <button key={p.id || p.name} onClick={() => onPick(p)}
+                className="w-full px-5 py-3 flex items-center justify-between border-b text-left transition-all hover:opacity-80"
+                style={{ borderColor: 'var(--border-light)', background: isCurrent ? '#E8F2FF' : 'transparent' }}>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {p.name}{isCurrent && <span className="text-[10px] ml-1.5" style={{ color: '#0066CC' }}>· 当前</span>}
+                  </div>
+                  <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>{[p.id, p.region].filter(Boolean).join(' · ')}</div>
+                </div>
+                <span className="text-[11px] font-medium shrink-0 ml-2" style={{ color: statusColor }}>{statusText}</span>
+              </button>
+            );
+          })}
+          {!items.length && <div className="px-5 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>无匹配对象</div>}
+        </div>
+
+        <div className="px-5 py-3 border-t shrink-0 flex justify-end" style={{ borderColor: 'var(--border-light)' }}>
+          <button onClick={onClear} className="text-xs font-medium" style={{ color: '#DC2626' }}>清空名单</button>
         </div>
       </div>
     </div>
@@ -256,9 +429,8 @@ export default function Dashboard() {
     institution, patientInfo, setPatientInfo, assessments, resetAssessment, startNewSession,
     deviceConnStatus, deviceOnlineMap, macInfo, connectAllDevices, disconnectAllDevices,
     rescanDevices, rescanLoading,
+    sessionId, roster, rosterCurrentId, importRoster, switchToPatient, updateCurrentExtra, clearRoster,
   } = useAssessment();
-  const [showDialog, setShowDialog] = useState(false);
-  const [pendingPath, setPendingPath] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(null);
   const [showNewSessionConfirm, setShowNewSessionConfirm] = useState(false);
   const [showGripTip, setShowGripTip] = useState(false);
@@ -266,37 +438,29 @@ export default function Dashboard() {
   const [showSitStandTip, setShowSitStandTip] = useState(false);
   const [sitStandTipPath, setSitStandTipPath] = useState('');
   const [showComprehensiveReport, setShowComprehensiveReport] = useState(false);
+  // 名单相关
+  const [showImport, setShowImport] = useState(false);
+  const [showRosterPanel, setShowRosterPanel] = useState(false);
+  const [switchTarget, setSwitchTarget] = useState(null);
+  const [showNextConfirm, setShowNextConfirm] = useState(null);
+  const nextPromptedRef = useRef(null);
 
   const handleStart = (path) => {
-    if (patientInfo) {
-      // 握力评估需要先提示用户带好手套
-      if (path === '/assessment/grip') {
-        setGripTipPath(path);
-        setShowGripTip(true);
-      } else if (path === '/assessment/sitstand') {
-        setSitStandTipPath(path);
-        setShowSitStandTip(true);
-      } else {
-        navigate(path);
-      }
-    } else {
-      setPendingPath(path);
-      setShowDialog(true);
+    if (!patientInfo) {
+      // 未选定评估对象：引导去名单选择（无名单则去导入）
+      if (roster.length > 0) setShowRosterPanel(true);
+      else setShowImport(true);
+      return;
     }
-  };
-
-  const handleConfirm = (info) => {
-    setPatientInfo(info);
-    setShowDialog(false);
     // 握力评估需要先提示用户带好手套
-    if (pendingPath === '/assessment/grip') {
-      setGripTipPath(pendingPath);
+    if (path === '/assessment/grip') {
+      setGripTipPath(path);
       setShowGripTip(true);
-    } else if (pendingPath === '/assessment/sitstand') {
-      setSitStandTipPath(pendingPath);
+    } else if (path === '/assessment/sitstand') {
+      setSitStandTipPath(path);
       setShowSitStandTip(true);
     } else {
-      navigate(pendingPath);
+      navigate(path);
     }
   };
 
@@ -310,6 +474,37 @@ export default function Dashboard() {
 
   const completedCount = Object.values(assessments).filter(a => a.completed).length;
   const comprehensiveReady = completedCount === 4;
+
+  // ─── 名单导入 / 切换 ───
+  const handleImported = (list) => {
+    importRoster(list);
+    setShowImport(false);
+    setShowRosterPanel(true);
+  };
+
+  const handlePickPatient = (p) => {
+    setShowRosterPanel(false);
+    setSwitchTarget(p);
+  };
+
+  const handleSwitchConfirm = ({ gender, age }) => {
+    const p = switchTarget;
+    if (!p) return;
+    switchToPatient({ ...p, gender: gender || '', age });
+    updateCurrentExtra({ gender: gender || '', age });
+    setSwitchTarget(null);
+  };
+
+  // 做满四项后，名单模式自动提示切换下一位（同一会话只提示一次）
+  useEffect(() => {
+    if (completedCount === 4 && rosterCurrentId != null && roster.length) {
+      if (nextPromptedRef.current === sessionId) return;
+      nextPromptedRef.current = sessionId;
+      const idx = roster.findIndex(r => r.id === rosterCurrentId);
+      const next = idx >= 0 && idx + 1 < roster.length ? roster[idx + 1] : null;
+      setShowNextConfirm({ currentName: patientInfo?.name || '', next });
+    }
+  }, [completedCount, rosterCurrentId, sessionId, roster]);
   const currentRecord = useMemo(() => {
     if (!patientInfo) return null;
     const now = new Date();
@@ -331,6 +526,12 @@ export default function Dashboard() {
     () => currentRecord ? buildComprehensiveScoreResult(assessments, patientInfo || {}) : null,
     [currentRecord, assessments, patientInfo],
   );
+  // 名单中尚未完成四项筛查的人（缺检提醒）
+  const pendingPatients = useMemo(() => {
+    if (!roster.length) return [];
+    const statusMap = deriveStatusMap(roster, getHistory());
+    return roster.filter(p => (statusMap[p.id]?.completed || 0) < 4);
+  }, [roster, assessments]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
@@ -354,12 +555,18 @@ export default function Dashboard() {
               style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
                 style={{ background: 'var(--zeiss-blue)' }}>
-                {patientInfo.name[0]}
+                {(patientInfo.name || '?')[0]}
               </div>
               <div>
                 <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{patientInfo.name}</div>
                 <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                  {patientInfo.gender} · {patientInfo.age}岁 · {patientInfo.weight}kg
+                  {[
+                    patientInfo.id && `编号${patientInfo.id}`,
+                    patientInfo.region,
+                    patientInfo.gender,
+                    (patientInfo.age !== '' && patientInfo.age != null) && `${patientInfo.age}岁`,
+                    (patientInfo.weight !== '' && patientInfo.weight != null) && `${patientInfo.weight}kg`,
+                  ].filter(Boolean).join(' · ') || '—'}
                 </div>
               </div>
             </div>
@@ -378,6 +585,25 @@ export default function Dashboard() {
 
           {institution && (
             <span className="text-sm font-medium hidden lg:inline" style={{ color: 'var(--text-secondary)' }}>{institution}</span>
+          )}
+          {/* 导入名单 / 名单管理 */}
+          <button onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm px-3 py-1.5 rounded-lg font-semibold transition-all"
+            style={{ color: '#0066CC', background: '#E8F2FF', border: '1px solid #0066CC30' }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            <span className="hidden sm:inline">导入名单</span>
+          </button>
+          {roster.length > 0 && (
+            <button onClick={() => setShowRosterPanel(true)}
+              className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm px-3 py-1.5 rounded-lg font-semibold transition-all"
+              style={{ color: '#7C3AED', background: '#F3EEFF', border: '1px solid #7C3AED30' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+              <span className="hidden sm:inline">名单 {roster.length}</span>
+            </button>
           )}
           {/* 新评估按钮 */}
           {patientInfo && (
@@ -435,44 +661,45 @@ export default function Dashboard() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => comprehensiveReady && setShowComprehensiveReport(true)}
-          disabled={!comprehensiveReady}
-          className="mb-5 md:mb-7 w-full max-w-[520px] rounded-xl px-5 py-4 transition-all animate-slideUp"
-          style={{
-            background: comprehensiveReady ? 'var(--bg-secondary)' : '#EEF1F5',
-            color: comprehensiveReady ? 'var(--text-primary)' : 'var(--text-muted)',
-            border: comprehensiveReady ? '1px solid rgba(0,102,204,0.22)' : '1px solid var(--border-light)',
-            boxShadow: comprehensiveReady ? '0 8px 24px rgba(0,102,204,0.08)' : 'none',
-            cursor: comprehensiveReady ? 'pointer' : 'not-allowed',
-            opacity: comprehensiveReady ? 1 : 0.72,
-          }}
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div className="text-left">
-              <div className="text-sm font-bold">综合评分报告</div>
-              <div className="text-xs mt-1" style={{ color: comprehensiveReady ? 'var(--text-tertiary)' : 'var(--text-muted)' }}>
-                {comprehensiveReady ? '四项评估已完成，可以生成总评分报告' : `完成四项评估后启用，目前 ${completedCount}/4`}
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {comprehensiveReady && comprehensiveScore && (
-                <div className="text-right">
-                  <div className="text-2xl font-black tabular-nums" style={{ color: comprehensiveScore.color }}>
-                    {comprehensiveScore.score}
-                    <span className="text-xs font-bold ml-0.5">/100</span>
+        {/* 当前测试者 + 缺检提醒 */}
+        {roster.length > 0 && (
+          <div className="mb-4 w-full max-w-[560px] rounded-xl px-5 py-3"
+            style={{ background: '#EFF6FF', border: '1px solid #0066CC33' }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {patientInfo ? (
+                  <>
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
+                      style={{ background: 'var(--zeiss-blue)' }}>
+                      {(patientInfo.name || '?')[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>当前：{patientInfo.name}</div>
+                      <div className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>
+                        {[patientInfo.id && `编号 ${patientInfo.id}`, patientInfo.region].filter(Boolean).join(' · ') || '—'}
+                        <span className="ml-2" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                          · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    未选择评估对象
+                    <span className="ml-2 text-xs" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                      · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
+                    </span>
                   </div>
-                  <div className="text-[10px] font-semibold" style={{ color: comprehensiveScore.color }}>{comprehensiveScore.level}</div>
-                </div>
-              )}
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                style={{ color: comprehensiveReady ? 'var(--zeiss-blue)' : 'var(--text-muted)' }}>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
+                )}
+              </div>
+              <button onClick={() => setShowRosterPanel(true)}
+                className="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold"
+                style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
+                查看名单
+              </button>
             </div>
           </div>
-        </button>
+        )}
 
         {/* 四个评估卡片 */}
         <div className="dashboard-grid px-2">
@@ -569,8 +796,54 @@ export default function Dashboard() {
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>v2.0.0</span>
       </footer>
 
-      {/* 患者信息弹窗 */}
-      <PatientDialog open={showDialog} onClose={() => setShowDialog(false)} onConfirm={handleConfirm} />
+      {/* 名单导入弹窗 */}
+      <RosterImportDialog open={showImport} hasExisting={roster.length > 0}
+        onClose={() => setShowImport(false)} onImported={handleImported} />
+
+      {/* 名单管理面板 */}
+      <RosterPanel open={showRosterPanel} roster={roster} currentId={rosterCurrentId}
+        onClose={() => setShowRosterPanel(false)} onPick={handlePickPatient}
+        onClear={() => { if (window.confirm('确认清空当前名单？')) { clearRoster(); setShowRosterPanel(false); } }} />
+
+      {/* 切换/补填评估对象弹窗 */}
+      <PatientSwitchDialog open={!!switchTarget} patient={switchTarget}
+        onClose={() => setSwitchTarget(null)} onConfirm={handleSwitchConfirm} />
+
+      {/* 做满四项后自动提示切换下一位 */}
+      {showNextConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[440px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ background: '#ECFDF5' }}>
+              <svg className="w-6 h-6" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+              {showNextConfirm.currentName} 四项评估已完成
+            </h3>
+            {showNextConfirm.next ? (
+              <>
+                <p className="text-sm mb-6" style={{ color: 'var(--text-tertiary)' }}>
+                  是否切换到下一位：<span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{showNextConfirm.next.name}</span>
+                  {showNextConfirm.next.id ? `（编号 ${showNextConfirm.next.id}）` : ''}？
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setShowNextConfirm(null)} className="zeiss-btn-secondary py-3 text-sm">留在当前</button>
+                  <button onClick={() => { const n = showNextConfirm.next; setShowNextConfirm(null); setSwitchTarget(n); }}
+                    className="py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer" style={{ background: '#059669' }}>
+                    切换到下一位
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm mb-6" style={{ color: 'var(--text-tertiary)' }}>名单已是最后一位，全部筛查完成。</p>
+                <button onClick={() => setShowNextConfirm(null)} className="zeiss-btn-primary w-full py-3 text-sm">知道了</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 握力评估手套提示弹窗 */}
       {showGripTip && (
