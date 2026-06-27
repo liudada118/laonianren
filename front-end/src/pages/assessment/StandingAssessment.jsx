@@ -20,8 +20,8 @@ const STANDING_BALANCE_STAGES = [
   {
     level: 1,
     title: '双脚站立',
-    requirement: '双脚站立 30 秒',
-    durationSec: 30,
+    requirement: '双脚站立 10 秒',
+    durationSec: 10,
     result: '基础站立能力尚可',
     instruction: '双脚自然站在传感器中心，双足完整踩在有效区域内，目视前方，保持身体稳定。',
     posture: 'parallel',
@@ -732,7 +732,7 @@ export default function StandingAssessment() {
       setTimer(p => {
         const next = p + 1;
         const targetTicks = (activeStage.durationSec || 10) * 10;
-        // timer每100ms+1；第1阶段30秒，其余阶段10秒。
+        // timer每100ms+1；各阶段均10秒（durationSec×10 个 tick）。
         if (next === targetTicks) {
           // 立即清除定时器，确保只触发一次
           clearInterval(timerRef.current);

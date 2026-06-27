@@ -479,7 +479,11 @@ export default function Dashboard() {
   const handleImported = (list) => {
     importRoster(list);
     setShowImport(false);
-    setShowRosterPanel(true);
+    // 自动定位到第一个尚未采集完成的人，弹切换窗继续
+    const statusMap = deriveStatusMap(list, getHistory());
+    const firstPending = list.find(p => (statusMap[p.id]?.completed || 0) < 4);
+    if (firstPending) setSwitchTarget(firstPending);
+    else setShowRosterPanel(true);
   };
 
   const handlePickPatient = (p) => {
@@ -493,6 +497,14 @@ export default function Dashboard() {
     switchToPatient({ ...p, gender: gender || '', age });
     updateCurrentExtra({ gender: gender || '', age });
     setSwitchTarget(null);
+  };
+
+  // 切到名单中相对当前对象的下一位（dir=1）/上一位（dir=-1），弹切换窗确认
+  const goAdjacentPatient = (dir) => {
+    if (!roster.length) return;
+    const idx = rosterCurrentId != null ? roster.findIndex(r => r.id === rosterCurrentId) : -1;
+    const target = roster[idx + dir];
+    if (target) setSwitchTarget(target);
   };
 
   // 做满四项后，名单模式自动提示切换下一位（同一会话只提示一次）
@@ -550,28 +562,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3 md:gap-5 shrink-0">
-          {patientInfo && (
-            <div className="hidden md:flex items-center gap-2.5 px-4 py-1.5 rounded-lg"
-              style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                style={{ background: 'var(--zeiss-blue)' }}>
-                {(patientInfo.name || '?')[0]}
-              </div>
-              <div>
-                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{patientInfo.name}</div>
-                <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                  {[
-                    patientInfo.id && `编号${patientInfo.id}`,
-                    patientInfo.region,
-                    patientInfo.gender,
-                    (patientInfo.age !== '' && patientInfo.age != null) && `${patientInfo.age}岁`,
-                    (patientInfo.weight !== '' && patientInfo.weight != null) && `${patientInfo.weight}kg`,
-                  ].filter(Boolean).join(' · ') || '—'}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* ─── 一键连接按钮 ─── */}
           <ConnectButton
             status={deviceConnStatus}
@@ -663,40 +653,49 @@ export default function Dashboard() {
 
         {/* 当前测试者 + 缺检提醒 */}
         {roster.length > 0 && (
-          <div className="mb-4 w-full max-w-[560px] rounded-xl px-5 py-3"
+          <div className="mb-5 w-full max-w-[680px] rounded-2xl px-7 py-5"
             style={{ background: '#EFF6FF', border: '1px solid #0066CC33' }}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0">
                 {patientInfo ? (
                   <>
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
+                    <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-xl font-bold shrink-0"
                       style={{ background: 'var(--zeiss-blue)' }}>
                       {(patientInfo.name || '?')[0]}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>当前：{patientInfo.name}</div>
-                      <div className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>
+                      <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>当前：{patientInfo.name}</div>
+                      <div className="text-xs mt-1 truncate" style={{ color: 'var(--text-tertiary)' }}>
                         {[patientInfo.id && `编号 ${patientInfo.id}`, patientInfo.region].filter(Boolean).join(' · ') || '—'}
-                        <span className="ml-2" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                        <span className="ml-2 font-medium" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
                           · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
                         </span>
                       </div>
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="text-base" style={{ color: 'var(--text-secondary)' }}>
                     未选择评估对象
-                    <span className="ml-2 text-xs" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                    <span className="ml-2 text-sm" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
                       · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
                     </span>
                   </div>
                 )}
               </div>
-              <button onClick={() => setShowRosterPanel(true)}
-                className="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold"
-                style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
-                查看名单
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {patientInfo && (
+                  <button onClick={() => goAdjacentPatient(1)}
+                    className="text-sm px-4 py-2 rounded-lg font-semibold"
+                    style={{ color: 'white', background: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>
+                    下一位 ›
+                  </button>
+                )}
+                <button onClick={() => setShowRosterPanel(true)}
+                  className="text-sm px-4 py-2 rounded-lg font-semibold"
+                  style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
+                  查看名单
+                </button>
+              </div>
             </div>
           </div>
         )}
