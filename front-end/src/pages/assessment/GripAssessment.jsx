@@ -10,6 +10,7 @@ import { gloveService } from '../../lib/GloveSerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import SerialLogPanel from '../../components/debug/SerialLogPanel';
 import { generateGripReportData } from '../../lib/gripReportGenerator';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
 
 /* ─── 步骤指示器 (蔡司风格) ─── */
 function StepIndicator({ current, steps }) {
@@ -731,9 +732,13 @@ export default function GripAssessment() {
       setShowGripInstruction(true);
       setTimer(0);
     } else {
-      setPhase('processing');
-      // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
-      const generateReport = async () => {
+      // 右手采集结束：立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+      setShowCompleteDialog(true);
+      const gripAssessmentId = [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(',');
+
+      (async () => {
+        let report = null;
+        // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
         try {
           if (isBackendMode) {
             // 后端模式：等待数据存储完成后调用后端报告接口
@@ -743,40 +748,38 @@ export default function GripAssessment() {
               collectName: patientInfo?.name || 'test',
               leftAssessmentId: leftAssessmentIdRef.current,
               rightAssessmentId: rightAssessmentIdRef.current,
+              assessmentId: gripAssessmentId,
             });
             if (resp?.code === 0 && resp?.data?.render_data) {
               console.log('[GripAssessment] 后端报告数据已获取:', resp.data);
-              setGripReportData(resp.data.render_data);
-              setShowCompleteDialog(true);
-              return;
+              report = resp.data.render_data;
+            } else {
+              console.warn('[GripAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
             }
-            console.warn('[GripAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
           }
         } catch (e) {
           console.warn('[GripAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
         }
         // 前端算法 fallback
-        try {
-          const report = generateGripReportData(
-            leftFullDataRef.current, rightFullDataRef.current,
-            leftRawFramesRef.current, rightRawFramesRef.current,
-            patientInfo?.name || ''
-          );
-          console.log('[GripAssessment] 前端报告数据已生成:', report);
-          setGripReportData(report);
-        } catch (e) {
-          console.error('[GripAssessment] 报告生成失败:', e);
+        if (!report) {
+          try {
+            report = generateGripReportData(
+              leftFullDataRef.current, rightFullDataRef.current,
+              leftRawFramesRef.current, rightRawFramesRef.current,
+              patientInfo?.name || ''
+            );
+            console.log('[GripAssessment] 前端报告数据已生成:', report);
+          } catch (e) {
+            console.error('[GripAssessment] 报告生成失败:', e);
+          }
         }
-        setShowCompleteDialog(true);
-      };
-      generateReport();
+        // 报告成功才写入历史，避免重复/空报告
+        if (report) {
+          setGripReportData(report);
+          completeAssessment('grip', { completed: true, reportData: report }, { leftData, rightData }, gripAssessmentId);
+        }
+      })();
     }
-  };
-
-  const viewReport = () => {
-    setShowCompleteDialog(false);
-    setPhase('report');
-    completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(','));
   };
 
   const handleClose = async () => {
@@ -1003,23 +1006,28 @@ export default function GripAssessment() {
       )}
 
       {/* 报告完成弹窗 */}
-      {showCompleteDialog && (
+      {showCompleteDialog && (() => {
+        const next = getNextAssessmentType(assessments, 'grip');
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-scaleIn">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[360px] animate-scaleIn">
             <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" style={{ color: 'var(--success)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
             </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>✓ 握力评估已完成</h3>
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>报告已在后台生成，可在历史记录查看</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeAssessment('grip', { completed: true, reportData: gripReportData }, { leftData, rightData }, [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(',')); navigate('/dashboard'); }}
-                className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport}
-                className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
+              {next ? (
+                <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
+              ) : (
+                <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Main: 左侧面板 + 右侧3D */}
       <main className="flex-1 flex min-h-0 relative z-10">

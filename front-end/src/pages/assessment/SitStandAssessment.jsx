@@ -6,6 +6,7 @@ import EChart from '../../components/ui/EChart';
 import SitStandReport from '../../components/report/SitStandReport';
 import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
 import { backendBridge } from '../../lib/BackendBridge';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
@@ -293,20 +294,16 @@ export default function SitStandAssessment() {
     isRecordingRef.current = false;
     clearInterval(timerRef.current);
     stopSimulation(); // 停止模拟数据更新
-    setPhase('processing');
+    // 立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+    setShowComplete(true);
 
-    // 后端模式：结束数据采集
-    if (isBackendMode) {
-      try {
-        await backendBridge.endCol();
-        console.log('[SitStand] endCol 成功');
-      } catch (e) {
-        console.warn('[SitStand] endCol 失败:', e.message);
+    (async () => {
+      // 结束后端采集
+      if (isBackendMode) {
+        try { await backendBridge.endCol(); } catch (e) { console.warn('[SitStand] endCol 失败:', e.message); }
       }
-    }
-
-    // 生成报告数据：优先调用后端Python算法接口，失败时回退到前端算法
-    const generateReport = async () => {
+      // 生成报告：优先后端算法，失败回退前端
+      let report = null;
       try {
         if (isBackendMode) {
           await new Promise(r => setTimeout(r, 500));
@@ -315,42 +312,31 @@ export default function SitStandAssessment() {
             assessmentId: assessmentIdRef.current,
             collectName: patientInfo?.name || 'test',
           });
-          if (resp?.code === 0 && resp?.data?.render_data) {
-            console.log('[SitStand] 后端报告数据已获取:', resp.data);
-            setSitstandReportData(resp.data.render_data);
-            setShowComplete(true);
-            return;
-          }
-          console.warn('[SitStand] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
+          if (resp?.code === 0 && resp?.data?.render_data) report = resp.data.render_data;
+          else console.warn('[SitStand] 后端报告异常，回退前端:', resp?.msg);
         }
       } catch (e) {
-        console.warn('[SitStand] 后端报告接口调用失败，回退到前端算法:', e.message);
+        console.warn('[SitStand] 后端报告失败，回退前端:', e.message);
       }
-      // 前端算法 fallback
-      try {
-        const report = generateSitStandReportData(
-          seatPressureFullRef.current,
-          footpadPressureFullRef.current,
-          seatStats,
-          footpadStats,
-          seatCoP,
-          footpadCoP,
-          timer,
-          {
-            seatTimestamps: seatTimeFullRef.current,
-            footpadTimestamps: footpadTimeFullRef.current,
-            displayIntervalSec: 0.3,
-            maxDisplayPoints: 48,
-          }
-        );
-        console.log('[SitStand] 前端报告数据已生成:', report);
+      if (!report) {
+        try {
+          report = generateSitStandReportData(
+            seatPressureFullRef.current, footpadPressureFullRef.current,
+            seatStats, footpadStats, seatCoP, footpadCoP, timer,
+            { seatTimestamps: seatTimeFullRef.current, footpadTimestamps: footpadTimeFullRef.current, displayIntervalSec: 0.3, maxDisplayPoints: 48 }
+          );
+        } catch (e) { console.error('[SitStand] 报告生成失败:', e); }
+      }
+      if (report) {
         setSitstandReportData(report);
-      } catch (e) {
-        console.error('[SitStand] 报告生成失败:', e);
+        completeAssessment('sitstand', { completed: true, reportData: report }, {
+          seatPressureHistory: seatPressureFullRef.current,
+          footpadPressureHistory: footpadPressureFullRef.current,
+          seatTimestamps: seatTimeFullRef.current,
+          footpadTimestamps: footpadTimeFullRef.current,
+        }, assessmentIdRef.current);
       }
-      setShowComplete(true);
-    };
-    generateReport();
+    })();
   };
 
   const viewReport = () => {
@@ -488,27 +474,28 @@ export default function SitStandAssessment() {
       )}
 
       {/* ── 完成弹窗 ── */}
-      {showComplete && (
+      {showComplete && (() => {
+        const next = getNextAssessmentType(assessments, 'sitstand');
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[360px] animate-slideUp">
             <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
             </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>采集完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>您可以查看报告或返回首页继续其他评估</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>✓ 起坐能力评估已完成</h3>
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>报告已在后台生成，可在历史记录查看</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('sitstand', { completed: true, reportData: sitstandReportData }, {
-                seatPressureHistory: seatPressureFullRef.current,
-                footpadPressureHistory: footpadPressureFullRef.current,
-                seatTimestamps: seatTimeFullRef.current,
-                footpadTimestamps: footpadTimeFullRef.current,
-              }, assessmentIdRef.current); navigate('/dashboard'); }}
-                className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
+              {next ? (
+                <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
+              ) : (
+                <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── 主内容区：左侧面板 + 右侧3D场景 ── */}
       <main className="flex-1 flex min-h-0">

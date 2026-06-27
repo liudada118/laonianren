@@ -13,6 +13,7 @@ import {
   getValidCoords, divideXRegions, calculateRegionPressure, processFrameRealtime,
   generateFootReport, parseFrameData
 } from '../../lib/FootAnalysis';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
 
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
 
@@ -837,11 +838,6 @@ export default function StandingAssessment() {
     setCsvExporting(false);
   };
 
-  const completeStandingAssessment = (finalReportData = reportData) => {
-    if (!finalReportData) return;
-    completeAssessment('standing', { completed: true, reportData: finalReportData }, null, assessmentIdRef.current);
-  };
-
   const advanceAfterStageResult = async (completed) => {
     const nextResults = [...stageResults];
     nextResults[currentStageIndex] = completed;
@@ -850,14 +846,20 @@ export default function StandingAssessment() {
     setShowStageResultDialog(false);
 
     if (shouldStop) {
-      setProcessingText('四阶段已完成，正在生成静态站立报告...');
-      setPhase('processing');
-      const finalBase = await generateBaseStandingReport() || baseStandingReportData || makeMinimalStandingReport(nextResults);
-      const finalReport = attachStandingStageScore(finalBase, nextResults);
-      setReportData(finalReport);
+      // 四阶段结束：立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
       setCurrentStageIndex(STANDING_BALANCE_STAGES.length);
       setPhase('idle');
       setShowCompleteDialog(true);
+
+      (async () => {
+        // 报告生成：优先后端算法（第1阶段双脚站立数据），失败回退前端
+        const finalBase = await generateBaseStandingReport() || baseStandingReportData || makeMinimalStandingReport(nextResults);
+        const finalReport = attachStandingStageScore(finalBase, nextResults);
+        if (finalReport) {
+          setReportData(finalReport);
+          completeAssessment('standing', { completed: true, reportData: finalReport }, null, assessmentIdRef.current);
+        }
+      })();
       return;
     }
 
@@ -896,12 +898,6 @@ export default function StandingAssessment() {
     advanceAfterStageResult(false);
   };
 
-  const viewReport = () => {
-    if (!reportData) return;
-    setShowCompleteDialog(false);
-    setPhase('report');
-    completeStandingAssessment(reportData);
-  };
   const handleClose = () => navigate('/dashboard');
   const fmtTime = (t) => { const s = Math.floor(t / 10); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
   // 组件卸载时清理定时器
@@ -1060,23 +1056,28 @@ export default function StandingAssessment() {
       )}
 
       {/* 完成弹窗 */}
-      {showCompleteDialog && (
+      {showCompleteDialog && (() => {
+        const next = getNextAssessmentType(assessments, 'standing');
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[360px] animate-slideUp">
             <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
             </div>
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>四阶段评估完成，报告已生成</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>四阶段平衡等级：{getFourStageLevel(stageResults)}/4</p>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>✓ 静态站立评估已完成</h3>
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>报告已在后台生成，可在历史记录查看</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowCompleteDialog(false); completeStandingAssessment(reportData); navigate('/dashboard'); }}
-                className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              <button onClick={viewReport}
-                className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
+              {next ? (
+                <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
+              ) : (
+                <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <main className="flex-1 flex min-h-0 overflow-hidden">
         {/* 左侧数据面板 */}

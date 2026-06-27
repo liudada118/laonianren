@@ -13,6 +13,7 @@ import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
 import ReportSummaryCard, { BasisNote } from '../../components/report/ReportSummaryCard';
 import { scoreGait } from '../../lib/assessmentScoring';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -969,37 +970,28 @@ export default function GaitAssessment() {
   /* ─── 停止采集 ─── */
   const stop = async () => {
     clearInterval(timerRef.current);
-    setPhase('processing');
-    setAnalyzing(true);
-    setAnalysisError('');
+    // 立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+    setShowComplete(true);
 
-    try {
-      await backendBridge.endCol();
-      await new Promise(r => setTimeout(r, 500));
-      const resp = await backendBridge.getGaitReport({
-        timestamp: new Date().toISOString(),
-        assessmentId: assessmentIdRef.current,
-        collectName: 'gait_assessment',
-        body_weight_kg: patientInfo?.weight || 60,
-      });
-      if (resp?.data?.render_data) {
-        setPythonResult(resp.data.render_data);
-        completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data }, assessmentIdRef.current);
-      } else {
-        throw new Error('后端未返回报告数据');
+    (async () => {
+      try {
+        await backendBridge.endCol();
+        const resp = await backendBridge.getGaitReport({
+          timestamp: new Date().toISOString(),
+          assessmentId: assessmentIdRef.current,
+          collectName: 'gait_assessment',
+          body_weight_kg: patientInfo?.weight || 60,
+        });
+        if (resp?.data?.render_data) {
+          setPythonResult(resp.data.render_data);
+          completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data }, assessmentIdRef.current);
+        } else {
+          console.warn('[Gait] 后端未返回报告数据');
+        }
+      } catch (e) {
+        console.error('报告生成失败:', e);
       }
-    } catch (e) {
-      console.error('报告生成失败:', e);
-      setAnalysisError(e.message || '报告生成失败');
-    } finally {
-      setAnalyzing(false);
-      setShowComplete(true);
-    }
-  };
-
-  const viewReport = () => {
-    setShowComplete(false); setPhase('report');
-    completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current);
+    })();
   };
 
   // 清理
@@ -1090,30 +1082,28 @@ export default function GaitAssessment() {
         </div>
       )}
 
-      {showComplete && (
+      {showComplete && (() => {
+        const next = getNextAssessmentType(assessments, 'gait');
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[340px] animate-slideUp">
-            {pythonResult ? (
-              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
-                <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              </div>
-            ) : (
-              <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#FEF3C7' }}>
-                <svg className="w-7 h-7" fill="none" stroke="#D97706" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              </div>
-            )}
-            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{pythonResult ? '采集完成，报告已生成' : analysisError ? '采集完成，分析失败' : '采集完成'}</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{pythonResult ? '您可以查看报告或返回首页继续其他评估' : analysisError || '可返回首页继续其他评估'}</p>
+          <div className="zeiss-dialog p-8 flex flex-col items-center gap-4 min-w-[360px] animate-slideUp">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: 'var(--success-light)' }}>
+              <svg className="w-7 h-7" fill="none" stroke="var(--success)" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            </div>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>✓ 行走步态评估已完成</h3>
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>报告已在后台生成，可在历史记录查看</p>
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={() => { setShowComplete(false); completeAssessment('gait', { completed: true, reportData: pythonResult }, { pythonResult }, assessmentIdRef.current); navigate('/dashboard'); }}
-                className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
-              {pythonResult && (
-                <button onClick={viewReport} className="zeiss-btn-primary flex-1 py-3 text-sm">查看报告</button>
+              <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
+              {next ? (
+                <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
+              ) : (
+                <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
               )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <main className="flex-1 flex min-h-0 overflow-hidden">
         {/* 左侧数据面板 */}
