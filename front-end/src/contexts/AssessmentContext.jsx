@@ -271,10 +271,18 @@ export function AssessmentProvider({ children }) {
   }, []);
 
   // ─── 名单导入与依次筛查（街道快速采集）───
+  // 追加合并导入：保留已有名单，按编号(无编号则姓名+地区)去重，新导入覆盖同一人
   const importRoster = useCallback((list) => {
-    rosterService.saveRoster(list || []);
-    rosterService.setCurrentId(null);
-    setState(prev => ({ ...prev, roster: list || [], rosterCurrentId: null }));
+    setState(prev => {
+      const keyOf = (p) => (p.id ? `id:${p.id}` : `nm:${p.name || ''}|${p.region || ''}`);
+      const byKey = new Map((prev.roster || []).map(p => [keyOf(p), p]));
+      for (const p of (list || [])) {
+        byKey.set(keyOf(p), { ...byKey.get(keyOf(p)), ...p });
+      }
+      const merged = Array.from(byKey.values());
+      rosterService.saveRoster(merged);
+      return { ...prev, roster: merged };
+    });
   }, []);
 
   const clearRoster = useCallback(() => {

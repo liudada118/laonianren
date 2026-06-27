@@ -176,7 +176,7 @@ function RosterImportDialog({ open, hasExisting, onClose, onImported }) {
       <div className="zeiss-dialog p-8 w-[560px] max-w-[92vw] animate-scaleIn">
         <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>导入评估名单</h3>
         <p className="text-sm mb-5" style={{ color: 'var(--text-tertiary)' }}>
-          选择 Excel 文件（.xlsx），自动识别 编号 / 姓名 / 地点 等列{hasExisting ? '；导入将替换当前名单' : ''}
+          选择 Excel 文件（.xlsx），自动识别 编号 / 姓名 / 地点 等列{hasExisting ? '；将追加到现有名单（同编号自动去重，不会覆盖之前导入的）' : ''}
         </p>
 
         <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" id="roster-file-input" />
@@ -228,6 +228,7 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
   const [keyword, setKeyword] = useState('');
   const [sortBy, setSortBy] = useState('id');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [regionFilter, setRegionFilter] = useState('all');
   const statusMap = useMemo(() => deriveStatusMap(roster, getHistory()), [roster, open]);
 
   if (!open) return null;
@@ -240,9 +241,11 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
   const partialCount = roster.filter(p => catOf(p) === 'partial').length;
   const notStartedCount = roster.filter(p => catOf(p) === 'notStarted').length;
 
+  const regions = [...new Set(roster.map(p => p.region).filter(Boolean))];
   const filtered = roster.filter(p => {
     if (keyword && !((p.name || '').includes(keyword) || String(p.id || '').includes(keyword))) return false;
     if (statusFilter !== 'all' && catOf(p) !== statusFilter) return false;
+    if (regionFilter !== 'all' && p.region !== regionFilter) return false;
     return true;
   });
   const items = [...filtered].sort((a, b) => {
@@ -265,8 +268,19 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
             <span style={{ color: 'var(--text-muted)' }}>未开始 {notStartedCount}</span>
           </div>
           <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="按姓名 / 编号搜索" className="zeiss-input mb-2" />
+          {regions.length > 1 && (
+            <div className="flex items-center gap-1.5 text-xs mb-2 flex-wrap">
+              <span style={{ color: 'var(--text-tertiary)' }}>地区：</span>
+              <button onClick={() => setRegionFilter('all')} className="px-2 py-1 rounded transition-all"
+                style={{ background: regionFilter === 'all' ? '#E8F2FF' : 'transparent', color: regionFilter === 'all' ? '#0066CC' : 'var(--text-tertiary)' }}>全部</button>
+              {regions.map(r => (
+                <button key={r} onClick={() => setRegionFilter(r)} className="px-2 py-1 rounded transition-all"
+                  style={{ background: regionFilter === r ? '#E8F2FF' : 'transparent', color: regionFilter === r ? '#0066CC' : 'var(--text-tertiary)' }}>{r}</button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-1.5 text-xs mb-2 flex-wrap">
-            <span style={{ color: 'var(--text-tertiary)' }}>筛选：</span>
+            <span style={{ color: 'var(--text-tertiary)' }}>状态：</span>
             {[['all', '全部'], ['notStarted', '未开始'], ['partial', '部分未完成'], ['done', '已完成']].map(([k, label]) => (
               <button key={k} onClick={() => setStatusFilter(k)} className="px-2 py-1 rounded transition-all"
                 style={{ background: statusFilter === k ? '#E8F2FF' : 'transparent', color: statusFilter === k ? '#0066CC' : 'var(--text-tertiary)' }}>
