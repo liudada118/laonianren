@@ -374,8 +374,11 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear, onAddP
         </div>
 
         <div className="px-5 py-3 border-t shrink-0 flex justify-between items-center" style={{ borderColor: 'var(--border-light)' }}>
-          <button onClick={onAddPatient} className="text-xs font-semibold px-3 py-1.5 rounded-lg"
-            style={{ color: 'var(--zeiss-blue)', background: '#E8F2FF', border: '1px solid #0066CC33' }}>+ 临时加入新用户</button>
+          <button onClick={onAddPatient} className="text-sm font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 transition-all"
+            style={{ color: 'white', background: 'var(--zeiss-blue)', border: 'none', boxShadow: '0 2px 8px rgba(0,102,204,0.25)' }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+            加入用户
+          </button>
           <button onClick={onClear} className="text-xs font-medium" style={{ color: '#DC2626' }}>清空名单</button>
         </div>
       </div>
