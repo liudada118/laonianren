@@ -241,6 +241,16 @@ export function AssessmentProvider({ children }) {
         } catch (e) {
           console.error('自动保存历史记录失败:', e);
         }
+        // 双写：同时存入后端 SQLite 数据库（失败不影响本地保存）
+        try {
+          backendBridge.saveHistory({
+            patientInfo: prev.patientInfo,
+            institution: prev.institution,
+            assessments: assessmentsForSave,
+          }).catch(e => console.warn('后端历史保存失败:', e?.message || e));
+        } catch (e) {
+          console.warn('后端历史保存异常:', e);
+        }
       }
 
       return { ...prev, assessments };

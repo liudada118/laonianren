@@ -3060,7 +3060,9 @@ function ensureHistoryTable(db) {
   db.run(`
     CREATE TABLE IF NOT EXISTS assessment_history (
       id TEXT PRIMARY KEY,
+      patient_id TEXT,
       patient_name TEXT,
+      patient_region TEXT,
       patient_gender TEXT,
       patient_age INTEGER,
       patient_weight REAL,
@@ -3077,8 +3079,19 @@ function ensureHistoryTable(db) {
   })
 }
 
+// 兼容旧库：补充缺失的 编号/地区 列
+function ensureHistoryColumns(db) {
+  db.all("PRAGMA table_info(assessment_history)", (err, rows) => {
+    if (err || !Array.isArray(rows)) return
+    const cols = rows.map(r => r.name)
+    if (!cols.includes('patient_id')) db.run('ALTER TABLE assessment_history ADD COLUMN patient_id TEXT')
+    if (!cols.includes('patient_region')) db.run('ALTER TABLE assessment_history ADD COLUMN patient_region TEXT')
+  })
+}
+
 // 初始化历史记录表
 ensureHistoryTable(currentDb)
+ensureHistoryColumns(currentDb)
 
 /**
  * POST /api/history/save
@@ -3094,11 +3107,14 @@ app.post('/api/history/save', (req, res) => {
 
     const now = new Date()
     const dateStr = formatDateStr(now)
+    // 优先按编号(ID)去重，无编号时回退用姓名
+    const pid = (patientInfo.id != null && String(patientInfo.id).trim()) ? String(patientInfo.id).trim() : patientInfo.name
+    const region = patientInfo.region || ''
 
-    // 查找今天同一患者的记录
+    // 查找今天同一患者(按编号)的记录
     currentDb.get(
-      'SELECT * FROM assessment_history WHERE patient_name = ? AND date_str = ?',
-      [patientInfo.name, dateStr],
+      'SELECT * FROM assessment_history WHERE patient_id = ? AND date_str = ?',
+      [pid, dateStr],
       (err, existingRow) => {
         if (err) {
           console.error('[History] 查询失败:', err)
@@ -3121,8 +3137,8 @@ app.post('/api/history/save', (req, res) => {
           }
 
           currentDb.run(
-            'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ? WHERE id = ?',
-            [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, existingRow.id],
+            'UPDATE assessment_history SET assessments = ?, updated_at = ?, patient_age = ?, patient_weight = ?, patient_gender = ?, patient_region = ? WHERE id = ?',
+            [JSON.stringify(existingAssessments), now.toISOString(), patientInfo.age, patientInfo.weight, patientInfo.gender, region, existingRow.id],
             function (err2) {
               if (err2) {
                 console.error('[History] 更新失败:', err2)
@@ -3144,9 +3160,9 @@ app.post('/api/history/save', (req, res) => {
           }
 
           currentDb.run(
-            `INSERT INTO assessment_history (id, patient_name, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, patientInfo.name, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
+            `INSERT INTO assessment_history (id, patient_id, patient_name, patient_region, patient_gender, patient_age, patient_weight, institution, assessments, date, date_str, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, pid, patientInfo.name, region, patientInfo.gender, patientInfo.age, patientInfo.weight, institution || '', JSON.stringify(assessmentData), now.toISOString(), dateStr, now.toISOString()],
             function (err2) {
               if (err2) {
                 console.error('[History] 插入失败:', err2)
@@ -3178,10 +3194,10 @@ app.post('/api/history/list', (req, res) => {
     const params = []
 
     if (keyword) {
-      const likeClause = ' AND (patient_name LIKE ? OR institution LIKE ?)'
+      const likeClause = ' AND (patient_name LIKE ? OR institution LIKE ? OR patient_id LIKE ? OR patient_region LIKE ?)'
       countSql += likeClause
       dataSql += likeClause
-      params.push(`%${keyword}%`, `%${keyword}%`)
+      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`)
     }
 
     if (date) {
@@ -3215,7 +3231,9 @@ app.post('/api/history/list', (req, res) => {
 
         const items = (rows || []).map(row => ({
           id: row.id,
+          patientId: row.patient_id,
           patientName: row.patient_name,
+          patientRegion: row.patient_region,
           patientGender: row.patient_gender,
           patientAge: row.patient_age,
           patientWeight: row.patient_weight,
