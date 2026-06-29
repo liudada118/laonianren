@@ -27,33 +27,6 @@ const STANDING_BALANCE_STAGES = [
     instruction: '双脚自然站在传感器中心，双足完整踩在有效区域内，目视前方，保持身体稳定。',
     posture: 'parallel',
   },
-  {
-    level: 2,
-    title: '半串联站立',
-    requirement: '半串联站立 10 秒',
-    durationSec: 10,
-    result: '有一定平衡控制能力',
-    instruction: '一只脚略微向前，前脚脚跟靠近后脚大脚趾内侧，双脚错开成半串联姿势。',
-    posture: 'semi',
-  },
-  {
-    level: 3,
-    title: '串联站立',
-    requirement: '脚跟脚尖一条线站立 10 秒',
-    durationSec: 10,
-    result: '达到较关键的平衡筛查要求',
-    instruction: '一只脚脚跟紧贴另一只脚脚尖，双脚前后成一条直线，目视前方保持稳定。',
-    posture: 'tandem',
-  },
-  {
-    level: 4,
-    title: '单脚站立',
-    requirement: '单脚站立 10 秒',
-    durationSec: 10,
-    result: '平衡能力较好',
-    instruction: '任选一侧单脚站立，另一只脚离开地面，可在旁边安排保护人员防止跌倒。',
-    posture: 'single',
-  },
 ];
 
 function StandingStageIndicator({ currentIndex, results }) {
@@ -172,7 +145,10 @@ function stageResultsFromReport(reportData) {
 }
 
 function attachStandingStageScore(reportData, results) {
-  const level = getFourStageLevel(results);
+  // 单阶段（仅双脚站立）：站稳即视为平衡基础达标，按满级计；多阶段按站到第几级
+  const level = STANDING_BALANCE_STAGES.length <= 1
+    ? (results[0] === true ? 4 : 0)
+    : getFourStageLevel(results);
   const base = reportData && typeof reportData === 'object' ? reportData : {};
   return {
     ...base,
@@ -923,7 +899,7 @@ export default function StandingAssessment() {
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
           <span className="text-sm font-semibold hidden md:inline" style={{ color: 'var(--text-primary)' }}>{patientInfo?.name || '---'}</span>
-          <StandingStageIndicator currentIndex={STANDING_BALANCE_STAGES.length} results={stageResults.length ? stageResults : [true, true, true, true]} />
+          <StandingStageIndicator currentIndex={STANDING_BALANCE_STAGES.length} results={stageResults.length ? stageResults : [true]} />
           <button onClick={handleExportCsv} disabled={csvExporting}
               className="zeiss-btn-ghost text-xs flex items-center gap-1"
               style={csvExporting ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>

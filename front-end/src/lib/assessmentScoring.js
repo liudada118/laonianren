@@ -776,7 +776,7 @@ function archType(ai) {
 // 核心：四阶段平衡等级（10 分）
 function standingStageScore(fourStageLevel, hasFourStageLevel) {
   if (!hasFourStageLevel) return { score: 5, desc: '四阶段平衡结果待录入，按中等档保守处理' };
-  if (fourStageLevel >= 4) return { score: 10, desc: '最高等级稳定完成' };
+  if (fourStageLevel >= 4) return { score: 10, desc: '站立平衡稳定完成' };
   if (fourStageLevel >= 3) return { score: 8, desc: '较高等级，轻微不稳' };
   if (fourStageLevel >= 2) return { score: 5, desc: '中等等级' };
   if (fourStageLevel >= 1) return { score: 2, desc: '低等级' };
@@ -907,8 +907,8 @@ export function scoreStanding(reportData) {
   const score = Math.round(core + enhanced);
 
   const breakdown = [
-    { label: '四阶段平衡等级（核心）', group: 'core', score: stage.score, max: 10, desc: stage.desc,
-      help: '双脚并立→半足距→全足距→单脚 四阶段平衡测试达到的等级。最高等级稳定=10分，较高轻微不稳=8，中等=5，低=2，无法安全完成=0。缺失按中等档保守计 5 分。' },
+    { label: '站立平衡（核心）', group: 'core', score: stage.score, max: 10, desc: stage.desc,
+      help: '站立平衡能力。单阶段（双脚站立）模式下站稳=10分、无法稳定完成=0分；多阶段模式按双脚并立→半足距→全足距→单脚达到的等级计分（最高=10/较高=8/中等=5/低=2/无法=0）。缺失按中等档保守计 5 分。' },
     { label: 'COP 稳态水平（核心）', group: 'core', score: copSteady.score, max: 5, desc: copSteady.desc,
       help: '站立时足底压力中心(COP)的轨迹长度，反映重心摆动多少。≤1000mm=5分（稳），1001–1500mm=3分，>1500mm=1分，缺失=0。' },
     { label: '左右负荷偏移（核心）', group: 'core', score: load.score, max: 3, desc: load.desc,
