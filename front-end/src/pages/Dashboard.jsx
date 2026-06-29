@@ -228,6 +228,8 @@ function RosterImportDialog({ open, hasExisting, onClose, onImported }) {
 function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
   const [id, setId] = useState('');
   const [name, setName] = useState('');
+  const [gender, setGender] = useState('');
+  const [age, setAge] = useState('');
   const [region, setRegion] = useState('');
   const [otherRegion, setOtherRegion] = useState('');
   const [error, setError] = useState('');
@@ -235,7 +237,7 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
 
   useEffect(() => {
     if (open) {
-      setId(''); setName('');
+      setId(''); setName(''); setGender(''); setAge('');
       setRegion(defaultRegion || (regions.length ? regions[0] : '__other__'));
       setOtherRegion(''); setError('');
     }
@@ -251,7 +253,7 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
     if (!tid) { setError('请填写编号(ID)'); return; }
     if (!tname) { setError('请填写姓名'); return; }
     if (roster.some(p => String(p.id) === tid)) { setError(`编号 ${tid} 已存在，请使用唯一编号`); return; }
-    onConfirm({ id: tid, name: tname, region: finalRegion, gender: '', age: '', weight: '' });
+    onConfirm({ id: tid, name: tname, region: finalRegion, gender, age: age === '' ? '' : (Number(age) || ''), weight: '' });
   };
 
   return (
@@ -267,6 +269,20 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
           <div>
             <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>姓名 *</label>
             <input value={name} onChange={e => { setName(e.target.value); setError(''); }} placeholder="请输入姓名" className="zeiss-input" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>性别</label>
+              <select value={gender} onChange={e => setGender(e.target.value)} className="zeiss-select">
+                <option value="">未填</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>年龄</label>
+              <input type="number" min="0" max="120" value={age} onChange={e => setAge(e.target.value)} placeholder="可留空" className="zeiss-input" />
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>地区</label>
@@ -579,7 +595,7 @@ export default function Dashboard() {
     importRoster([newPatient]); // 追加到名单（编号唯一已在弹窗校验）
     setShowAddPatient(false);
     setShowRosterPanel(false);
-    setSwitchTarget(newPatient); // 加入后直接切到该用户，弹切换窗补性别/年龄
+    switchToPatient(newPatient); // 信息已在弹窗填全，直接设为当前对象（不再弹切换窗）
   };
 
   const handleSwitchConfirm = ({ gender, age }) => {
