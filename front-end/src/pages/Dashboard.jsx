@@ -224,7 +224,58 @@ function RosterImportDialog({ open, hasExisting, onClose, onImported }) {
 }
 
 /* ─── 名单管理面板 ─── */
-function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
+/* ─── 临时加入新用户弹窗 ─── */
+function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
+  const [id, setId] = useState('');
+  const [name, setName] = useState('');
+  const [region, setRegion] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) { setId(''); setName(''); setRegion(defaultRegion || ''); setError(''); }
+  }, [open, defaultRegion]);
+
+  if (!open) return null;
+
+  const submit = () => {
+    const tid = id.trim();
+    const tname = name.trim();
+    if (!tid) { setError('请填写编号(ID)'); return; }
+    if (!tname) { setError('请填写姓名'); return; }
+    if (roster.some(p => String(p.id) === tid)) { setError(`编号 ${tid} 已存在，请使用唯一编号`); return; }
+    onConfirm({ id: tid, name: tname, region: region.trim(), gender: '', age: '', weight: '' });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+      <div className="zeiss-dialog p-8 w-[440px] max-w-[90vw] animate-scaleIn">
+        <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>临时加入新用户</h3>
+        <p className="text-sm mb-5" style={{ color: 'var(--text-tertiary)' }}>现场临时人员，编号必须唯一</p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>编号 (ID) *</label>
+            <input value={id} onChange={e => { setId(e.target.value); setError(''); }} placeholder="请输入唯一编号" className="zeiss-input" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>姓名 *</label>
+            <input value={name} onChange={e => { setName(e.target.value); setError(''); }} placeholder="请输入姓名" className="zeiss-input" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>地区</label>
+            <input value={region} onChange={e => setRegion(e.target.value)} placeholder="默认当前名单地区，可修改" className="zeiss-input" />
+          </div>
+        </div>
+        {error && <p className="text-sm mt-3" style={{ color: '#DC2626' }}>{error}</p>}
+        <div className="grid grid-cols-2 gap-3 mt-7">
+          <button onClick={onClose} className="zeiss-btn-secondary py-3">取消</button>
+          <button onClick={submit} className="py-3 rounded-[10px] font-semibold text-sm text-white border-none cursor-pointer transition-all" style={{ background: 'var(--zeiss-blue)' }}>加入并开始</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RosterPanel({ open, roster, currentId, onClose, onPick, onClear, onAddPatient }) {
   const [keyword, setKeyword] = useState('');
   const [sortBy, setSortBy] = useState('id');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -322,7 +373,9 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear }) {
           {!items.length && <div className="px-5 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>无匹配对象</div>}
         </div>
 
-        <div className="px-5 py-3 border-t shrink-0 flex justify-end" style={{ borderColor: 'var(--border-light)' }}>
+        <div className="px-5 py-3 border-t shrink-0 flex justify-between items-center" style={{ borderColor: 'var(--border-light)' }}>
+          <button onClick={onAddPatient} className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+            style={{ color: 'var(--zeiss-blue)', background: '#E8F2FF', border: '1px solid #0066CC33' }}>+ 临时加入新用户</button>
           <button onClick={onClear} className="text-xs font-medium" style={{ color: '#DC2626' }}>清空名单</button>
         </div>
       </div>
@@ -454,6 +507,7 @@ export default function Dashboard() {
   // 名单相关
   const [showImport, setShowImport] = useState(false);
   const [showRosterPanel, setShowRosterPanel] = useState(false);
+  const [showAddPatient, setShowAddPatient] = useState(false);
   const [switchTarget, setSwitchTarget] = useState(null);
   const [showNextConfirm, setShowNextConfirm] = useState(null);
   const nextPromptedRef = useRef(null);
@@ -502,6 +556,13 @@ export default function Dashboard() {
   const handlePickPatient = (p) => {
     setShowRosterPanel(false);
     setSwitchTarget(p);
+  };
+
+  const handleAddPatient = (newPatient) => {
+    importRoster([newPatient]); // 追加到名单（编号唯一已在弹窗校验）
+    setShowAddPatient(false);
+    setShowRosterPanel(false);
+    setSwitchTarget(newPatient); // 加入后直接切到该用户，弹切换窗补性别/年龄
   };
 
   const handleSwitchConfirm = ({ gender, age }) => {
@@ -804,7 +865,12 @@ export default function Dashboard() {
       {/* 名单管理面板 */}
       <RosterPanel open={showRosterPanel} roster={roster} currentId={rosterCurrentId}
         onClose={() => setShowRosterPanel(false)} onPick={handlePickPatient}
+        onAddPatient={() => setShowAddPatient(true)}
         onClear={() => { if (window.confirm('确认清空当前名单？')) { clearRoster(); setShowRosterPanel(false); } }} />
+
+      <AddPatientDialog open={showAddPatient} roster={roster}
+        defaultRegion={roster.find(p => p.region)?.region || ''}
+        onClose={() => setShowAddPatient(false)} onConfirm={handleAddPatient} />
 
       {/* 切换/补填评估对象弹窗 */}
       <PatientSwitchDialog open={!!switchTarget} patient={switchTarget}
