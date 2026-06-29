@@ -229,10 +229,17 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [region, setRegion] = useState('');
+  const [otherRegion, setOtherRegion] = useState('');
   const [error, setError] = useState('');
+  const regions = useMemo(() => [...new Set((roster || []).map(p => p.region).filter(Boolean))], [roster]);
 
   useEffect(() => {
-    if (open) { setId(''); setName(''); setRegion(defaultRegion || ''); setError(''); }
+    if (open) {
+      setId(''); setName('');
+      setRegion(defaultRegion || (regions.length ? regions[0] : '__other__'));
+      setOtherRegion(''); setError('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultRegion]);
 
   if (!open) return null;
@@ -240,10 +247,11 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
   const submit = () => {
     const tid = id.trim();
     const tname = name.trim();
+    const finalRegion = (region === '__other__' ? otherRegion : region).trim();
     if (!tid) { setError('请填写编号(ID)'); return; }
     if (!tname) { setError('请填写姓名'); return; }
     if (roster.some(p => String(p.id) === tid)) { setError(`编号 ${tid} 已存在，请使用唯一编号`); return; }
-    onConfirm({ id: tid, name: tname, region: region.trim(), gender: '', age: '', weight: '' });
+    onConfirm({ id: tid, name: tname, region: finalRegion, gender: '', age: '', weight: '' });
   };
 
   return (
@@ -262,7 +270,13 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
           </div>
           <div>
             <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-tertiary)' }}>地区</label>
-            <input value={region} onChange={e => setRegion(e.target.value)} placeholder="默认当前名单地区，可修改" className="zeiss-input" />
+            <select value={region} onChange={e => setRegion(e.target.value)} className="zeiss-select">
+              {regions.map(r => <option key={r} value={r}>{r}</option>)}
+              <option value="__other__">其它（手动输入新地区）</option>
+            </select>
+            {region === '__other__' && (
+              <input value={otherRegion} onChange={e => setOtherRegion(e.target.value)} placeholder="输入新地区名称" className="zeiss-input mt-2" />
+            )}
           </div>
         </div>
         {error && <p className="text-sm mt-3" style={{ color: '#DC2626' }}>{error}</p>}
