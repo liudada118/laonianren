@@ -1,6 +1,6 @@
 {
   "key": "1A0031000251333039343533:foot1,060030000251333039343533:foot2,3E0031000251333039343533:foot3,0E0033000251333039343533:foot4",
   "orgName": "",
-  "llmApiKey": "sk-nhTnQa7URDIyr3KsUWfcNtkhdgn0yZ0iHHLCnmtkosKisFFC",
-  "updatedAt": "2026-05-06T08:38:48.652Z"
+  "llmApiKey": "sk-85e029eb1699475e8885ab1525a8ed7a",
+  "updatedAt": "2026-06-04T03:10:46.893Z"
 }
