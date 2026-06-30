@@ -14,6 +14,7 @@ import { exportToPdf } from '../../lib/pdfExport';
 import ReportSummaryCard, { BasisNote } from '../../components/report/ReportSummaryCard';
 import { scoreGait } from '../../lib/assessmentScoring';
 import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getDeviceRegion } from '../../lib/deviceRegion';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -885,7 +886,7 @@ export default function GaitAssessment() {
   // ─── 挂载时激活步道模式，使采集前就能显示可视化 ───
   useEffect(() => {
     if (!isGlobalConnected) return;
-    backendBridge.setActiveMode(5).catch(e => console.warn('步道模式激活失败:', e));
+    backendBridge.setActiveMode(5, { deviceRegion: getDeviceRegion() }).catch(e => console.warn('步道模式激活失败:', e));
   }, [isGlobalConnected]);
 
   // ─── 后端数据监听 ───
@@ -953,12 +954,15 @@ export default function GaitAssessment() {
     stepDetectorRef.current = { padWasActive: [false, false, false, false], stepEvents: [], lastStepTime: 0 };
 
     try {
-      await backendBridge.setActiveMode(5); // 5=脚垫模式
+      const deviceRegion = getDeviceRegion();
+      await backendBridge.setActiveMode(5, { deviceRegion }); // 5=脚垫模式
       await backendBridge.startCol({
         name: patientInfo?.name || '未知',
         assessmentId: assessmentIdRef.current,
+        sampleType: '5',
         date: new Date().toISOString().split('T')[0],
         colName: 'gait_assessment',
+        deviceRegion,
       });
     } catch (e) {
       console.error('后端采集启动失败:', e);

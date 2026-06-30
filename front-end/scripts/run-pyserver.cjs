@@ -1,4 +1,5 @@
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
@@ -6,6 +7,7 @@ const frontEndRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(frontEndRoot, '..');
 const pythonRoot = path.join(repoRoot, 'back-end', 'code', 'python');
 const apiServerPath = path.join(pythonRoot, 'app', 'algorithms', 'api_server.py');
+const apiPort = Number.parseInt(process.env.PYTHON_API_PORT || '8765', 10);
 
 function isUsableCommand(command) {
   const probe = spawnSync(command, ['--version'], {
@@ -48,6 +50,22 @@ function resolvePythonCommand() {
   return null;
 }
 
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    socket.setTimeout(600);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
 if (!fs.existsSync(apiServerPath)) {
   console.error(`[pyserver] Could not find api server: ${apiServerPath}`);
   process.exit(1);
@@ -60,35 +78,49 @@ if (!pythonCommand) {
   process.exit(1);
 }
 
-console.log(`[pyserver] Using Python: ${pythonCommand}`);
-console.log(`[pyserver] Serving API from: ${apiServerPath}`);
-
-const child = spawn(pythonCommand, [apiServerPath], {
-  cwd: frontEndRoot,
-  stdio: 'inherit',
-  env: process.env,
-  windowsHide: false,
-});
-
-const forwardSignal = (signal) => {
-  if (!child.killed) {
-    child.kill(signal);
-  }
-};
-
-process.on('SIGINT', () => forwardSignal('SIGINT'));
-process.on('SIGTERM', () => forwardSignal('SIGTERM'));
-
-child.on('error', (error) => {
-  console.error(`[pyserver] Failed to start Python API: ${error.message}`);
-  process.exit(1);
-});
-
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
+async function main() {
+  if (await isPortInUse(apiPort)) {
+    console.warn(`[pyserver] Port ${apiPort} is already in use; skipped starting ${apiServerPath}.`);
+    console.warn(`[pyserver] Close the existing process or set PYTHON_API_PORT to another port before starting this server.`);
+    setInterval(() => {}, 1 << 30);
     return;
   }
 
-  process.exit(code ?? 0);
+  console.log(`[pyserver] Using Python: ${pythonCommand}`);
+  console.log(`[pyserver] Serving API from: ${apiServerPath}`);
+
+  const child = spawn(pythonCommand, [apiServerPath], {
+    cwd: frontEndRoot,
+    stdio: 'inherit',
+    env: process.env,
+    windowsHide: false,
+  });
+
+  const forwardSignal = (signal) => {
+    if (!child.killed) {
+      child.kill(signal);
+    }
+  };
+
+  process.on('SIGINT', () => forwardSignal('SIGINT'));
+  process.on('SIGTERM', () => forwardSignal('SIGTERM'));
+
+  child.on('error', (error) => {
+    console.error(`[pyserver] Failed to start Python API: ${error.message}`);
+    process.exit(1);
+  });
+
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 0);
+  });
+}
+
+main().catch((error) => {
+  console.error(`[pyserver] Failed to start Python API: ${error.message}`);
+  process.exit(1);
 });

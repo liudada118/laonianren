@@ -67,6 +67,7 @@ const csvPath = path.join(storageBase, 'data')
 const pdfPath = path.join(storageBase, 'OneStep')
 const imgPath = path.join(storageBase, 'img')
 const userConfigPath = path.join(storageBase, 'config.txt')
+const deviceRegionConfigPath = path.join(storageBase, 'device-region.json')
 const packagedResourcesDir = process.env.resourcesPath || process.resourcesPath || bundledBase
 
 function getPackagedAppRootDir() {
@@ -256,6 +257,42 @@ function flipFoot64x64Vertical(arr) {
     for (let c = 0; c < size; c++) {
       out[dstRowStart + c] = arr[srcRowStart + c]
     }
+  }
+  return out
+}
+
+function flipFlatMatrixHorizontal(arr, size) {
+  if (!Array.isArray(arr) || arr.length !== size * size) return arr
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const rowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+    }
+  }
+  return out
+}
+
+function flipReportFrameVertical(arr) {
+  if (!Array.isArray(arr)) return arr
+  if (arr.length === 4096) return flipFoot64x64Vertical(arr)
+  return arr
+}
+
+function shiftFoot64x64FirstRowToLast(arr) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  const out = new Array(arr.length)
+  for (let r = 0; r < size - 1; r++) {
+    const srcRowStart = (r + 1) * size
+    const dstRowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[dstRowStart + c] = arr[srcRowStart + c]
+    }
+  }
+  const lastRowStart = (size - 1) * size
+  for (let c = 0; c < size; c++) {
+    out[lastRowStart + c] = arr[c]
   }
   return out
 }
@@ -699,9 +736,45 @@ let activeSendTypes = null
 let activeAssessmentId = null
 let activeSampleType = null
 
+function normalizeDeviceRegion(region) {
+  return region === 'beijing' ? 'beijing' : 'guangzhou'
+}
+
+function readPersistedDeviceRegion() {
+  try {
+    if (!fs.existsSync(deviceRegionConfigPath)) return 'guangzhou'
+    const data = JSON.parse(fs.readFileSync(deviceRegionConfigPath, 'utf8') || '{}')
+    return normalizeDeviceRegion(data.deviceRegion)
+  } catch (err) {
+    console.warn('[deviceRegion] read config failed:', err.message)
+    return 'guangzhou'
+  }
+}
+
+function persistDeviceRegion(region) {
+  const deviceRegion = normalizeDeviceRegion(region)
+  try {
+    ensureDirSync(path.dirname(deviceRegionConfigPath))
+    fs.writeFileSync(deviceRegionConfigPath, JSON.stringify({ deviceRegion }, null, 2), 'utf8')
+  } catch (err) {
+    console.warn('[deviceRegion] write config failed:', err.message)
+  }
+  return deviceRegion
+}
+
+let activeDeviceRegion = readPersistedDeviceRegion()
+
+function isBeijingDevice() {
+  return activeDeviceRegion === 'beijing'
+}
+
+function getSingleFootType(region = activeDeviceRegion) {
+  return normalizeDeviceRegion(region) === 'beijing' ? 'foot4' : 'foot1'
+}
+
 // ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开） ───
 let footFilterConfig = {
-  // 静态评估 (mode=4, foot1)
+  // 静态评估 (mode=4, 广州 foot1 / 北京 foot4)
   standing: {
     filterEnabled: true,     // 去噪滤波开关
     filterThreshold: 12,     // 低压力阈值
@@ -1059,12 +1132,14 @@ function applyActiveMode(mode) {
     return { activeTypes: null, sampleType: null }
   }
   const modeNum = parseInt(mode, 10)
-  const types = MODE_TYPE_MAP[modeNum]
+  let types = MODE_TYPE_MAP[modeNum]
+  if (modeNum === 3) types = ['sit', getSingleFootType()]
+  if (modeNum === 4) types = [getSingleFootType()]
   if (!types) return null
   // mode 11/12 是握力评估的左/右手子模式，sampleType 仍用 '1'
   const sampleType = (modeNum === 11 || modeNum === 12) ? '1' : String(modeNum)
   setActiveSendTypes(types, sampleType)
-  return { activeTypes: types, sampleType }
+  return { activeTypes: types, sampleType, deviceRegion: activeDeviceRegion }
 }
 
 const BAUD_CANDIDATES = [921600, 1000000, 3000000]
@@ -1684,9 +1759,12 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       ['sit'],
       [/sit/i]
     )
+    const standKeyCandidates = isBeijingDevice()
+      ? ['foot4', 'foot1', 'foot']
+      : ['foot1', 'foot', 'foot4']
     const standKey = pickKey(
-      ['foot1'],
-      [/foot1/i, /foot/i, /stand/i, /back/i]
+      standKeyCandidates,
+      [/foot4/i, /foot1/i, /foot/i, /stand/i, /back/i]
     )
 
     const formatTimestamp = (ts) => {
@@ -2113,8 +2191,14 @@ app.get('/rescanPort', async (req, res) => {
 app.post('/startCol', async (req, res) => {
   try {
     const { fileName, select, name, collectName, date } = req.body
-    console.log('[startCol] 收到请求: assessmentId=%s, sampleType=%s, colName=%s, 当前activeSendTypes=%s',
-      req.body?.assessmentId, req.body?.sampleType || req.body?.sample_type, req.body?.colName, JSON.stringify(activeSendTypes))
+    let regionChanged = false
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'deviceRegion')) {
+      const previousRegion = activeDeviceRegion
+      activeDeviceRegion = persistDeviceRegion(req.body.deviceRegion)
+      regionChanged = previousRegion !== activeDeviceRegion
+    }
+    console.log('[startCol] 收到请求: assessmentId=%s, sampleType=%s, colName=%s, deviceRegion=%s, 当前activeSendTypes=%s',
+      req.body?.assessmentId, req.body?.sampleType || req.body?.sample_type, req.body?.colName, activeDeviceRegion, JSON.stringify(activeSendTypes))
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assessmentId')) {
       const v = req.body.assessmentId
       activeAssessmentId = v === null || v === undefined || v === '' ? null : String(v)
@@ -2122,6 +2206,9 @@ app.post('/startCol', async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'sampleType') || Object.prototype.hasOwnProperty.call(req.body || {}, 'sample_type')) {
       const v = req.body.sampleType ?? req.body.sample_type
       activeSampleType = v === null || v === undefined || v === '' ? null : String(v)
+    }
+    if (regionChanged && (activeSampleType === '3' || activeSampleType === '4')) {
+      applyActiveMode(activeSampleType)
     }
     selectArr = select
     if (typeof req.body.fileName === 'string') req.body.fileName = decodeField(req.body.fileName)
@@ -2161,17 +2248,41 @@ app.post('/startCol', async (req, res) => {
 // 璁剧疆褰撳墠璇勪及妯″紡锛堟帶鍒?WS 鍙戦€佷笌瀛樺偍鐨勬暟鎹被鍨嬶級
 app.post('/setActiveMode', (req, res) => {
   try {
-    const { mode } = req.body || {}
-    console.log('[setActiveMode] 收到请求: mode=%s, 当前activeSendTypes=%s', mode, JSON.stringify(activeSendTypes))
+    const { mode, deviceRegion } = req.body || {}
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'deviceRegion')) {
+      activeDeviceRegion = persistDeviceRegion(deviceRegion)
+    }
+    console.log('[setActiveMode] 收到请求: mode=%s, deviceRegion=%s, 当前activeSendTypes=%s', mode, activeDeviceRegion, JSON.stringify(activeSendTypes))
     const result = applyActiveMode(mode)
     if (!result) {
       res.json(new HttpResult(1, {}, 'invalid mode'))
       return
     }
-    console.log('[setActiveMode] 切换完成: activeSendTypes=%s, activeSampleType=%s', JSON.stringify(activeSendTypes), activeSampleType)
+    console.log('[setActiveMode] 切换完成: activeSendTypes=%s, activeSampleType=%s, deviceRegion=%s', JSON.stringify(activeSendTypes), activeSampleType, activeDeviceRegion)
     res.json(new HttpResult(0, result, 'success'))
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setActiveMode failed'))
+  }
+})
+
+app.get('/getDeviceRegion', (req, res) => {
+  try {
+    activeDeviceRegion = readPersistedDeviceRegion()
+    res.json(new HttpResult(0, { deviceRegion: activeDeviceRegion }, 'success'))
+  } catch (e) {
+    res.json(new HttpResult(1, {}, 'getDeviceRegion failed'))
+  }
+})
+
+app.post('/setDeviceRegion', (req, res) => {
+  try {
+    activeDeviceRegion = persistDeviceRegion(req.body?.deviceRegion)
+    if (activeSampleType === '3' || activeSampleType === '4') {
+      applyActiveMode(activeSampleType)
+    }
+    res.json(new HttpResult(0, { deviceRegion: activeDeviceRegion, activeTypes: activeSendTypes, sampleType: activeSampleType }, 'success'))
+  } catch (e) {
+    res.json(new HttpResult(1, {}, 'setDeviceRegion failed'))
   }
 })
 
@@ -2704,13 +2815,21 @@ app.post('/getDbHeatmap', async (req, res) => {
       })
     })
 
-    if (dataArr['foot'] || dataArr['foot1']) {
-      const sensor = dataArr['foot'] || dataArr['foot1']
-      pdfArrData = sensor
+    const standingKeys = isBeijingDevice()
+      ? ['foot4', 'foot1', 'foot']
+      : ['foot1', 'foot', 'foot4']
+    const standingKey = standingKeys.find((key) => dataArr[key])
+
+    if (standingKey) {
+      const sensor = dataArr[standingKey]
+      const reportSensor = (isBeijingDevice() || standingKey === 'foot4')
+        ? sensor.map(flipReportFrameVertical)
+        : sensor
+      pdfArrData = reportSensor
       let renderData = null
       try {
         renderData = await callAlgorithm('generate_standing_render_report', {
-          data_array: sensor,
+          data_array: reportSensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
         })
@@ -4089,8 +4208,19 @@ async function connectPort() {
           }
           zeroBelowThreshold(pointArr, 8)
           removeSmallIslands64x64(pointArr, 12)
-          // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
-          const flippedArr = flipFoot64x64Vertical(pointArr)
+          // 北京设备沿用 express-python3-beijing 的脚垫归一化规则；广州保持原来的上下翻转。
+          let normalizedArr = pointArr
+          if (isBeijingDevice()) {
+            normalizedArr = shiftFoot64x64FirstRowToLast(pointArr)
+            if (activeSampleType === '3' || activeSampleType === '4') {
+              normalizedArr = flipFoot64x64Vertical(normalizedArr)
+              normalizedArr = flipFlatMatrixHorizontal(normalizedArr, 64)
+            } else if (activeSampleType === '5') {
+              normalizedArr = flipFoot64x64Vertical(normalizedArr)
+            }
+          } else {
+            normalizedArr = flipFoot64x64Vertical(pointArr)
+          }
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
           // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
           let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
@@ -4103,15 +4233,16 @@ async function connectPort() {
             }
           }
           if (filterMode) {
-            applyFootFilter(flippedArr, filterMode, dataItem.type)
+            applyFootFilter(normalizedArr, filterMode, dataItem.type)
           } else {
             console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
           }
-          dataItem.arr = flippedArr
-          if (dataItem.type === 'foot' && lastFootPointArr.length) {
-            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
+          dataItem.arr = normalizedArr
+          const shouldCalculateFootCop = dataItem.type === 'foot' || (isBeijingDevice() && activeSampleType === '4' && dataItem.type === 'foot4')
+          if (shouldCalculateFootCop && lastFootPointArr.length) {
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: normalizedArr, data_prev: lastFootPointArr })
           }
-          lastFootPointArr = flippedArr
+          lastFootPointArr = normalizedArr
           // console.log(444)
           const stamp = new Date().getTime()
 
@@ -4413,7 +4544,10 @@ function storageData(data) {
   // 基于 stamp 去重：只存储有新数据的设备
   const newData = {}
   let hasNewData = false
-  for (const key of Object.keys(data)) {
+  const storageKeys = activeSampleType === '4'
+    ? [getSingleFootType()]
+    : Object.keys(data)
+  for (const key of storageKeys) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status

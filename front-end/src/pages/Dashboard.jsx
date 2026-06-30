@@ -6,7 +6,8 @@ import { buildComprehensiveScoreResult } from '../lib/assessmentScoring';
 import { parseRosterFile } from '../lib/rosterImport';
 import { deriveStatusMap } from '../lib/rosterService';
 import { getHistory } from '../lib/historyService';
-import { getDeviceRegion, setDeviceRegion, REGION_LABEL } from '../lib/deviceRegion';
+import { getDeviceRegion, getStoredDeviceRegion, setDeviceRegion, REGION_LABEL } from '../lib/deviceRegion';
+import { backendBridge } from '../lib/BackendBridge';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
@@ -548,6 +549,38 @@ export default function Dashboard() {
   const [showNextConfirm, setShowNextConfirm] = useState(null);
   const nextPromptedRef = useRef(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    const storedRegion = getStoredDeviceRegion();
+    backendBridge.getDeviceRegion()
+      .then((resp) => {
+        if (cancelled) return;
+        const serverRegion = resp?.data?.deviceRegion;
+        if (!storedRegion && (serverRegion === 'beijing' || serverRegion === 'guangzhou')) {
+          const next = setDeviceRegion(serverRegion);
+          setDeviceRegionState(next);
+          return;
+        }
+        backendBridge.setDeviceRegion(getDeviceRegion()).catch((e) => {
+          console.warn('[Dashboard] 同步设备地区到后端失败:', e);
+        });
+      })
+      .catch((e) => {
+        console.warn('[Dashboard] 读取后端设备地区失败:', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDeviceRegionChange = (region) => {
+    const next = setDeviceRegion(region);
+    setDeviceRegionState(next);
+    backendBridge.setDeviceRegion(next).catch((e) => {
+      console.warn('[Dashboard] 持久化设备地区到后端失败:', e);
+    });
+  };
+
   const handleStart = (path) => {
     if (!patientInfo) {
       // 未选定评估对象：引导去名单选择（无名单则去导入）
@@ -713,7 +746,7 @@ export default function Dashboard() {
             title="切换设备地区（线序/预处理：广州 / 北京），进入评估时按该地区处理">
             {['guangzhou', 'beijing'].map(r => (
               <button key={r}
-                onClick={() => { setDeviceRegion(r); setDeviceRegionState(r); }}
+                onClick={() => handleDeviceRegionChange(r)}
                 className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
                 style={deviceRegion === r
                   ? { background: '#059669', color: 'white' }

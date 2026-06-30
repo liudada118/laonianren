@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { searchHistory, deleteRecord, clearHistory } from '../lib/historyService';
+import { backendBridge } from '../lib/BackendBridge';
+import { exportAssessmentWorkbook } from '../lib/assessmentWorkbookExport';
 
 const ASSESSMENT_LABELS = {
   grip: '握力评估',
@@ -49,6 +51,7 @@ export default function AssessmentHistory() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [expandedRow, setExpandedRow] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [exportingId, setExportingId] = useState(null);
   const pageSize = 10;
 
   // 异步数据状态
@@ -96,6 +99,22 @@ export default function AssessmentHistory() {
     setShowClearConfirm(false);
     setRefreshKey(k => k + 1);
   }, []);
+
+  const handleExportWorkbook = useCallback(async (record) => {
+    if (!record || exportingId) return;
+    setExportingId(record.id);
+    try {
+      const result = await exportAssessmentWorkbook(record, backendBridge);
+      if (result.skipped.length) {
+        alert(`已导出 ${result.exported} 个项目。未导出：${result.skipped.join('、')}`);
+      }
+    } catch (error) {
+      console.error('导出四项评估数据失败:', error);
+      alert('导出失败: ' + (error?.message || '未知错误'));
+    } finally {
+      setExportingId(null);
+    }
+  }, [exportingId]);
 
   const getCompletedCount = (assessments) => {
     if (!assessments) return 0;
@@ -336,6 +355,20 @@ export default function AssessmentHistory() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
                               生成综合报告
+                            </button>
+                            {/* 导出四项采集数据 */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExportWorkbook(item);
+                              }}
+                              disabled={exportingId === item.id}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                              style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', cursor: exportingId === item.id ? 'not-allowed' : 'pointer', opacity: exportingId === item.id ? 0.6 : 1 }}>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              {exportingId === item.id ? '导出中...' : '导出四项数据'}
                             </button>
                             {/* 打开所有报告按钮 */}
                             <button

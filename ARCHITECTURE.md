@@ -1,12 +1,15 @@
 # 老年人筛查系统MAC 架构文档
 
 **版本**: 2.0
-**最后更新**: 2026-03-24 07:04
+**最后更新**: 2026-06-30
 **作者**: Manus AI
 
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-06-30 | express-python3-beijing2 | 配置变更 | 设备地区切换改为前端 `localStorage` 与后端 `device-region.json` 双持久化；新增 `/getDeviceRegion`、`/setDeviceRegion` 接口，Dashboard 初始化时同步地区配置，点击广州/北京切换时立即写回后端。 |
+| 2026-06-30 | express-python3-beijing2 | 修复缺陷 | 北京/广州设备切换接入实时评估采集链路：`BackendBridge.setActiveMode/startCol` 传递 `deviceRegion`，后端按地区将起坐/静态评估映射到广州 `foot1` 或北京 `foot4`，北京 4096 脚垫帧沿用 `origin/express-python3-beijing` 的首行移位与翻转规则，并兼容静态/起坐报告取数；`run-pyserver.cjs` 增加 8765 端口占用探测，避免 Python API 重复绑定直接崩溃。 |
+| 2026-06-30 | express-python3-beijing2 | 新增功能 | 历史记录增加“四项数据”导出入口，按历史记录中的各评估采集 ID 调用 CSV 导出接口并合并为 Excel 工作簿；修正历史单项报告中步态 CSV 导出的 sample_type 参数为 5。修改文件：AssessmentHistory.jsx、HistoryReportView.jsx、assessmentWorkbookExport.js。 |
 | 2026-03-24 07:04 | update | 新增功能 | 添加在线自动更新功能。新增 electron-updater 依赖，配置 generic provider（更新服务器 http://sensor.bodyta.com/evaluate）；创建 updater.js 自动更新模块；修改 preload.js 暴露更新 IPC API；修改 index.js 集成更新初始化和清理；配置 package.json build.publish；新增 UpdateNotification.jsx 前端更新弹窗组件（含进度条）；修改 Login.jsx 添加检查更新按钮和动态版本号。 |
 | 2026-03-12 12:40 | ld | 修复缺陷 | 彻底修复串口 Cannot lock port 问题。根因确认：CH340 USB转串口芯片在 macOS 上，当一个端口被打开后会锁住同一总线上的其他端口。重构 connectPort 为两阶段架构：阶段一“探测”——通过分隔符+帧长度双重验证逐个串行探测波特率，每个探测完关闭端口后等 500ms 再探测下一个；阶段二“连接”——全部探测完成后等 1s 确保端口锁彻底释放，再通过 newSerialPortLinkWithRetry 逐个打开连接。修改文件：serialServer.js。 |
 | 2026-03-12 12:22 | ld | 修复缺陷 | 修复串口设备连接时 Cannot lock port 端口锁定问题及波特率误检问题。(1) detectBaudRate 新增双重验证：先检测分隔符 AA 55 03 99，再验证帧长度是否匹配该波特率对应的设备类型（921600→1​30/146/18，1000000→1024，3000000→4096），防止脚垫被误识为坐垫；(2) 每次波特率探测后加 300ms 延时等待端口锁释放，探测失败时最多重试 2 次；(3) 新增 newSerialPortLinkWithRetry 函数，端口打开失败时自动重试最多 3 次，每次间隔 500ms。修改文件：serialServer.js、config.js。 |
@@ -142,6 +145,9 @@
   - 各评估项目的完成状态和报告数据。
   - 全局设备连接状态 (`deviceConnStatus`) 和各传感器的在线状态 (`deviceOnlineMap`)。
 - **`useWebSocket` / `BackendBridge.js`**: 封装了与后端 `serialServer.js` 的通信逻辑。
+- **`assessmentWorkbookExport.js`**: 历史记录数据导出工具，按握力、起坐、静态站立、步态的 `assessmentId` 调用后端 CSV 导出接口，并用 `xlsx` 合并为一个四项评估数据工作簿。
+
+- **`deviceRegion.js` / `BackendBridge.js`**: 前端保存北京/广州设备地区，实时评估通过 `setActiveMode` 和 `startCol` 将 `deviceRegion` 传给后端，驱动起坐/静态站立选择广州 `foot1` 或北京 `foot4`。
 
 #### 2.2.3. 与后端通信 (`lib/BackendBridge.js`)
 
@@ -171,7 +177,10 @@
 
 - `/connPort`: 连接所有串口设备。
 - `/startCol`, `/endCol`: 开始和结束数据采集。
+- `/getDeviceRegion`, `/setDeviceRegion`: 读取和持久化北京/广州设备地区配置，后端存储在 `device-region.json`，并用于实时评估脚垫解析规则。
 - `/getHandPdf`, `/getFootPdf`, ...: 请求生成各项评估报告。
+- `/exportCsv`: 按 `assessmentId`/`assessmentIds` 与 `sampleType` 导出采集原始帧为 CSV。
+- `/downloadCsvFile/:name`: 下载 `/exportCsv` 生成的 CSV 文件。
 - `/api/history/*`: 增删查改历史评估记录。
 
 #### 2.3.2. 实时通信 (WebSocket)
@@ -189,7 +198,7 @@
   - `921600` → 手套（HL/HR），通过 130/146 字节帧内类型位区分左右手。**注意：左右手共用同一串口**，通过 `gloveLatestData` 缓存按 HL/HR 分别存储最新帧数据，解决 `dataMap[path]` 被交替覆盖的问题
   - `1000000` → 起坐垫（sit），1024 字节帧
   - `3000000` → 脚垫（foot1-4），4096 字节帧，通过 AT 指令获取 MAC 地址查映射表细分
-- **脚垫数据预处理流程**：对每个 64×64 脚垫帧依次执行 `zeroBelowThreshold(8)` → `removeSmallIslands64x64(12)` → `flipFoot64x64Vertical`（行顺序反转，实现左右对调），确保前端显示方向与实际脚垫物理方向一致。
+- **脚垫数据预处理流程**：对每个 64×64 脚垫帧依次执行 `zeroBelowThreshold(8)` → `removeSmallIslands64x64(12)`；广州设备保持原有 `flipFoot64x64Vertical` 行顺序反转，北京设备在起坐/静态评估中使用 `foot4` 并执行首行移位、上下翻转、水平翻转，步态评估执行首行移位与上下翻转，确保实时显示、存储和报告算法使用同一套地区化解析规则。
 - 监听每个串口的 `data` 事件，接收传感器发送的原始二进制数据。
 - 对原始数据进行解析、分包、校验，转换为数字矩阵。
 - **支持的帧类型**：18 字节（陀螺仪）、130 字节（手套分包矩阵）、146 字节（手套分包+四元数）、1024 字节（起坐垫 32×32）、4096 字节（脚垫 64×64）。
@@ -275,6 +284,7 @@
 
 | 完成日期 | 完成的功能/工作 | 简要说明 |
 |---|---|---|
+| 2026-06-30 | 历史报告数据导出 | 历史单项报告支持按评估类型导出 CSV，历史列表支持将同一记录下已完成的四项采集数据合并导出为 Excel 工作簿。 |
 | 2026-03-03 | viewReport 路由 state 支持 | GripAssessment 和 StandingAssessment 现在支持从 Dashboard "查看报告"按钮直接跳转到报告页面，与 SitStandAssessment 和 GaitAssessment 保持一致。 |
 | 2026-03-03 | 采集按钮 UX 修复 | 所有 4 个评估页面的采集按钮（开始/结束采集）已将 onClick 事件从 button 移至外层 div 容器，确保点击文字标签也能触发操作。 |
 | 2026-03-03 | HistoryReportView onClose 修复 | SitStandReport 和 GaitReportContent 组件在历史报告查看页面中现在有正确的 onClose 回调，支持返回历史记录列表。 |
@@ -307,6 +317,9 @@
 | 2026-03-12 15:30 | hand | 右手清零基线修复 | 修复左右手共用串口导致 tareGrip 只能记录一只手基线的问题，新增 gloveLatestData 缓存确保 HL/HR 都能被清零。 |
 | 2026-03-12 16:00 | hand | 第二次进入清零失效修复 | 修复退出后重新进入握力评估时清零基线不正确的问题，clearGripBaseline同时清除缓存，tareGrip增加时间戳新鲜度检查和异步重试。 |
 | 2026-03-24 07:04 | update | 在线自动更新功能 | 集成 electron-updater，配置 generic provider 指向 http://sensor.bodyta.com/evaluate。后端新增 updater.js 模块处理更新检查/下载/安装，preload.js 暴露 IPC API，前端新增 UpdateNotification.jsx 弹窗组件（含进度条、版本对比、安装提示），Login.jsx 添加检查更新按钮和动态版本号。 |
+
+| 2026-06-30 | 设备地区双端持久化 | 广州/北京切换同时保存到前端 `localStorage` 和后端 `device-region.json`，Dashboard 初始化时自动同步，后端重启后仍能恢复地区配置。 |
+| 2026-06-30 | 北京设备实时评估解析规则 | `deviceRegion` 贯通前端实时评估与后端采集接口，北京起坐/静态评估使用 `foot4` 和 origin 分支脚垫归一化规则，历史静态/起坐报告兼容 `foot4` 取数；前端 Python API 启动脚本增加 8765 端口占用保护。 |
 
 ## 6. 未来维护与更新
 

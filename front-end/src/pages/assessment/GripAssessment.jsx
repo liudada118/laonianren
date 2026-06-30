@@ -11,6 +11,7 @@ import { backendBridge } from '../../lib/BackendBridge';
 import SerialLogPanel from '../../components/debug/SerialLogPanel';
 import { generateGripReportData } from '../../lib/gripReportGenerator';
 import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getDeviceRegion } from '../../lib/deviceRegion';
 
 /* ─── 步骤指示器 (蔡司风格) ─── */
 function StepIndicator({ current, steps }) {
@@ -303,7 +304,7 @@ export default function GripAssessment() {
     if (!isGlobalConnected || backendCleanupRef.current) return;
 
     // 设置手套模式，后端只推送 HL/HR 数据
-    backendBridge.setActiveMode(1).then(() => {
+    backendBridge.setActiveMode(1, { deviceRegion: getDeviceRegion() }).then(() => {
       console.log('[GripAssessment] 已设置为手套模式 (mode=1)');
       addSimLog('已设置为手套模式 (mode=1)', 'info');
       // 设置模式后延迟 500ms 执行清零，确保已收到稳定的基线数据
@@ -527,7 +528,7 @@ export default function GripAssessment() {
       addSimLog(`后端连接结果: ${JSON.stringify(connResult)}`, 'info');
 
       // 设置手套模式 (mode=1)
-      await backendBridge.setActiveMode(1);
+      await backendBridge.setActiveMode(1, { deviceRegion: getDeviceRegion() });
       addSimLog('已设置为手套模式 (mode=1)', 'info');
 
       // 连接WebSocket
@@ -641,8 +642,9 @@ export default function GripAssessment() {
       }
       // 先切换到单手模式，等待完成后再开始采集
       const handMode = isLeft ? 11 : 12;
+      const deviceRegion = getDeviceRegion();
       try {
-        await backendBridge.setActiveMode(handMode);
+        await backendBridge.setActiveMode(handMode, { deviceRegion });
         addSimLog(`已切换到${isLeft ? '左手' : '右手'}模式 (mode=${handMode})`, 'info');
       } catch (e) {
         addSimLog(`切换模式失败: ${e.message}`, 'error');
@@ -659,6 +661,7 @@ export default function GripAssessment() {
           assessmentId: aid,
           sampleType: '1',
           date: new Date().toISOString(),
+          deviceRegion,
           colName: isLeft ? '左手握力' : '右手握力',
         });
         addSimLog(`后端采集已启动 (assessmentId=${aid})`, 'info');
@@ -691,7 +694,7 @@ export default function GripAssessment() {
       }
       // 采集结束后恢复到双手模式，以便检测另一只手的连接状态
       try {
-        await backendBridge.setActiveMode(1);
+        await backendBridge.setActiveMode(1, { deviceRegion: getDeviceRegion() });
         addSimLog('已恢复双手模式 (mode=1)', 'info');
       } catch (e) {
         console.error('[GripAssessment] 恢复双手模式失败:', e);

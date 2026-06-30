@@ -7,6 +7,7 @@ import SitStandReport from '../../components/report/SitStandReport';
 import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
 import { backendBridge } from '../../lib/BackendBridge';
 import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getDeviceRegion } from '../../lib/deviceRegion';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
@@ -260,6 +261,7 @@ export default function SitStandAssessment() {
           sampleType: '3',
           name: patientInfo?.name || 'test',
           date: new Date().toISOString().split('T')[0],
+          deviceRegion: getDeviceRegion(),
         });
         console.log('[SitStand] startCol 成功, assessmentId:', aid);
       } catch (e) {

@@ -165,11 +165,12 @@ class BackendBridge {
     return res.json();
   }
 
-  async setActiveMode(mode) {
+  async setActiveMode(mode, options = {}) {
+    const deviceRegion = typeof options === 'string' ? options : options?.deviceRegion;
     const res = await fetch(`${this.httpUrl}/setActiveMode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, deviceRegion }),
     });
     return res.json();
   }
@@ -193,6 +194,20 @@ class BackendBridge {
     return res.json();
   }
 
+  async getDeviceRegion() {
+    const res = await fetch(`${this.httpUrl}/getDeviceRegion`);
+    return res.json();
+  }
+
+  async setDeviceRegion(deviceRegion) {
+    const res = await fetch(`${this.httpUrl}/setDeviceRegion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceRegion }),
+    });
+    return res.json();
+  }
+
   async tareGrip() {
     const res = await fetch(`${this.httpUrl}/tareGrip`, {
       method: 'POST',
@@ -211,11 +226,11 @@ class BackendBridge {
     return res.json();
   }
 
-  async startCol({ name, assessmentId, sampleType, date, colName }) {
+  async startCol({ name, assessmentId, sampleType, date, colName, deviceRegion }) {
     const res = await fetch(`${this.httpUrl}/startCol`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, assessmentId, sample_type: sampleType, date, colName }),
+      body: JSON.stringify({ name, assessmentId, sample_type: sampleType, date, colName, deviceRegion }),
     });
     return res.json();
   }
