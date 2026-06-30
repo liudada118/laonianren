@@ -566,9 +566,13 @@ def detect_sit_peak_cycles(sit_data, sit_times):
         _adc_floor = 50.0 * 26.18  # 50N 对应的 ADC 总和阈值（≈1309）
         _seg_peaks = [float(np.max(smooth_force[s:e])) for s, e in sit_segments]
         _kept = [seg for seg, pk in zip(sit_segments, _seg_peaks) if pk >= _adc_floor]
-        if len(_kept) < len(sit_segments):
+        if _kept and len(_kept) < len(sit_segments):
             print(f"    [噪声过滤] 坐力阈值=50N(ADC总和≥{_adc_floor:.0f})，坐姿段 {len(sit_segments)}→{len(_kept)}")
-        sit_segments = _kept
+            sit_segments = _kept
+        elif not _kept:
+            # 全部低于阈值时保留原段，避免把正常起坐误删成 0 次/0 时长；
+            # 同时打印实际峰值，便于核对 50N 阈值是否与现场坐垫量级匹配
+            print(f"    [噪声过滤] 警告：坐姿段峰值均 < 50N（最大ADC总和≈{max(_seg_peaks):.0f}），保留原段避免误判为0")
 
     sit_peaks = []
     for start, end in sit_segments:
@@ -1772,14 +1776,9 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
-        # 坐垫接触总时长 = 各坐姿平台(坐着)时长之和
-        _seat_contact = 0.0
-        for _s, _e in sit_segments:
-            _s_idx = min(int(_s), len(sit_times) - 1)
-            _e_idx = min(int(_e) - 1, len(sit_times) - 1)
-            if _e_idx > _s_idx:
-                _seat_contact += max((sit_times.iloc[_e_idx] - sit_times.iloc[_s_idx]).total_seconds(), 0.0)
-        duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
+        # 坐垫接触总时长：沿用原「总时长」(calculate_cycle_stats 的各周期有效时长之和，
+        # 能稳定显示)。注意先取值、再用整周期覆盖 total_duration。
+        duration_stats['seat_contact_duration'] = round(float(duration_stats.get('total_duration', 0.0) or 0.0), 2)
         # 总时长 = 整个起坐周期：第一个坐姿平台起点 → 最后一个坐姿平台终点
         if len(sit_segments) > 0:
             _w_start = sit_times.iloc[min(int(sit_segments[0][0]), len(sit_times) - 1)]
