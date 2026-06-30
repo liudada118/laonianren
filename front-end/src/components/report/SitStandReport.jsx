@@ -726,6 +726,7 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
   const sitEvoLabels = ['Start', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', 'End'];
 
   const totalDur = durationStats.total_duration || 0;
+  const seatContactDur = durationStats.seat_contact_duration || 0;
   // 防呆：若评分函数判定为数据无效，评估等级直接显示"数据异常"，不允许给"优秀/正常/偏慢"
   // 分档与 V3 评分逻辑一致：≤10s 优秀 / 10-12s 正常 / 12-20s 偏慢 / >20s 异常
   const evalLevel = scoreResult?.invalid
@@ -813,11 +814,12 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
             {/* ═══════════ 1. 基本信息 ═══════════ */}
             <section id="ss-metrics">
               <SectionHeader title="基本信息" subtitle="Basic Information" />
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.blue} />
+                <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.cyan} />
                 <MetricCard label="完成周期数" value={`${durationStats.num_cycles || '--'}次`} color={C.green} />
-                <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.cyan} />
-                <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.purple} />
+                <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.purple} />
+                <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.blue} />
               </div>
               {samplingRate && (
                 <div className="mt-2 text-right">
@@ -857,8 +859,9 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 </div>
               ) : (
                 <div className="zeiss-card p-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
+                  <div className="grid grid-cols-3 gap-4">
+                    <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.blue} />
+                    <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.cyan} />
                     <MetricCard label="周期数" value={`${durationStats.num_cycles || '--'}`} color={C.green} />
                   </div>
                 </div>

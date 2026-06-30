@@ -26,8 +26,13 @@ export const ASSESSMENT_LABEL = {
  * @returns {string|null} 下一个待评估类型，全部完成返回 null
  */
 export function getNextAssessmentType(assessments, currentType) {
-  for (const t of ASSESSMENT_ORDER) {
-    if (t === currentType) continue;
+  // 只在当前项之后按顺序找下一个未完成的，绝不回头找前面的项。
+  // 否则：刚做完的项（如步态）报告还在后台生成、completed 尚未置位时，会被当成
+  // 「下一个未完成」，导致做完下一项后又回跳到它。前面漏做/失败的项通过历史补测，不在流程里回跳。
+  const idx = ASSESSMENT_ORDER.indexOf(currentType);
+  const startFrom = idx >= 0 ? idx + 1 : 0;
+  for (let i = startFrom; i < ASSESSMENT_ORDER.length; i++) {
+    const t = ASSESSMENT_ORDER[i];
     if (!assessments?.[t]?.completed) return t;
   }
   return null;

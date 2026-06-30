@@ -987,9 +987,11 @@ export default function GaitAssessment() {
           completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data }, assessmentIdRef.current);
         } else {
           console.warn('[Gait] 后端未返回报告数据');
+          alert('步态报告生成失败：未取到有效数据。\n常见原因是 4 块步道未全部连接或采集数据不足。\n请检查步道连接后重新测量此项（历史记录里该项显示未测、可补测）。');
         }
       } catch (e) {
         console.error('报告生成失败:', e);
+        alert('步态报告生成失败：' + (e?.message || '未知错误') + '\n请重新测量此项（历史记录里该项显示未测、可补测）。');
       }
     })();
   };
