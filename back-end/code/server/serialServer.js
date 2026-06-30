@@ -260,6 +260,44 @@ function flipFoot64x64Vertical(arr) {
   return out
 }
 
+// ─── 北京设备线序专用方向处理（广州不用）───
+function flipFlatMatrixHorizontal(arr, size) {
+  if (!Array.isArray(arr) || arr.length !== size * size) return arr
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const rowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+    }
+  }
+  return out
+}
+
+function flipReportFrameVertical(arr) {
+  if (!Array.isArray(arr)) return arr
+  if (arr.length === 4096) return flipFoot64x64Vertical(arr)
+  return arr
+}
+
+function shiftFoot64x64FirstRowToLast(arr) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  const out = new Array(arr.length)
+  for (let r = 0; r < size - 1; r++) {
+    const srcRowStart = (r + 1) * size
+    const dstRowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[dstRowStart + c] = arr[srcRowStart + c]
+    }
+  }
+  const firstRowStart = 0
+  const lastRowStart = (size - 1) * size
+  for (let c = 0; c < size; c++) {
+    out[lastRowStart + c] = arr[firstRowStart + c]
+  }
+  return out
+}
+
 function zeroBelowThreshold(arr, threshold) {
   if (!Array.isArray(arr)) return arr
   for (let i = 0; i < arr.length; i++) {
@@ -890,6 +928,17 @@ const MODE_TYPE_MAP = {
   4: ['foot1'],
   5: ['foot1', 'foot2', 'foot3', 'foot4'],
 }
+// 北京设备线序不同：起坐(3)/静态(4)用 foot4（广州用 foot1）；步态(5)两地一致
+const MODE_TYPE_MAP_BEIJING = {
+  ...MODE_TYPE_MAP,
+  3: ['sit', 'foot4'],
+  4: ['foot4'],
+}
+// 当前地区（'guangzhou' | 'beijing'）：由前端滑块通过 /setRegion 同步，决定垫子线序/翻转
+let currentRegion = 'guangzhou'
+function getModeTypeMap() {
+  return currentRegion === 'beijing' ? MODE_TYPE_MAP_BEIJING : MODE_TYPE_MAP
+}
 let sensorHzCache = {}
 let sensorHzLocked = false
 let sensorTypeSignature = ''
@@ -1059,7 +1108,7 @@ function applyActiveMode(mode) {
     return { activeTypes: null, sampleType: null }
   }
   const modeNum = parseInt(mode, 10)
-  const types = MODE_TYPE_MAP[modeNum]
+  const types = getModeTypeMap()[modeNum]
   if (!types) return null
   // mode 11/12 是握力评估的左/右手子模式，sampleType 仍用 '1'
   const sampleType = (modeNum === 11 || modeNum === 12) ? '1' : String(modeNum)
@@ -1685,8 +1734,8 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       [/sit/i]
     )
     const standKey = pickKey(
-      ['foot1'],
-      [/foot1/i, /foot/i, /stand/i, /back/i]
+      ['foot4', 'foot1'],
+      [/foot4/i, /foot1/i, /foot/i, /stand/i, /back/i]
     )
 
     const formatTimestamp = (ts) => {
@@ -2172,6 +2221,18 @@ app.post('/setActiveMode', (req, res) => {
     res.json(new HttpResult(0, result, 'success'))
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setActiveMode failed'))
+  }
+})
+
+// ─── 地区切换 API：决定垫子线序(foot1/foot4)与数据翻转(广州/北京) ───
+app.post('/setRegion', (req, res) => {
+  try {
+    const region = (req.body && req.body.region) === 'beijing' ? 'beijing' : 'guangzhou'
+    currentRegion = region
+    console.log('[setRegion] 当前地区切换为: %s', currentRegion)
+    res.json(new HttpResult(0, { region: currentRegion }, 'success'))
+  } catch (e) {
+    res.json(new HttpResult(1, {}, 'setRegion failed'))
   }
 })
 
@@ -2704,13 +2765,15 @@ app.post('/getDbHeatmap', async (req, res) => {
       })
     })
 
-    if (dataArr['foot'] || dataArr['foot1']) {
-      const sensor = dataArr['foot'] || dataArr['foot1']
-      pdfArrData = sensor
+    if (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']) {
+      const sensor = dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']
+      // 北京设备数据方向不同，静态报告数据需上下翻转；广州不翻
+      const reportSensor = currentRegion === 'beijing' ? sensor.map(flipReportFrameVertical) : sensor
+      pdfArrData = reportSensor
       let renderData = null
       try {
         renderData = await callAlgorithm('generate_standing_render_report', {
-          data_array: sensor,
+          data_array: reportSensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
         })
@@ -4089,8 +4152,21 @@ async function connectPort() {
           }
           zeroBelowThreshold(pointArr, 8)
           removeSmallIslands64x64(pointArr, 12)
-          // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
-          const flippedArr = flipFoot64x64Vertical(pointArr)
+          // 脚垫数据方向归一化：广州/北京设备线序不同，按地区分别处理
+          let flippedArr
+          if (currentRegion === 'beijing') {
+            // 北京：先首行移末行，再按模式补方向（起坐/静态 上下+左右翻，步道 仅上下翻）
+            flippedArr = shiftFoot64x64FirstRowToLast(pointArr)
+            if (activeSampleType === '3' || activeSampleType === '4') {
+              flippedArr = flipFoot64x64Vertical(flippedArr)
+              flippedArr = flipFlatMatrixHorizontal(flippedArr, 64)
+            } else if (activeSampleType === '5') {
+              flippedArr = flipFoot64x64Vertical(flippedArr)
+            }
+          } else {
+            // 广州：上下翻转（沿水平轴翻转行顺序，实现左右对调）
+            flippedArr = flipFoot64x64Vertical(pointArr)
+          }
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
           // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
           let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
@@ -4108,7 +4184,7 @@ async function connectPort() {
             console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
           }
           dataItem.arr = flippedArr
-          if (dataItem.type === 'foot' && lastFootPointArr.length) {
+          if ((dataItem.type === 'foot' || (currentRegion === 'beijing' && activeSampleType === '4' && dataItem.type === 'foot4')) && lastFootPointArr.length) {
             dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
           }
           lastFootPointArr = flippedArr
@@ -4413,7 +4489,9 @@ function storageData(data) {
   // 基于 stamp 去重：只存储有新数据的设备
   const newData = {}
   let hasNewData = false
-  for (const key of Object.keys(data)) {
+  // 北京静态(mode=4)只存 foot4，避免存入广州线序的 foot1
+  const storageKeys = (currentRegion === 'beijing' && activeSampleType === '4') ? ['foot4'] : Object.keys(data)
+  for (const key of storageKeys) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status

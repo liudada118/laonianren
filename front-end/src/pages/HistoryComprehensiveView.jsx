@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getRecord } from '../lib/historyService';
+import { backendBridge } from '../lib/BackendBridge';
+import { exportAssessmentWorkbook } from '../lib/assessmentWorkbookExport';
 import ComprehensiveReport from '../components/report/ComprehensiveReport';
 
 /**
@@ -14,6 +16,7 @@ export default function HistoryComprehensiveView() {
 
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!recordId) {
@@ -34,6 +37,22 @@ export default function HistoryComprehensiveView() {
 
   const handleBack = () => navigate('/history');
   const patientName = record?.patientName || '未知';
+
+  const handleExportWorkbook = async () => {
+    if (!record || exporting) return;
+    setExporting(true);
+    try {
+      const result = await exportAssessmentWorkbook(record, backendBridge);
+      if (result.skipped.length) {
+        alert(`已导出 ${result.exported} 个项目。未导出：${result.skipped.join('、')}`);
+      }
+    } catch (error) {
+      console.error('导出四项评估数据失败:', error);
+      alert('导出失败: ' + (error?.message || '未知错误'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -84,6 +103,16 @@ export default function HistoryComprehensiveView() {
           {record?.dateStr && (
             <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{record.dateStr}</span>
           )}
+          <button
+            onClick={handleExportWorkbook}
+            disabled={exporting}
+            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all"
+            style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', opacity: exporting ? 0.6 : 1, cursor: exporting ? 'not-allowed' : 'pointer' }}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            {exporting ? '导出中...' : '导出四项数据'}
+          </button>
           <button onClick={handleBack} className="zeiss-btn-ghost text-xs flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 17l-5-5m0 0l5-5m-5 5h12" />

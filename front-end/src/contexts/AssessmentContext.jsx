@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { saveAssessmentSession } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
+import { getDeviceRegion } from '../lib/deviceRegion';
 import * as rosterService from '../lib/rosterService';
 
 const AssessmentContext = createContext(null);
@@ -145,6 +146,9 @@ export function AssessmentProvider({ children }) {
       // 2. 调用后端 connPort 连接所有串口设备（MAC信息会通过 WebSocket 推送）
       const connResult = await backendBridge.connPort();
       console.log('[一键连接] connPort result:', connResult);
+
+      // 同步当前地区给后端（决定垫子线序 foot1/foot4 与数据翻转）
+      try { await backendBridge.setRegion(getDeviceRegion()); } catch (e) { console.warn('[一键连接] 同步地区失败:', e?.message || e); }
 
       setDeviceConnStatus('connected');
       return { success: true, data: connResult };

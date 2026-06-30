@@ -175,6 +175,19 @@ class BackendBridge {
   }
 
   /**
+   * 设置当前地区（广州/北京）：决定后端垫子线序(foot1/foot4)与数据翻转
+   * @param {string} region - 'guangzhou' | 'beijing'
+   */
+  async setRegion(region) {
+    const res = await fetch(`${this.httpUrl}/setRegion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region }),
+    });
+    return res.json();
+  }
+
+  /**
    * 设置脚垫滤波/优化参数
    * @param {string} mode - 'standing' 或 'gait'
    * @param {object} config - { filterEnabled, filterThreshold, filterMinArea, optimizeEnabled, optimizeBad, optimizeGood }

@@ -7,6 +7,7 @@ import { parseRosterFile } from '../lib/rosterImport';
 import { deriveStatusMap } from '../lib/rosterService';
 import { getHistory } from '../lib/historyService';
 import { getDeviceRegion, setDeviceRegion, REGION_LABEL } from '../lib/deviceRegion';
+import { backendBridge } from '../lib/BackendBridge';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
@@ -713,7 +714,7 @@ export default function Dashboard() {
             title="切换设备地区（线序/预处理：广州 / 北京），进入评估时按该地区处理">
             {['guangzhou', 'beijing'].map(r => (
               <button key={r}
-                onClick={() => { setDeviceRegion(r); setDeviceRegionState(r); }}
+                onClick={() => { setDeviceRegion(r); setDeviceRegionState(r); backendBridge.setRegion(r).catch(() => {}); }}
                 className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
                 style={deviceRegion === r
                   ? { background: '#059669', color: 'white' }
