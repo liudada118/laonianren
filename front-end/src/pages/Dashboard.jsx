@@ -541,6 +541,7 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
   const [showRosterPanel, setShowRosterPanel] = useState(false);
   const [showAddPatient, setShowAddPatient] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [switchTarget, setSwitchTarget] = useState(null);
   const [showNextConfirm, setShowNextConfirm] = useState(null);
   const nextPromptedRef = useRef(null);
@@ -579,11 +580,7 @@ export default function Dashboard() {
   const handleImported = (list) => {
     importRoster(list);
     setShowImport(false);
-    // 自动定位到第一个尚未采集完成的人，弹切换窗继续
-    const statusMap = deriveStatusMap(list, getHistory());
-    const firstPending = list.find(p => (statusMap[p.id]?.completed || 0) < 4);
-    if (firstPending) setSwitchTarget(firstPending);
-    else setShowRosterPanel(true);
+    // 导入后不自动选人：停在首页，由操作员用搜索框搜要测的对象（第一个不一定是表里第一个）
   };
 
   const handlePickPatient = (p) => {
@@ -747,52 +744,78 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* 当前测试者 + 缺检提醒 */}
+        {/* 当前测试者 / 搜索选人 + 缺检提醒 */}
         {roster.length > 0 && (
           <div className="mb-5 w-full max-w-[680px] rounded-2xl px-7 py-5"
             style={{ background: '#EFF6FF', border: '1px solid #0066CC33' }}>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4 min-w-0">
-                {patientInfo ? (
-                  <>
-                    <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-xl font-bold shrink-0"
-                      style={{ background: 'var(--zeiss-blue)' }}>
-                      {(patientInfo.name || '?')[0]}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>当前：{patientInfo.name}</div>
-                      <div className="text-xs mt-1 truncate" style={{ color: 'var(--text-tertiary)' }}>
-                        {[patientInfo.id && `编号 ${patientInfo.id}`, patientInfo.region].filter(Boolean).join(' · ') || '—'}
-                        <span className="ml-2 font-medium" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
-                          · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
-                        </span>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-base" style={{ color: 'var(--text-secondary)' }}>
-                    未选择评估对象
-                    <span className="ml-2 text-sm" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
-                      · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
-                    </span>
+            {patientInfo ? (
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-xl font-bold shrink-0"
+                    style={{ background: 'var(--zeiss-blue)' }}>
+                    {(patientInfo.name || '?')[0]}
                   </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {patientInfo && (
+                  <div className="min-w-0">
+                    <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>当前：{patientInfo.name}</div>
+                    <div className="text-xs mt-1 truncate" style={{ color: 'var(--text-tertiary)' }}>
+                      {[patientInfo.id && `编号 ${patientInfo.id}`, patientInfo.region].filter(Boolean).join(' · ') || '—'}
+                      <span className="ml-2 font-medium" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                        · {pendingPatients.length ? `名单还有 ${pendingPatients.length} 人未完成` : '名单已全部完成'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
                   <button onClick={() => goAdjacentPatient(1)}
                     className="text-sm px-4 py-2 rounded-lg font-semibold"
                     style={{ color: 'white', background: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>
                     下一位 ›
                   </button>
-                )}
-                <button onClick={() => setShowRosterPanel(true)}
-                  className="text-sm px-4 py-2 rounded-lg font-semibold"
-                  style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
-                  查看名单
-                </button>
+                  <button onClick={() => setShowRosterPanel(true)}
+                    className="text-sm px-4 py-2 rounded-lg font-semibold"
+                    style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
+                    查看名单
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-3">
+                  <svg className="w-5 h-5 shrink-0" fill="none" stroke="var(--zeiss-blue)" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)}
+                    placeholder="输入姓名或编号，搜索评估对象" className="zeiss-input flex-1" autoFocus />
+                  <span className="text-xs shrink-0 font-medium" style={{ color: pendingPatients.length ? '#D97706' : '#059669' }}>
+                    {pendingPatients.length ? `还有 ${pendingPatients.length} 人未完成` : '已全部完成'}
+                  </span>
+                  <button onClick={() => setShowRosterPanel(true)}
+                    className="text-sm px-4 py-2 rounded-lg font-semibold shrink-0"
+                    style={{ color: 'var(--zeiss-blue)', background: '#DBEAFE', border: '1px solid #0066CC33', cursor: 'pointer' }}>
+                    查看名单
+                  </button>
+                </div>
+                {searchKeyword.trim() && (() => {
+                  const kw = searchKeyword.trim();
+                  const matched = roster.filter(p => (p.name || '').includes(kw) || String(p.id || '').includes(kw)).slice(0, 8);
+                  return (
+                    <div className="mt-3 rounded-lg overflow-hidden" style={{ border: '1px solid #0066CC22' }}>
+                      {matched.length ? matched.map(p => (
+                        <button key={p.id || p.name}
+                          onClick={() => { setSearchKeyword(''); setShowRosterPanel(false); setSwitchTarget(p); }}
+                          className="w-full px-4 py-2.5 flex items-center justify-between text-left border-b hover:opacity-80 transition-all"
+                          style={{ borderColor: '#0066CC11', background: 'white' }}>
+                          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{p.name}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{[p.id, p.region].filter(Boolean).join(' · ')}</span>
+                        </button>
+                      )) : (
+                        <div className="px-4 py-3 text-sm text-center" style={{ color: 'var(--text-muted)', background: 'white' }}>无匹配对象</div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
 

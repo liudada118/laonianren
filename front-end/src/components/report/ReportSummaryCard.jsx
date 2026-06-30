@@ -62,15 +62,9 @@ export default function ReportSummaryCard({
                 {scoreResult.title || title}
               </h3>
               <p className="text-sm leading-relaxed mt-1" style={{ color: 'var(--text-secondary)' }}>
-                {aiIntro || scoreResult.summary}
+                {scoreResult.summary}
               </p>
             </div>
-            {aiLoading && (
-              <div className="hidden md:flex items-center gap-2 text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
-                <span className="w-3 h-3 rounded-full border-2 animate-spin" style={{ borderColor: 'var(--border-light)', borderTopColor: 'var(--zeiss-blue)' }} />
-                AI综合评估生成中
-              </div>
-            )}
           </div>
 
           {breakdown.length > 0 && (
