@@ -7,6 +7,7 @@
 ## 更新日志
 | 日期 | 分支 | 类型 | 描述 |
 |---|---|---|---|
+| 2026-06-30 | express-python3-beijing2 | 修复缺陷 | 修复 Electron 开发态前端启动误判：Vite 启动参数固定 `127.0.0.1:5173` 且启用 `strictPort`，启动器必须确认 dev server 可访问后才加载窗口，避免软件打开后显示前端不可达；同步 `front-end/dist` 到 `back-end/code/renderer-build`。 |
 | 2026-06-30 | express-python3-beijing2 | 配置变更 | 设备地区切换改为前端 `localStorage` 与后端 `device-region.json` 双持久化；新增 `/getDeviceRegion`、`/setDeviceRegion` 接口，Dashboard 初始化时同步地区配置，点击广州/北京切换时立即写回后端。 |
 | 2026-06-30 | express-python3-beijing2 | 修复缺陷 | 北京/广州设备切换接入实时评估采集链路：`BackendBridge.setActiveMode/startCol` 传递 `deviceRegion`，后端按地区将起坐/静态评估映射到广州 `foot1` 或北京 `foot4`，北京 4096 脚垫帧沿用 `origin/express-python3-beijing` 的首行移位与翻转规则，并兼容静态/起坐报告取数；`run-pyserver.cjs` 增加 8765 端口占用探测，避免 Python API 重复绑定直接崩溃。 |
 | 2026-06-30 | express-python3-beijing2 | 新增功能 | 历史记录增加“四项数据”导出入口，按历史记录中的各评估采集 ID 调用 CSV 导出接口并合并为 Excel 工作簿；修正历史单项报告中步态 CSV 导出的 sample_type 参数为 5。修改文件：AssessmentHistory.jsx、HistoryReportView.jsx、assessmentWorkbookExport.js。 |

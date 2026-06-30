@@ -103,7 +103,7 @@ function startViteDevServer() {
   const clientDir = path.join(__dirname, '..', '..', 'front-end')
   console.log('[vite] frontend dir:', clientDir)
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const viteArgs = ['run', 'dev', '--', '--port', defaultDevPort]
+  const viteArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort']
   const viteBin = path.join(
     clientDir,
     'node_modules',
@@ -120,13 +120,13 @@ function startViteDevServer() {
     () => {
       if (!fs.existsSync(viteBin)) return null
       console.log('[vite] attempt 2: direct vite bin')
-      return spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      return spawn(viteBin, ['--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
     },
     () => {
       // 最后兜底：用 npx vite
       console.log('[vite] attempt 3: npx vite')
       const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-      return spawn(npxCmd, ['vite', '--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      return spawn(npxCmd, ['vite', '--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
     }
   ]
 
@@ -226,7 +226,22 @@ function startViteDevServer() {
         finish()
       }
 
-      timer = setTimeout(ready, 15000)
+      timer = setTimeout(async () => {
+        const reachable = await checkDevServerOnce(devServerUrl, 1000)
+        if (reachable) {
+          ready()
+          return
+        }
+        cleanup()
+        console.log('[vite] dev server not reachable after startup wait:', devServerUrl)
+        viteProcess = null
+        if (attemptIndex + 1 < attempts.length) {
+          attemptIndex += 1
+          startAttempt()
+          return
+        }
+        finish()
+      }, 15000)
 
       child.stdout?.on('data', onData)
       child.stderr?.on('data', onData)
