@@ -634,15 +634,15 @@ export default function StandingAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 设置脚垫模式，后端只推送 foot1-4 数据
-    backendBridge.setActiveMode(5).then(() => {
-      console.log('[StandingAssessment] 已设置后端模式 mode=5');
+    // 设置静态站立模式，后端只推送 foot4 数据，滤波使用 standing 参数
+    backendBridge.setActiveMode(4).then(() => {
+      console.log('[StandingAssessment] 已设置后端模式 mode=4');
     }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
 
-    // 监听后端推送的脚垫数据（使用 foot1 作为主数据源）
+    // 监听后端推送的脚垫数据（使用 foot4 作为主数据源）
     const handleBackendFootData = (arr) => {
       if (!arr || arr.length === 0) return;
       // 后端推送的是 4096 个值的 flat 数组
@@ -652,10 +652,10 @@ export default function StandingAssessment() {
       handleSerialData(matrix);
     };
 
-    const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
+    const unsubFoot4 = backendBridge.on('foot4Data', handleBackendFootData);
 
     backendCleanupRef.current = () => {
-      unsubFoot1();
+      unsubFoot4();
       setIsBackendMode(false);
     };
 

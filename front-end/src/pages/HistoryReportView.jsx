@@ -78,7 +78,7 @@ export default function HistoryReportView() {
     try {
       // assessmentIds 可能是逗号分隔的多个 ID（如握力左右手）
       const ids = assessmentIds.split(',').filter(Boolean);
-      const sampleTypeMap = { grip: '1', sitstand: '3', standing: '4', gait: 'gait' };
+      const sampleTypeMap = { grip: '1', sitstand: '3', standing: '4', gait: '5' };
       const params = ids.length > 1
         ? { assessmentIds: ids, sampleType: sampleTypeMap[assessmentType] || '' }
         : { assessmentId: ids[0], sampleType: sampleTypeMap[assessmentType] || '' };

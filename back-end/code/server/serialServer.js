@@ -260,6 +260,43 @@ function flipFoot64x64Vertical(arr) {
   return out
 }
 
+function flipFlatMatrixHorizontal(arr, size) {
+  if (!Array.isArray(arr) || arr.length !== size * size) return arr
+  const out = new Array(arr.length)
+  for (let r = 0; r < size; r++) {
+    const rowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[rowStart + c] = arr[rowStart + (size - 1 - c)]
+    }
+  }
+  return out
+}
+
+function flipReportFrameVertical(arr) {
+  if (!Array.isArray(arr)) return arr
+  if (arr.length === 4096) return flipFoot64x64Vertical(arr)
+  return arr
+}
+
+function shiftFoot64x64FirstRowToLast(arr) {
+  if (!Array.isArray(arr) || arr.length !== 4096) return arr
+  const size = 64
+  const out = new Array(arr.length)
+  for (let r = 0; r < size - 1; r++) {
+    const srcRowStart = (r + 1) * size
+    const dstRowStart = r * size
+    for (let c = 0; c < size; c++) {
+      out[dstRowStart + c] = arr[srcRowStart + c]
+    }
+  }
+  const firstRowStart = 0
+  const lastRowStart = (size - 1) * size
+  for (let c = 0; c < size; c++) {
+    out[lastRowStart + c] = arr[firstRowStart + c]
+  }
+  return out
+}
+
 function zeroBelowThreshold(arr, threshold) {
   if (!Array.isArray(arr)) return arr
   for (let i = 0; i < arr.length; i++) {
@@ -701,7 +738,7 @@ let activeSampleType = null
 
 // ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开） ───
 let footFilterConfig = {
-  // 静态评估 (mode=4, foot1)
+  // 静态评估 (mode=4, foot4)
   standing: {
     filterEnabled: true,     // 去噪滤波开关
     filterThreshold: 12,     // 低压力阈值
@@ -886,8 +923,8 @@ const MODE_TYPE_MAP = {
   11: ['HL'],            // 握力评估-左手采集：只推送左手数据
   12: ['HR'],            // 握力评估-右手采集：只推送右手数据
   2: ['HL', 'HR'],
-  3: ['sit', 'foot1'],
-  4: ['foot1'],
+  3: ['sit', 'foot4'],
+  4: ['foot4'],
   5: ['foot1', 'foot2', 'foot3', 'foot4'],
 }
 let sensorHzCache = {}
@@ -1685,8 +1722,8 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       [/sit/i]
     )
     const standKey = pickKey(
-      ['foot1'],
-      [/foot1/i, /foot/i, /stand/i, /back/i]
+      ['foot4', 'foot1'],
+      [/foot4/i, /foot1/i, /foot/i, /stand/i, /back/i]
     )
 
     const formatTimestamp = (ts) => {
@@ -2704,13 +2741,14 @@ app.post('/getDbHeatmap', async (req, res) => {
       })
     })
 
-    if (dataArr['foot'] || dataArr['foot1']) {
-      const sensor = dataArr['foot'] || dataArr['foot1']
-      pdfArrData = sensor
+    if (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']) {
+      const sensor = dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']
+      const reportSensor = sensor.map(flipReportFrameVertical)
+      pdfArrData = reportSensor
       let renderData = null
       try {
         renderData = await callAlgorithm('generate_standing_render_report', {
-          data_array: sensor,
+          data_array: reportSensor,
           fps: Number(req.body?.fps ?? 42),
           threshold_ratio: Number(req.body?.threshold_ratio ?? 0.8),
         })
@@ -4089,8 +4127,17 @@ async function connectPort() {
           }
           zeroBelowThreshold(pointArr, 8)
           removeSmallIslands64x64(pointArr, 12)
-          // 对脚垫数据做上下翻转（沿水平轴翻转行顺序，实现左右对调）
-          const flippedArr = flipFoot64x64Vertical(pointArr)
+          const shiftedArr = shiftFoot64x64FirstRowToLast(pointArr)
+          let normalizedArr = shiftedArr
+          // 起坐/静态模式按 ld 分支：源头先做上下+左右翻转。
+          if (activeSampleType === '3' || activeSampleType === '4') {
+            normalizedArr = flipFoot64x64Vertical(normalizedArr)
+            normalizedArr = flipFlatMatrixHorizontal(normalizedArr, 64)
+          }
+          // 步道模式按 ld 分支：源头只做上下方向处理。
+          if (activeSampleType === '5') {
+            normalizedArr = flipFoot64x64Vertical(normalizedArr)
+          }
           // 根据当前评估模式应用滤波和坏线补值（数据源头处理，同时影响前端显示、数据库存储和 Python 算法）
           // 优先根据 activeSampleType 判断，兜底根据传感器类型判断（foot1-4 为 gait，foot 为 standing）
           let filterMode = activeSampleType === '4' ? 'standing' : (activeSampleType === '5' ? 'gait' : null)
@@ -4103,15 +4150,15 @@ async function connectPort() {
             }
           }
           if (filterMode) {
-            applyFootFilter(flippedArr, filterMode, dataItem.type)
+            applyFootFilter(normalizedArr, filterMode, dataItem.type)
           } else {
             console.log('[坏线补值] filterMode为null, activeSampleType=%s, type=%s, typeof=%s', activeSampleType, dataItem.type, typeof activeSampleType)
           }
-          dataItem.arr = flippedArr
-          if (dataItem.type === 'foot' && lastFootPointArr.length) {
-            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: flippedArr, data_prev: lastFootPointArr })
+          dataItem.arr = normalizedArr
+          if ((dataItem.type === 'foot' || (activeSampleType === '4' && dataItem.type === 'foot4')) && lastFootPointArr.length) {
+            dataItem.cop = await callAlgorithm('realtime_server', { sensor_data: normalizedArr, data_prev: lastFootPointArr })
           }
-          lastFootPointArr = flippedArr
+          lastFootPointArr = normalizedArr
           // console.log(444)
           const stamp = new Date().getTime()
 
@@ -4409,11 +4456,12 @@ const lastStoredStamps = {}
 
 function storageData(data) {
   const timestamp = Date.now()
+  const storageKeys = activeSampleType === '4' ? ['foot4'] : Object.keys(data || {})
 
   // 基于 stamp 去重：只存储有新数据的设备
   const newData = {}
   let hasNewData = false
-  for (const key of Object.keys(data)) {
+  for (const key of storageKeys) {
     if (!data[key]) continue
     const item = { ...data[key] }
     delete item.status
