@@ -261,6 +261,7 @@ function flipFoot64x64Vertical(arr) {
   return out
 }
 
+// ─── 北京设备线序专用方向处理（广州不用）───
 function flipFlatMatrixHorizontal(arr, size) {
   if (!Array.isArray(arr) || arr.length !== size * size) return arr
   const out = new Array(arr.length)
@@ -2283,6 +2284,20 @@ app.post('/setDeviceRegion', (req, res) => {
     res.json(new HttpResult(0, { deviceRegion: activeDeviceRegion, activeTypes: activeSendTypes, sampleType: activeSampleType }, 'success'))
   } catch (e) {
     res.json(new HttpResult(1, {}, 'setDeviceRegion failed'))
+  }
+})
+
+// 兼容 express-python3-guangzhou 分支的旧接口名。
+app.post('/setRegion', (req, res) => {
+  try {
+    activeDeviceRegion = persistDeviceRegion(req.body?.region)
+    if (activeSampleType === '3' || activeSampleType === '4') {
+      applyActiveMode(activeSampleType)
+    }
+    console.log('[setRegion] 当前地区切换为: %s', activeDeviceRegion)
+    res.json(new HttpResult(0, { region: activeDeviceRegion, deviceRegion: activeDeviceRegion, activeTypes: activeSendTypes, sampleType: activeSampleType }, 'success'))
+  } catch (e) {
+    res.json(new HttpResult(1, {}, 'setRegion failed'))
   }
 })
 

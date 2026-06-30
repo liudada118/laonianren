@@ -79,9 +79,36 @@ export default function ComprehensiveReport({ record, onClose }) {
   const handlePdfExport = async () => {
     if (pdfExporting) return;
     setPdfExporting(true);
+    const root = contentRef?.current;
+    const restores = [];
     try {
-      await exportToPdf(contentRef?.current, `${patientInfo.name}_综合评估报告`, { title: '综合评估报告' });
+      if (root) {
+        // 综合报告 = 4 个固定 88vh 容器 + 子报告内部独立滚动，直接截图会漏掉每块超出可视区的内容（少最后一页）。
+        // 导出前先把所有限高/滚动容器展开成完整高度，让 4 份子报告平铺，确保 PDF 完整贴上。
+        root.querySelectorAll('*').forEach((el) => {
+          const cs = window.getComputedStyle(el);
+          const hasOverflow = el.scrollHeight > el.clientHeight + 1;
+          const fixedVh = typeof el.style?.height === 'string' && el.style.height.includes('vh');
+          const clipped = cs.overflowY === 'auto' || cs.overflowY === 'scroll'
+            || cs.overflow === 'hidden' || cs.overflow === 'auto';
+          if (hasOverflow || fixedVh || clipped) {
+            restores.push([el, el.getAttribute('style')]);
+            el.style.height = 'auto';
+            el.style.maxHeight = 'none';
+            el.style.minHeight = '0';
+            el.style.overflow = 'visible';
+            el.style.overflowY = 'visible';
+          }
+        });
+        // 等两帧让展开后的布局（含 echarts 容器）稳定，再截图
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }
+      await exportToPdf(root, `${patientInfo.name}_综合评估报告`, { title: '综合评估报告' });
     } finally {
+      restores.forEach(([el, css]) => {
+        if (css === null) el.removeAttribute('style');
+        else el.setAttribute('style', css);
+      });
       setPdfExporting(false);
     }
   };
