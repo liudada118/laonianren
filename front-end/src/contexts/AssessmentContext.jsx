@@ -89,10 +89,7 @@ export function AssessmentProvider({ children }) {
               const alertMsg = { id: Date.now() + '_' + type, type, deviceName, time: new Date().toLocaleTimeString() };
               setDeviceAlerts(prev => [...prev, alertMsg]);
               console.warn(`[设备断开] ${deviceName} 已断开连接`);
-              // 5秒后自动移除提示
-              setTimeout(() => {
-                setDeviceAlerts(prev => prev.filter(a => a.id !== alertMsg.id));
-              }, 5000);
+              // 不自动消失：需用户在弹窗里手动点「知道了」确认后才关闭
             }
           }, 5000);
         }

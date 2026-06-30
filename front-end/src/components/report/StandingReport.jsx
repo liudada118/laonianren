@@ -578,10 +578,7 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
     );
   }
 
-  /* ─── 综合评估 ─── */
   const diff = Math.abs(data.bilateral.leftPressureRatio - data.bilateral.rightPressureRatio);
-  const balanceStatus = diff < 5 ? '优秀' : diff < 10 ? '良好' : diff < 20 ? '一般' : '较差';
-  const balanceColor = diff < 5 ? '#059669' : diff < 10 ? '#0066CC' : diff < 20 ? '#D97706' : '#DC2626';
 
   return (
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-primary)' }}>
@@ -686,10 +683,6 @@ export default function StandingReport({ reportData, patientInfo, onClose }) {
                   <DataRow label="左脚压力占比" value={`${data.bilateral.leftPressureRatio.toFixed(1)}%`} />
                   <DataRow label="右脚压力占比" value={`${data.bilateral.rightPressureRatio.toFixed(1)}%`} />
                   <DataRow label="左右差异" value={`${diff.toFixed(1)}%`} />
-                  <div className="flex justify-between items-center py-1.5">
-                    <span className="text-sm" style={{ color: 'var(--text-muted)' }}>平衡评级</span>
-                    <span className="text-sm font-bold" style={{ color: balanceColor }}>{balanceStatus}</span>
-                  </div>
                 </div>
               </div>
             </section>

@@ -26,6 +26,7 @@ import {
   calculateCoP,
 } from '../lib/pressure-sensor';
 import { backendBridge } from '../lib/BackendBridge';
+import { getDeviceRegion } from '../lib/deviceRegion';
 
 const SIM_INTERVAL = 50; // 模拟数据更新间隔（ms），约 20fps
 
@@ -252,13 +253,15 @@ export function usePressureScene(options = {}) {
 
     // 处理后端推送的脚垫数据
     const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
-    // 根据当前模式确定需要使用的脚垫类型
+    // 设备地区：北京/广州线序不同 → 起坐/单脚垫用不同的脚垫接口（北京 foot4 / 广州 foot1）
+    const deviceRegion = getDeviceRegion();
+    const singlePad = deviceRegion === 'beijing' ? 'foot4' : 'foot1';
     const MODE_FOOT_TYPES = {
-      3: ['foot1'],                              // 起坐评估：只用 foot1
-      4: ['foot1'],                              // 单脚垫模式
+      3: [singlePad],                            // 起坐评估：单脚垫
+      4: [singlePad],                            // 单脚垫模式
       5: ['foot1', 'foot2', 'foot3', 'foot4'],   // 步态评估：4 个脚垫
     };
-    const activeFootTypes = MODE_FOOT_TYPES[mode] || ['foot1'];
+    const activeFootTypes = MODE_FOOT_TYPES[mode] || [singlePad];
 
     const handleFootData = (type) => (arr) => {
       const scene = sceneRef.current;
@@ -275,7 +278,10 @@ export function usePressureScene(options = {}) {
       // 使用过滤后的 buffers 更新场景
       const combined = combineFootpads(filteredBuffers);
       if (combined) {
-        const matrix = denoiseMatrix(flipLR(rotateCCW90(combined)), 3, 12);
+        // 北京/广州预处理不同：广州总是 flipLR；北京仅 mode3(起坐)flipLR、其余方向不翻
+        const rotated = rotateCCW90(combined);
+        const oriented = deviceRegion === 'beijing' ? (mode === 3 ? flipLR(rotated) : rotated) : flipLR(rotated);
+        const matrix = denoiseMatrix(oriented, 3, 12);
         scene.updateFootpadData(matrix);
         const stats = matrixStats(matrix);
         const cop = calculateCoP(matrix);

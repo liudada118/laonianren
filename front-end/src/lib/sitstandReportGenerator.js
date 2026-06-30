@@ -131,7 +131,8 @@ export function generateSitStandReportData(
     cycleDurations.push(roundTo(peakTimes[i + 1] - peakTimes[i], 2));
   }
 
-  const numCycles = Math.max(peaks.length, 0);
+  // 起立次数 = 坐姿峰值数 - 1（坐-起-坐为一个周期，中间的"坐"被两个周期共用）
+  const numCycles = Math.max(peaks.length - 1, 0);
   const avgDuration = numCycles > 0
     ? roundTo(Math.max(
       timer / 10,

@@ -14,6 +14,7 @@ import {
   generateFootReport, parseFrameData
 } from '../../lib/FootAnalysis';
 import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getDeviceRegion } from '../../lib/deviceRegion';
 
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
 
@@ -634,15 +635,21 @@ export default function StandingAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 设置脚垫模式，后端只推送 foot1-4 数据
-    backendBridge.setActiveMode(5).then(() => {
-      console.log('[StandingAssessment] 已设置后端模式 mode=5');
+    // 设备地区差异：广州直接站在 foot1（单独垫子）做静态站立；
+    // 北京是步态走到底转身回来、站在最后一个垫子 foot4 上做静态站立
+    const region = getDeviceRegion();
+    const standMode = region === 'beijing' ? 4 : 5;
+    const standFoot = region === 'beijing' ? 'foot4' : 'foot1';
+
+    // 设置脚垫模式
+    backendBridge.setActiveMode(standMode).then(() => {
+      console.log(`[StandingAssessment] 已设置后端模式 mode=${standMode}（地区=${region}，主数据源=${standFoot}）`);
     }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
 
-    // 监听后端推送的脚垫数据（使用 foot1 作为主数据源）
+    // 监听后端推送的脚垫数据（广州 foot1 / 北京 foot4 作为主数据源）
     const handleBackendFootData = (arr) => {
       if (!arr || arr.length === 0) return;
       // 后端推送的是 4096 个值的 flat 数组
@@ -652,10 +659,10 @@ export default function StandingAssessment() {
       handleSerialData(matrix);
     };
 
-    const unsubFoot1 = backendBridge.on('foot1Data', handleBackendFootData);
+    const unsubFoot = backendBridge.on(`${standFoot}Data`, handleBackendFootData);
 
     backendCleanupRef.current = () => {
-      unsubFoot1();
+      unsubFoot();
       setIsBackendMode(false);
     };
 
@@ -782,7 +789,8 @@ export default function StandingAssessment() {
     }
 
     setPhase('idle');
-    setShowStageResultDialog(true);
+    // 单阶段：采集 10 秒结束直接判为完成，不再弹"是否顺利采集"确认，直接进入完成/下一项
+    advanceAfterStageResult(true);
   };
 
   // ─── 手动停止采集 ───

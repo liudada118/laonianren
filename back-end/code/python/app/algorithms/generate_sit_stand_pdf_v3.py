@@ -1753,6 +1753,31 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             "cycle_durations": [],
         }
 
+    # ── 客户定制：站起次数 = 坐垫压力高平台段数 - 1 ──
+    # 用户定义：坐垫压力「高-低-高」为一个周期，相邻两个高平台之间是一次站起；
+    # N 个坐姿高平台 → N-1 次站起（中间的「坐」被相邻两个周期共用）。
+    # 直接用方波分段 sit_segments 计数，绕开 split_edge_baseline_cycles
+    # 把首尾「坐」当基线剔除导致的少算（4 个平台被裁成 2 → 误显示完成 2 次）。
+    plateau_count = len(sit_segments)
+    num_stands = max(plateau_count - 1, 0)
+    if duration_stats is not None:
+        duration_stats['num_cycles'] = num_stands
+        if len(sit_peaks) >= 2:
+            _peak_times = [sit_times.iloc[int(p)] for p in sit_peaks]
+            _stand_durations = [
+                round(max((_peak_times[i + 1] - _peak_times[i]).total_seconds(), 0.0), 2)
+                for i in range(len(_peak_times) - 1)
+            ]
+            duration_stats['cycle_durations'] = _stand_durations
+            duration_stats['avg_duration'] = (
+                round(sum(_stand_durations) / len(_stand_durations), 2)
+                if _stand_durations else 0
+            )
+        else:
+            duration_stats['cycle_durations'] = []
+            duration_stats['avg_duration'] = 0
+    print(f"   [站起次数] 坐垫高平台 {plateau_count} 段 → 站起 {num_stands} 次")
+
     # [已注释] 3. base64 PNG 图片生成 — 前端已使用 heatmap_data + cop_data 通过 Canvas 渲染，不再需要 images
     # import base64  # (下方 cop_data 段仍需要，移到那里)
     upf = LC.ImageConfig.UPSCALE_FACTOR
@@ -1925,11 +1950,9 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         t0 = min(t0_stand, t0_sit)
     else:
         t0 = t0_stand or t0_sit
-    effective_sit_peaks = [
-        int(cycle["peak_idx"])
-        for cycle in timing_cycles
-        if cycle.get("peak_idx") is not None
-    ]
+    # 客户定制：坐垫峰值数 = 全部坐姿高平台数（与站起次数 = 平台数-1 自洽），
+    # 不裁掉首尾「坐」；timing_cycles 经 split_edge_baseline_cycles 裁过首尾会少标。
+    effective_sit_peaks = [int(p) for p in sit_peaks]
     stand_time_list = [(t - t0).total_seconds() for t in stand_times] if t0 is not None and len(stand_times) > 0 else []
     sit_time_list = [(t - t0).total_seconds() for t in sit_times] if t0 is not None and len(sit_times) > 0 else []
     stand_peak_time_list = [(stand_times.iloc[idx] - t0).total_seconds() for idx in stand_peaks] if t0 is not None and len(stand_peaks) > 0 else []

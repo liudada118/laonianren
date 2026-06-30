@@ -51,21 +51,23 @@ export default function DeviceAlertOverlay() {
             </div>
           </div>
 
-          {/* 关闭按钮 */}
+          {/* 确认按钮：需人工点击「知道了」才关闭，不再自动消失 */}
           <button
             onClick={() => dismissDeviceAlert(alert.id)}
             style={{
-              background: 'none',
+              background: '#EF4444',
               border: 'none',
               cursor: 'pointer',
-              padding: 4,
-              color: '#B91C1C',
-              fontSize: 16,
-              lineHeight: 1,
+              padding: '6px 12px',
+              color: 'white',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
               flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
-            &times;
+            知道了
           </button>
         </div>
       ))}

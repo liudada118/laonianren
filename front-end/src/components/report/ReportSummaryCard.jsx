@@ -16,12 +16,9 @@ function scoreBand(score, maxScore) {
   return { label: '重点关注', color: '#DC2626', bg: '#FEF2F2' };
 }
 
-export function BasisNote({ className = '' }) {
-  return (
-    <p className={`text-[10px] leading-relaxed ${className}`} style={{ color: 'var(--text-muted)' }}>
-      依据说明：本报告依据《亚洲肌少症工作组（AWGS）2019 共识》及《社区老年人肌肉减少症筛查专家共识》构建早筛路径；握力、步速、5次坐站等阈值用于功能风险提示，静态站立结合 CDC STEADI、SPPB 和本设备压力/COP轨迹长度指标，不作为疾病诊断。
-    </p>
-  );
+export function BasisNote() {
+  // 依据说明已按客户要求移除（保留导出避免各报告 import 报错）
+  return null;
 }
 
 export default function ReportSummaryCard({
@@ -31,6 +28,10 @@ export default function ReportSummaryCard({
   aiIntro = '',
   children,
 }) {
+  // 评分块（项目评分/等级/评分明细/描述）已按客户要求整体移除，报告只保留采集数据与图表
+  return null;
+
+  /* eslint-disable no-unreachable */
   if (!scoreResult) return null;
 
   const band = scoreBand(scoreResult.score, scoreResult.maxScore || 25);
@@ -67,24 +68,6 @@ export default function ReportSummaryCard({
             </div>
           </div>
 
-          {breakdown.length > 0 && (
-            <div className="mb-3">
-              <div className="text-[11px] font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>评分明细</div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                {breakdown.map((item, index) => (
-                  <div key={`${item.label}-${index}`} className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
-                    <div className="flex items-center gap-1 mb-0.5">
-                      <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{item.label}</span>
-                      <InfoTooltip text={item.help} iconColor="#C4C8CE" iconOpacity={1} />
-                    </div>
-                    <div className="text-sm font-bold" style={{ color: breakdownColor(item.score, item.max) }}>
-                      {item.score}<span className="text-[11px] font-bold" style={{ color: 'var(--text-muted)' }}>/{item.max}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {redFlags.length > 0 && (
             <div className="flex flex-wrap gap-2">

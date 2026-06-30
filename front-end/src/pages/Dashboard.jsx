@@ -6,6 +6,7 @@ import { buildComprehensiveScoreResult } from '../lib/assessmentScoring';
 import { parseRosterFile } from '../lib/rosterImport';
 import { deriveStatusMap } from '../lib/rosterService';
 import { getHistory } from '../lib/historyService';
+import { getDeviceRegion, setDeviceRegion, REGION_LABEL } from '../lib/deviceRegion';
 
 /* ─── 评估项目配置 ─── */
 const ASSESSMENTS = [
@@ -542,6 +543,7 @@ export default function Dashboard() {
   const [showRosterPanel, setShowRosterPanel] = useState(false);
   const [showAddPatient, setShowAddPatient] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [deviceRegion, setDeviceRegionState] = useState(getDeviceRegion());
   const [switchTarget, setSwitchTarget] = useState(null);
   const [showNextConfirm, setShowNextConfirm] = useState(null);
   const nextPromptedRef = useRef(null);
@@ -706,6 +708,20 @@ export default function Dashboard() {
             </svg>
             <span className="hidden sm:inline">历史记录</span>
           </button>
+          <div className="flex items-center rounded-full p-0.5 shrink-0"
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}
+            title="切换设备地区（线序/预处理：广州 / 北京），进入评估时按该地区处理">
+            {['guangzhou', 'beijing'].map(r => (
+              <button key={r}
+                onClick={() => { setDeviceRegion(r); setDeviceRegionState(r); }}
+                className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
+                style={deviceRegion === r
+                  ? { background: '#059669', color: 'white' }
+                  : { background: 'transparent', color: 'var(--text-muted)' }}>
+                {REGION_LABEL[r]}
+              </button>
+            ))}
+          </div>
           <button onClick={() => navigate('/', { state: { editMode: true } })}
             className="zeiss-btn-ghost flex items-center gap-1.5 md:gap-2 text-xs md:text-sm"
             title="修改登录信息">
