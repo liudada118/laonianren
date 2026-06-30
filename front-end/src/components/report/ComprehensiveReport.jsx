@@ -42,11 +42,12 @@ function NotTested({ label }) {
 }
 
 /* ─── 子报告容器 ───
-   各单项报告组件根节点是整页布局（h-full flex flex-col + 内部独立滚动 + 侧边目录）。
-   堆叠时给每个一个固定的视口高度容器，让 h-full 解析，组件内部自带滚动正常工作。 */
+   不再用固定 88vh + 内部滚动（那样每块都有自己的滚动条、看起来像缩放小窗）。
+   改为按内容完整展开：配合下方 scoped CSS 解除子报告内部的 h-full / overflow，
+   4 份子报告垂直拼接成一长条，整体只用外层一个滚动条，导出 PDF 也天然完整。 */
 function ReportBlock({ children }) {
   return (
-    <div className="mx-2 md:mx-4 mb-4 rounded-xl overflow-hidden" style={{ height: '88vh', border: '1px solid var(--border-light)' }}>
+    <div className="cr-report-block mx-2 md:mx-4 mb-4 rounded-xl" style={{ border: '1px solid var(--border-light)' }}>
       {children}
     </div>
   );
@@ -115,6 +116,13 @@ export default function ComprehensiveReport({ record, onClose }) {
 
   return (
     <div className="flex flex-col h-full">
+      {/* 让 4 份子报告完整展开拼接：解除子报告内部的固定高度与内部滚动，
+          页面整体只用外层一个滚动条，不再是每块一个带滚动条的小窗。 */}
+      <style>{`
+        .cr-report-block .h-full { height: auto !important; }
+        .cr-report-block .overflow-hidden { overflow: visible !important; }
+        .cr-report-block .overflow-y-auto { overflow-y: visible !important; height: auto !important; max-height: none !important; }
+      `}</style>
       {/* 顶部栏 */}
       <div className="shrink-0 px-4 md:px-6 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-light)', background: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-3 min-w-0">
