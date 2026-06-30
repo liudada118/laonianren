@@ -2012,6 +2012,26 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             if sit_range is not None:
                 sit_cycle_ranges.append(sit_range)
 
+    # 客户定制：各周期(站起)范围按坐垫高平台的相邻峰对齐，使周期数 = 站起次数(坐垫平台-1)，
+    # 与「完成次数」「各周期时长」「各峰值力分布」一致。否则会沿用 split_edge_baseline_cycles
+    # 裁剪首尾后的周期数，导致峰值力柱数偏少(如 4 个坐垫峰却只画 2 个柱)。
+    if len(sit_peaks) >= 2:
+        rebuilt_stand_ranges = []
+        rebuilt_sit_ranges = []
+        for i in range(len(sit_peaks) - 1):
+            t_start = sit_times.iloc[int(sit_peaks[i])]
+            t_end = sit_times.iloc[int(sit_peaks[i + 1])]
+            sr = time_window_to_index_range(stand_times, t_start, t_end)
+            si = time_window_to_index_range(sit_times, t_start, t_end)
+            if sr is not None:
+                rebuilt_stand_ranges.append(sr)
+            if si is not None:
+                rebuilt_sit_ranges.append(si)
+        if rebuilt_stand_ranges:
+            stand_cycle_ranges = rebuilt_stand_ranges
+            sit_cycle_ranges = rebuilt_sit_ranges
+            print(f"   [周期对齐] 各峰值力/周期范围按坐垫相邻峰重建为 {len(stand_cycle_ranges)} 个站起")
+
     # ====== 4.6 补充前端所需的额外字段 ======
 
     # --- 4.6.1 heatmap_data: 热力图矩阵数据（供前端 Canvas 渲染） ---
