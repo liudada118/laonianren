@@ -299,8 +299,8 @@ def load_stand_data(file_path):
 
 
 # ─── 坐垫力值/接触判定阈值（不影响热力图；热力图用 load_sit_data 的低阈值保留低压细节）───
-SIT_POINT_THR = 50          # 单点 ADC 阈值：>此值才计入力值求和，滤空载零漂
-SEAT_CONTACT_SUM_THR = 500  # 坐垫 ADC 总和阈值：单帧总和>此值算「坐上去」，用于坐垫接触时长
+SIT_POINT_THR = 100         # 单点 ADC 阈值：帧内有点>此值才算「真的坐上去」（滤空载零漂）。
+                            # 力值求和、坐垫接触判定、次数开关共用——相当于「有没有开始测」的总开关
 
 def load_sit_data(file_path):
     """加载并去噪坐姿数据"""
@@ -1787,14 +1787,19 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             _dt = _span / max(len(sit_times) - 1, 1)
         # 坐垫接触总时长 = 坐垫压力 > 阈值的全部帧 × 帧间隔（单独接触坐垫的累计时间）。
         # 直接数「压力>阈值」的帧，不经过分段/去短段/噪声过滤，稳定必有值。
-        # 坐垫接触总时长 = 坐垫ADC总和 > 阈值的帧数 × 帧间隔（滤空载后，判定真正坐上去的帧）
-        _sit_force_raw = sit_cycle_info.get('sit_force')
+        # 坐垫接触总时长 = 帧内单点最大 ADC > SIT_POINT_THR 的帧数 × 帧间隔
+        # （帧里有点超过阈值=真的坐上去了；纯零漂帧不超阈值，不计入）
         _seat_contact = 0.0
         _contact_frames = 0
-        if _sit_force_raw is not None and len(_sit_force_raw) > 0 and _dt > 0:
-            _contact_frames = int(np.sum(np.asarray(_sit_force_raw, dtype=float) > SEAT_CONTACT_SUM_THR))
+        if sit_data is not None and len(sit_data) > 0 and _dt > 0:
+            _frame_max = np.max(np.asarray(sit_data), axis=(1, 2))
+            _contact_frames = int(np.sum(_frame_max > SIT_POINT_THR))
             _seat_contact = _contact_frames * _dt
         duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
+        # 测试次数开关：整段采集没有任何帧单点>阈值（没测/纯零漂）→ 强制 0 次，避免零漂被算成起坐
+        if _contact_frames == 0:
+            duration_stats['num_cycles'] = 0
+        print(f"   [坐垫接触] 单点>{SIT_POINT_THR}的帧={_contact_frames}, 接触时长={duration_stats['seat_contact_duration']}s")
         # 总时长 = 整个起坐评估的采集时长（从采集开始到结束）
         if len(sit_times) > 1:
             duration_stats['total_duration'] = round((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 2)
