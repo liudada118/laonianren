@@ -1776,9 +1776,15 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
-        # 坐垫接触总时长：沿用原「总时长」(calculate_cycle_stats 的各周期有效时长之和，
-        # 能稳定显示)。注意先取值、再用整周期覆盖 total_duration。
-        duration_stats['seat_contact_duration'] = round(float(duration_stats.get('total_duration', 0.0) or 0.0), 2)
+        # 坐垫接触总时长 = 各坐姿平台(坐着)时长之和：直接量坐着累计时间，稳定必有值。
+        # （方案B 沿用原 total_duration 在部分数据下会取到 0，不稳定，故改回直接量坐着时间）
+        _seat_contact = 0.0
+        for _cs, _ce in sit_segments:
+            _cs_i = min(int(_cs), len(sit_times) - 1)
+            _ce_i = min(int(_ce) - 1, len(sit_times) - 1)
+            if _ce_i > _cs_i:
+                _seat_contact += max((sit_times.iloc[_ce_i] - sit_times.iloc[_cs_i]).total_seconds(), 0.0)
+        duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
         # 总时长 = 整个起坐周期：第一个坐姿平台起点 → 最后一个坐姿平台终点
         if len(sit_segments) > 0:
             _w_start = sit_times.iloc[min(int(sit_segments[0][0]), len(sit_times) - 1)]

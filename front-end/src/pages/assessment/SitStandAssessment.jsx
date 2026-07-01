@@ -6,7 +6,7 @@ import EChart from '../../components/ui/EChart';
 import SitStandReport from '../../components/report/SitStandReport';
 import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
 import { backendBridge } from '../../lib/BackendBridge';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
@@ -488,9 +488,9 @@ export default function SitStandAssessment() {
               <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               {next ? (
                 <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
-              ) : (
+              ) : isAllAssessmentsCompleted(assessments) ? (
                 <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

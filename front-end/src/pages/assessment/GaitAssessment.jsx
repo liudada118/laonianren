@@ -13,7 +13,7 @@ import PressureEvolutionChart from '../../components/ui/PressureEvolutionChart';
 import { exportToPdf } from '../../lib/pdfExport';
 import ReportSummaryCard, { BasisNote } from '../../components/report/ReportSummaryCard';
 import { scoreGait } from '../../lib/assessmentScoring';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
 
 /* ─── 传感器常量 ─── */
 const SENSOR_KEYS = ['sensor1', 'sensor2', 'sensor3', 'sensor4'];
@@ -1098,9 +1098,9 @@ export default function GaitAssessment() {
               <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               {next ? (
                 <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
-              ) : (
+              ) : isAllAssessmentsCompleted(assessments) ? (
                 <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

@@ -38,4 +38,13 @@ export function getNextAssessmentType(assessments, currentType) {
   return null;
 }
 
-export default { ASSESSMENT_ORDER, ASSESSMENT_PATH, ASSESSMENT_LABEL, getNextAssessmentType };
+/**
+ * 是否四项评估都已完成（用于完成窗判断，避免「向后没有下一项」被误判成「四项已完成」）。
+ * @param {Object} assessments
+ * @returns {boolean}
+ */
+export function isAllAssessmentsCompleted(assessments) {
+  return ASSESSMENT_ORDER.every((t) => assessments?.[t]?.completed);
+}
+
+export default { ASSESSMENT_ORDER, ASSESSMENT_PATH, ASSESSMENT_LABEL, getNextAssessmentType, isAllAssessmentsCompleted };

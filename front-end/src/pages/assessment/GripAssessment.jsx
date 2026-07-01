@@ -10,7 +10,7 @@ import { gloveService } from '../../lib/GloveSerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import SerialLogPanel from '../../components/debug/SerialLogPanel';
 import { generateGripReportData } from '../../lib/gripReportGenerator';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
 
 /* ─── 步骤指示器 (蔡司风格) ─── */
 function StepIndicator({ current, steps }) {
@@ -1020,9 +1020,9 @@ export default function GripAssessment() {
               <button onClick={() => navigate('/dashboard')} className="zeiss-btn-secondary flex-1 py-3 text-sm">返回首页</button>
               {next ? (
                 <button onClick={() => navigate(ASSESSMENT_PATH[next])} className="zeiss-btn-primary flex-1 py-3 text-sm">下一项：{ASSESSMENT_LABEL[next]} ›</button>
-              ) : (
+              ) : isAllAssessmentsCompleted(assessments) ? (
                 <button onClick={() => navigate('/dashboard')} className="zeiss-btn-primary flex-1 py-3 text-sm">四项已完成，返回</button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
