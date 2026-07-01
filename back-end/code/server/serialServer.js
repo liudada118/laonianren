@@ -770,12 +770,12 @@ function isBeijingDevice() {
 }
 
 function getSingleFootType(region = activeDeviceRegion) {
-  return normalizeDeviceRegion(region) === 'beijing' ? 'foot4' : 'foot1'
+  return 'foot4'
 }
 
 // ─── 脚垫滤波/优化参数（前端可通过 API 实时调节，静态和步道分开） ───
 let footFilterConfig = {
-  // 静态评估 (mode=4, 广州 foot1 / 北京 foot4)
+  // 静态评估 (mode=4, foot4)
   standing: {
     filterEnabled: true,     // 去噪滤波开关
     filterThreshold: 12,     // 低压力阈值
@@ -960,8 +960,8 @@ const MODE_TYPE_MAP = {
   11: ['HL'],            // 握力评估-左手采集：只推送左手数据
   12: ['HR'],            // 握力评估-右手采集：只推送右手数据
   2: ['HL', 'HR'],
-  3: ['sit', 'foot1'],
-  4: ['foot1'],
+  3: ['sit', 'foot4'],
+  4: ['foot4'],
   5: ['foot1', 'foot2', 'foot3', 'foot4'],
 }
 let sensorHzCache = {}

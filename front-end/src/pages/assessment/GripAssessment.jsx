@@ -10,7 +10,7 @@ import { gloveService } from '../../lib/GloveSerialService';
 import { backendBridge } from '../../lib/BackendBridge';
 import SerialLogPanel from '../../components/debug/SerialLogPanel';
 import { generateGripReportData } from '../../lib/gripReportGenerator';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
 import { getDeviceRegion } from '../../lib/deviceRegion';
 
 /* ─── 步骤指示器 (蔡司风格) ─── */

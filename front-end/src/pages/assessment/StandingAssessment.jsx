@@ -13,8 +13,7 @@ import {
   getValidCoords, divideXRegions, calculateRegionPressure, processFrameRealtime,
   generateFootReport, parseFrameData
 } from '../../lib/FootAnalysis';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
-import { getDeviceRegion } from '../../lib/deviceRegion';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
 
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };
 
@@ -635,21 +634,18 @@ export default function StandingAssessment() {
     if (!isGlobalConnected) return;
     if (backendCleanupRef.current) return; // 已在监听
 
-    // 设备地区差异：广州直接站在 foot1（单独垫子）做静态站立；
-    // 北京是步态走到底转身回来、站在最后一个垫子 foot4 上做静态站立
-    const region = getDeviceRegion();
     const standMode = 4;
-    const standFoot = region === 'beijing' ? 'foot4' : 'foot1';
+    const standFoot = 'foot4';
 
-    // 设置脚垫模式
-    backendBridge.setActiveMode(standMode, { deviceRegion: region }).then(() => {
-      console.log(`[StandingAssessment] 已设置后端模式 mode=${standMode}（地区=${region}，主数据源=${standFoot}）`);
+    // 设置静态站立模式，后端只推送 foot4 数据
+    backendBridge.setActiveMode(standMode, { deviceRegion: 'beijing' }).then(() => {
+      console.log(`[StandingAssessment] 已设置后端模式 mode=${standMode}（主数据源=${standFoot}）`);
     }).catch(e => console.error('[StandingAssessment] setActiveMode failed:', e));
 
     setIsBackendMode(true);
     setDeviceStatus('connected');
 
-    // 监听后端推送的脚垫数据（广州 foot1 / 北京 foot4 作为主数据源）
+    // 监听后端推送的脚垫数据（使用 foot4 作为主数据源）
     const handleBackendFootData = (arr) => {
       if (!arr || arr.length === 0) return;
       // 后端推送的是 4096 个值的 flat 数组
@@ -698,7 +694,6 @@ export default function StandingAssessment() {
     // 只有第一阶段双脚站立数据进入 Python 指标计算；后续阶段只记录人为完成等级。
     if (isBackendMode && currentStageIndex === 0) {
       const aid = `standing_${Date.now()}`;
-      const region = getDeviceRegion();
       assessmentIdRef.current = aid;
       try {
         await backendBridge.startCol({
@@ -706,7 +701,7 @@ export default function StandingAssessment() {
           sampleType: '4',
           name: patientInfo?.name || 'test',
           date: new Date().toISOString().split('T')[0],
-          deviceRegion: region,
+          deviceRegion: 'beijing',
         });
         console.log('[Standing] startCol 成功, assessmentId:', aid);
       } catch (e) {

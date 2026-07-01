@@ -217,7 +217,7 @@ export function usePressureScene(options = {}) {
     if (backendCleanupRef.current) return; // 已经在监听了
 
     const mode = optionsRef.current.backendMode || 3;
-    const deviceRegion = getDeviceRegion();
+    const deviceRegion = (mode === 3 || mode === 4) ? 'beijing' : getDeviceRegion();
 
     // 设置后端采集模式
     backendBridge.setActiveMode(mode, { deviceRegion }).then(() => {
@@ -254,8 +254,8 @@ export function usePressureScene(options = {}) {
 
     // 处理后端推送的脚垫数据
     const footBuffers = { foot1: null, foot2: null, foot3: null, foot4: null };
-    // 设备地区：北京/广州线序不同 → 起坐/单脚垫用不同的脚垫接口（北京 foot4 / 广州 foot1）
-    const singlePad = deviceRegion === 'beijing' ? 'foot4' : 'foot1';
+    // 北京静态/起坐使用 foot4。
+    const singlePad = 'foot4';
     const MODE_FOOT_TYPES = {
       3: [singlePad],                            // 起坐评估：单脚垫
       4: [singlePad],                            // 单脚垫模式

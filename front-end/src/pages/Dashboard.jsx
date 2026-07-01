@@ -37,7 +37,7 @@ const ASSESSMENTS = [
     iconColor: '#BEB0D8',
     icon: '/icons/footprint.png',
     iconBg: 'linear-gradient(135deg, #F3EEFF 0%, #E8DEFF 100%)',
-    devices: ['foot1'],
+    devices: ['foot4'],
   },
   {
     key: 'grip',
@@ -65,7 +65,7 @@ const ASSESSMENTS = [
     iconColor: '#A8C8B8',
     icon: '/icons/sit-stand.png',
     iconBg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
-    devices: ['sit', 'foot1'],
+    devices: ['sit', 'foot4'],
   }
 ];
 
@@ -254,7 +254,7 @@ function AddPatientDialog({ open, roster, defaultRegion, onClose, onConfirm }) {
     const finalRegion = (region === '__other__' ? otherRegion : region).trim();
     if (!tid) { setError('请填写编号(ID)'); return; }
     if (!tname) { setError('请填写姓名'); return; }
-    if (roster.some(p => String(p.id) === tid)) { setError(`编号 ${tid} 已存在，请使用唯一编号`); return; }
+    // ID 唯一：编号重复时用新输入覆盖旧记录（不再拒绝）；姓名可重复
     onConfirm({ id: tid, name: tname, region: finalRegion, gender, age: age === '' ? '' : (Number(age) || ''), weight: '' });
   };
 

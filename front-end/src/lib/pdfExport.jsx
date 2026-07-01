@@ -315,6 +315,93 @@ export async function exportToPdf(container, fileName = 'report', options = {}) 
   }
 }
 
+/**
+ * 多段合并导出：依次对每个 step.prepare() 返回的容器截图，合并进同一个 PDF。
+ * 用于握力左右手：先切左手截图、再切右手截图，左手在前、右手在后。
+ * @param {Array<{prepare: () => Promise<HTMLElement>}>} steps
+ */
+export async function exportHandsToPdf(steps, fileName = 'report', options = {}) {
+  const {
+    title = '评估报告',
+    orientation = 'portrait',
+    scale = 2,
+    quality = 0.95,
+    pageBreakSelectors = DEFAULT_PAGE_BREAK_SELECTORS,
+  } = options;
+
+  const isLandscape = orientation === 'landscape';
+  const pageWidth = isLandscape ? 297 : 210;
+  const pageHeight = isLandscape ? 210 : 297;
+  const margin = 5;
+  const contentWidth = pageWidth - margin * 2;
+  const contentHeight = pageHeight - margin * 2;
+
+  const pdf = new jsPDF({ orientation: isLandscape ? 'l' : 'p', unit: 'mm', format: 'a4' });
+  pdf.setProperties({ title: `${title} - ${fileName}`, creator: '老年人筛查系统' });
+
+  let firstPage = true;
+  try {
+    for (const step of steps) {
+      const container = await step.prepare();
+      if (!container) continue;
+
+      const exportId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const prevId = container.getAttribute(TEMP_EXPORT_ATTR);
+      container.setAttribute(TEMP_EXPORT_ATTR, exportId);
+      try {
+        const { width: cw, height: ch } = getCaptureBounds(container);
+        const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0, cw);
+        const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0, ch);
+        const effScale = limitRenderScale(cw, ch, scale);
+        let ranges = [];
+        const canvas = await html2canvas(container, {
+          scale: effScale, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false,
+          width: cw, height: ch, scrollX: 0, scrollY: 0, windowWidth: vw, windowHeight: vh,
+          onclone: (doc) => {
+            const c = doc.querySelector(`[${TEMP_EXPORT_ATTR}="${exportId}"]`);
+            ranges = prepareCloneForCapture(c, cw, ch, pageBreakSelectors);
+          },
+        });
+
+        const imgWidth = contentWidth;
+        const imgHeight = (canvas.height * contentWidth) / canvas.width;
+        const pageHeightPx = Math.max(1, Math.floor((contentHeight / contentWidth) * canvas.width));
+        const rangeScale = canvas.height / Math.max(1, ch);
+        const scaledRanges = ranges.map((r) => ({
+          top: Math.round(r.top * rangeScale),
+          bottom: Math.round(r.bottom * rangeScale),
+          height: Math.round(r.height * rangeScale),
+        }));
+        const slices = computePageSlices(canvas.height, pageHeightPx, scaledRanges);
+
+        if (imgHeight <= contentHeight || slices.length <= 1) {
+          if (!firstPage) pdf.addPage();
+          pdf.addImage(canvas.toDataURL('image/jpeg', quality), 'JPEG', margin, margin, imgWidth, imgHeight);
+          firstPage = false;
+        } else {
+          slices.forEach((slice) => {
+            if (!firstPage) pdf.addPage();
+            const page = renderCanvasSlice(canvas, slice.start, slice.end, quality);
+            const sliceHmm = (page.height * imgWidth) / canvas.width;
+            pdf.addImage(page.dataUrl, 'JPEG', margin, margin, imgWidth, sliceHmm);
+            firstPage = false;
+          });
+        }
+      } finally {
+        if (prevId == null) container.removeAttribute(TEMP_EXPORT_ATTR);
+        else container.setAttribute(TEMP_EXPORT_ATTR, prevId);
+      }
+    }
+
+    pdf.save(`${fileName}.pdf`);
+    return true;
+  } catch (error) {
+    console.error('[PDF Export multi] failed:', error);
+    alert(`PDF 生成失败: ${error.message}`);
+    return false;
+  }
+}
+
 export function PdfExportButton({ containerRef, fileName, title, className, style, children }) {
   const [exporting, setExporting] = React.useState(false);
 
