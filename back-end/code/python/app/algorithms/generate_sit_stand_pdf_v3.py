@@ -560,6 +560,20 @@ def detect_sit_peak_cycles(sit_data, sit_times):
             min(len(smooth_force), peak_idx + half_width + 1),
         )]
 
+    # 噪声力阈值：坐姿平台峰值力必须 ≥ 50N（坐垫牛顿 = 每帧 ADC 总和 / 26.18），
+    # 否则视为噪声/轻微触碰，不计入坐姿——避免坐垫噪声被误算成一次坐、虚增起坐次数。
+    if len(sit_segments) > 0:
+        _adc_floor = 50.0 * 26.18  # 50N 对应的 ADC 总和阈值（≈1309）
+        _seg_peaks = [float(np.max(smooth_force[s:e])) for s, e in sit_segments]
+        _kept = [seg for seg, pk in zip(sit_segments, _seg_peaks) if pk >= _adc_floor]
+        if _kept and len(_kept) < len(sit_segments):
+            print(f"    [噪声过滤] 坐力阈值=50N(ADC总和≥{_adc_floor:.0f})，坐姿段 {len(sit_segments)}→{len(_kept)}")
+            sit_segments = _kept
+        elif not _kept:
+            # 全部低于阈值时保留原段，避免把正常起坐误删成 0 次/0 时长；
+            # 同时打印实际峰值，便于核对 50N 阈值是否与现场坐垫量级匹配
+            print(f"    [噪声过滤] 警告：坐姿段峰值均 < 50N（最大ADC总和≈{max(_seg_peaks):.0f}），保留原段避免误判为0")
+
     sit_peaks = []
     for start, end in sit_segments:
         local_max_idx = int(np.argmax(smooth_force[start:end]))
@@ -1762,6 +1776,14 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
+        # 坐垫接触总时长：沿用原「总时长」(calculate_cycle_stats 的各周期有效时长之和，
+        # 能稳定显示)。注意先取值、再用整周期覆盖 total_duration。
+        duration_stats['seat_contact_duration'] = round(float(duration_stats.get('total_duration', 0.0) or 0.0), 2)
+        # 总时长 = 整个起坐周期：第一个坐姿平台起点 → 最后一个坐姿平台终点
+        if len(sit_segments) > 0:
+            _w_start = sit_times.iloc[min(int(sit_segments[0][0]), len(sit_times) - 1)]
+            _w_end = sit_times.iloc[min(int(sit_segments[-1][1]) - 1, len(sit_times) - 1)]
+            duration_stats['total_duration'] = round(max((_w_end - _w_start).total_seconds(), 0.0), 2)
         if len(sit_peaks) >= 2:
             _peak_times = [sit_times.iloc[int(p)] for p in sit_peaks]
             _stand_durations = [
@@ -2011,6 +2033,26 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             )
             if sit_range is not None:
                 sit_cycle_ranges.append(sit_range)
+
+    # 客户定制：各周期(站起)范围按坐垫高平台的相邻峰对齐，使周期数 = 站起次数(坐垫平台-1)，
+    # 与「完成次数」「各周期时长」「各峰值力分布」一致。否则会沿用 split_edge_baseline_cycles
+    # 裁剪首尾后的周期数，导致峰值力柱数偏少(如 4 个坐垫峰却只画 2 个柱)。
+    if len(sit_peaks) >= 2:
+        rebuilt_stand_ranges = []
+        rebuilt_sit_ranges = []
+        for i in range(len(sit_peaks) - 1):
+            t_start = sit_times.iloc[int(sit_peaks[i])]
+            t_end = sit_times.iloc[int(sit_peaks[i + 1])]
+            sr = time_window_to_index_range(stand_times, t_start, t_end)
+            si = time_window_to_index_range(sit_times, t_start, t_end)
+            if sr is not None:
+                rebuilt_stand_ranges.append(sr)
+            if si is not None:
+                rebuilt_sit_ranges.append(si)
+        if rebuilt_stand_ranges:
+            stand_cycle_ranges = rebuilt_stand_ranges
+            sit_cycle_ranges = rebuilt_sit_ranges
+            print(f"   [周期对齐] 各峰值力/周期范围按坐垫相邻峰重建为 {len(stand_cycle_ranges)} 个站起")
 
     # ====== 4.6 补充前端所需的额外字段 ======
 
