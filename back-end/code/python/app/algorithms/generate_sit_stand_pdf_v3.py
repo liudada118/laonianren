@@ -298,6 +298,10 @@ def load_stand_data(file_path):
     return tensor, times
 
 
+# ─── 坐垫力值/接触判定阈值（不影响热力图；热力图用 load_sit_data 的低阈值保留低压细节）───
+SIT_POINT_THR = 50          # 单点 ADC 阈值：>此值才计入力值求和，滤空载零漂
+SEAT_CONTACT_SUM_THR = 500  # 坐垫 ADC 总和阈值：单帧总和>此值算「坐上去」，用于坐垫接触时长
+
 def load_sit_data(file_path):
     """加载并去噪坐姿数据"""
     print(f" 正在读取 Sit 文件: {file_path}")
@@ -307,7 +311,7 @@ def load_sit_data(file_path):
 
     final_matrix = []
     for frame in tensor:
-        frame[frame <= 50] = 0  # 坐垫单点去噪阈值：滤掉空载零漂（ADC≤50 视为无接触，置0）
+        frame[frame <= 10] = 0  # 坐垫热力图去噪：仅滤极小噪声，保留低压细节（力值/接触另用 SIT_POINT_THR 滤空载）
         
         if np.max(frame) > 0:
             mask = (frame > 0).astype(np.uint8)
@@ -532,7 +536,7 @@ def detect_sit_peak_cycles(sit_data, sit_times):
             "cycle_windows": [],
         }
 
-    sit_force = np.sum(sit_data, axis=(1, 2)).astype(np.float64)
+    sit_force = np.sum(np.where(sit_data > SIT_POINT_THR, sit_data, 0), axis=(1, 2)).astype(np.float64)  # 力值/分段：单点>阈值才计入，滤空载零漂
     frame_dt = _estimate_frame_interval_seconds(sit_times)
     sigma_frames = max(1.0, min(6.0, 0.18 / max(frame_dt, 1e-3)))
     smooth_force = (
@@ -1783,11 +1787,12 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             _dt = _span / max(len(sit_times) - 1, 1)
         # 坐垫接触总时长 = 坐垫压力 > 阈值的全部帧 × 帧间隔（单独接触坐垫的累计时间）。
         # 直接数「压力>阈值」的帧，不经过分段/去短段/噪声过滤，稳定必有值。
-        _smooth = sit_cycle_info.get('smooth_force')
-        _thr = float(sit_cycle_info.get('threshold', 0.0) or 0.0)
+        # 坐垫接触总时长 = 坐垫ADC总和 > 阈值的帧数 × 帧间隔（滤空载后，判定真正坐上去的帧）
+        _sit_force_raw = sit_cycle_info.get('sit_force')
         _seat_contact = 0.0
-        if _smooth is not None and len(_smooth) > 0 and _dt > 0:
-            _contact_frames = int(np.sum(np.asarray(_smooth, dtype=float) >= _thr))
+        _contact_frames = 0
+        if _sit_force_raw is not None and len(_sit_force_raw) > 0 and _dt > 0:
+            _contact_frames = int(np.sum(np.asarray(_sit_force_raw, dtype=float) > SEAT_CONTACT_SUM_THR))
             _seat_contact = _contact_frames * _dt
         duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
         # 总时长 = 整个起坐评估的采集时长（从采集开始到结束）
@@ -1971,7 +1976,7 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
     # ADC→牛顿转换: 足底逐像素转换后求和, 坐垫ADC总和/26.18
     stand_force_arr = np.array([adc_to_newton_foot_sum(f) for f in stand_data])
-    sit_adc_arr = np.sum(sit_data, axis=(1, 2))
+    sit_adc_arr = np.sum(np.where(sit_data > SIT_POINT_THR, sit_data, 0), axis=(1, 2))  # 前端坐垫力曲线：滤空载零漂
     sit_force_arr = sit_adc_arr / 26.18  # 坐垫 ADC→牛顿
     stand_force = stand_force_arr.tolist()
     sit_force = sit_force_arr.tolist()
