@@ -1808,7 +1808,7 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         # 总时长 = 整个起坐评估的采集时长（从采集开始到结束）
         if len(sit_times) > 1:
             duration_stats['total_duration'] = round((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 2)
-        print(f"   [时长] 坐垫接触(压力>{_thr:.0f})={duration_stats.get('seat_contact_duration')}s, 采集总时长={duration_stats.get('total_duration')}s")
+        print(f"   [时长] 坐垫接触(压力>{SEAT_FORCE_MIN_ADC:.0f})={duration_stats.get('seat_contact_duration')}s, 采集总时长={duration_stats.get('total_duration')}s")
         if len(sit_peaks) >= 2:
             _peak_times = [sit_times.iloc[int(p)] for p in sit_peaks]
             _stand_durations = [
