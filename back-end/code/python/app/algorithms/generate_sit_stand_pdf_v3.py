@@ -1776,15 +1776,17 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
-        # 坐垫接触总时长 = 各坐姿平台(坐着)时长之和：直接量坐着累计时间，稳定必有值。
-        # （方案B 沿用原 total_duration 在部分数据下会取到 0，不稳定，故改回直接量坐着时间）
+        # 坐垫接触总时长 = 坐着帧数 × 平均帧间隔（坐着累计时间）。
+        # 用帧数×帧间隔而非逐段 iloc 时间差，避免个别时间戳异常导致算出 0；
+        # 平均帧间隔由整段 sit_times 首尾推得（整周期能正常显示即证明此值可靠）。
+        _seated_frames = sum(max(int(_ce) - int(_cs), 0) for _cs, _ce in sit_segments)
         _seat_contact = 0.0
-        for _cs, _ce in sit_segments:
-            _cs_i = min(int(_cs), len(sit_times) - 1)
-            _ce_i = min(int(_ce) - 1, len(sit_times) - 1)
-            if _ce_i > _cs_i:
-                _seat_contact += max((sit_times.iloc[_ce_i] - sit_times.iloc[_cs_i]).total_seconds(), 0.0)
+        if len(sit_times) > 1 and _seated_frames > 0:
+            _span = (sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds()
+            _dt = _span / max(len(sit_times) - 1, 1)
+            _seat_contact = _seated_frames * _dt
         duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
+        print(f"   [坐垫接触] 坐姿段={len(sit_segments)}, 坐着帧={_seated_frames}, 总帧={len(sit_times)}, 坐垫接触总时长={duration_stats['seat_contact_duration']}s")
         # 总时长 = 整个起坐周期：第一个坐姿平台起点 → 最后一个坐姿平台终点
         if len(sit_segments) > 0:
             _w_start = sit_times.iloc[min(int(sit_segments[0][0]), len(sit_times) - 1)]
