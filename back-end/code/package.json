@@ -30,6 +30,12 @@
   "build": {
     "asar": true,
     "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/evaluateBJCOL"
+      }
+    ],
     "extraResources": [
       {
         "from": "python/venv",
