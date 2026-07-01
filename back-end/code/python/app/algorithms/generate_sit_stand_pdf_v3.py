@@ -1776,22 +1776,24 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
-        # 坐垫接触总时长 = 坐着帧数 × 平均帧间隔（坐着累计时间）。
-        # 用帧数×帧间隔而非逐段 iloc 时间差，避免个别时间戳异常导致算出 0；
-        # 平均帧间隔由整段 sit_times 首尾推得（整周期能正常显示即证明此值可靠）。
-        _seated_frames = sum(max(int(_ce) - int(_cs), 0) for _cs, _ce in sit_segments)
-        _seat_contact = 0.0
-        if len(sit_times) > 1 and _seated_frames > 0:
+        # 平均帧间隔（由整段 sit_times 首尾推得）
+        _dt = 0.0
+        if len(sit_times) > 1:
             _span = (sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds()
             _dt = _span / max(len(sit_times) - 1, 1)
-            _seat_contact = _seated_frames * _dt
+        # 坐垫接触总时长 = 坐垫压力 > 阈值的全部帧 × 帧间隔（单独接触坐垫的累计时间）。
+        # 直接数「压力>阈值」的帧，不经过分段/去短段/噪声过滤，稳定必有值。
+        _smooth = sit_cycle_info.get('smooth_force')
+        _thr = float(sit_cycle_info.get('threshold', 0.0) or 0.0)
+        _seat_contact = 0.0
+        if _smooth is not None and len(_smooth) > 0 and _dt > 0:
+            _contact_frames = int(np.sum(np.asarray(_smooth, dtype=float) >= _thr))
+            _seat_contact = _contact_frames * _dt
         duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
-        print(f"   [坐垫接触] 坐姿段={len(sit_segments)}, 坐着帧={_seated_frames}, 总帧={len(sit_times)}, 坐垫接触总时长={duration_stats['seat_contact_duration']}s")
-        # 总时长 = 整个起坐周期：第一个坐姿平台起点 → 最后一个坐姿平台终点
-        if len(sit_segments) > 0:
-            _w_start = sit_times.iloc[min(int(sit_segments[0][0]), len(sit_times) - 1)]
-            _w_end = sit_times.iloc[min(int(sit_segments[-1][1]) - 1, len(sit_times) - 1)]
-            duration_stats['total_duration'] = round(max((_w_end - _w_start).total_seconds(), 0.0), 2)
+        # 总时长 = 整个起坐评估的采集时长（从采集开始到结束）
+        if len(sit_times) > 1:
+            duration_stats['total_duration'] = round((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 2)
+        print(f"   [时长] 坐垫接触(压力>{_thr:.0f})={duration_stats.get('seat_contact_duration')}s, 采集总时长={duration_stats.get('total_duration')}s")
         if len(sit_peaks) >= 2:
             _peak_times = [sit_times.iloc[int(p)] for p in sit_peaks]
             _stand_durations = [
