@@ -176,12 +176,21 @@ export function generateSitStandReportData(
   const displaySit = downsampleSeries(seatTimes, sitForce, options);
   const cycles = detectCycles(footpadPressureHistory);
 
+  // 坐垫接触总时长（兜底）：有起坐动作时，坐着(坐垫压力≥坐起半程)的帧数 × 帧间隔；无动作则 0
+  const _seatHi = sitForce.length > 0 ? Math.max(...sitForce) : 0;
+  const _seatLo = sitForce.length > 0 ? Math.min(...sitForce) : 0;
+  const _seatMid = (_seatHi + _seatLo) / 2;
+  const seatContactDuration = peaks.length > 0
+    ? roundTo(sitForce.filter((v) => v >= _seatMid).length * sitIntervalSec, 2)
+    : 0;
+
   return {
     test_date: new Date().toLocaleString('zh-CN'),
     duration_stats: {
       total_duration: totalDuration,
       num_cycles: numCycles,
       avg_duration: avgDuration,
+      seat_contact_duration: seatContactDuration,
       cycle_durations: cycleDurations,
       min_cycle_duration: roundTo(minCycleDuration, 2),
       max_cycle_duration: roundTo(maxCycleDuration, 2),
