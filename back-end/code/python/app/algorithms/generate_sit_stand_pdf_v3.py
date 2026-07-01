@@ -307,7 +307,7 @@ def load_sit_data(file_path):
 
     final_matrix = []
     for frame in tensor:
-        frame[frame <= 10] = 0
+        frame[frame <= 20] = 0  # 坐垫单点去噪阈值：滤掉空载零漂（ADC≤20 视为无接触，置0）
         
         if np.max(frame) > 0:
             mask = (frame > 0).astype(np.uint8)

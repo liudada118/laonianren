@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as echarts from 'echarts';
 import HandPressureMap from './HandPressureMap';
-import { exportToPdf } from '../../lib/pdfExport';
+import { exportToPdf, exportHandsToPdf } from '../../lib/pdfExport';
 import ReportSummaryCard, { BasisNote } from './ReportSummaryCard';
 import { scoreGrip } from '../../lib/assessmentScoring';
 
@@ -450,7 +450,8 @@ export default function GripReport({ patientName, patientInfo, onClose, reportDa
 
         </div>
         <div className="flex items-center gap-3">
-          <PdfBtn containerRef={contentRef} fileName={`${patientName || '报告'}_握力评估_${handLabel}`} />
+          <PdfBtn containerRef={contentRef} fileName={`${patientName || '报告'}_握力评估${hasBothHands ? '' : '_' + handLabel}`}
+            setActiveHand={setActiveHand} hasLeft={hasLeft} hasRight={hasRight} activeHand={activeHand} />
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
             style={{ color: 'var(--text-muted)' }}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -652,14 +653,25 @@ function SectionHeader({ title }) {
   );
 }
 
-function PdfBtn({ containerRef, fileName }) {
+function PdfBtn({ containerRef, fileName, setActiveHand, hasLeft, hasRight, activeHand }) {
   const [exporting, setExporting] = React.useState(false);
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
+    const prevHand = activeHand;
+    const tick = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      await exportToPdf(containerRef?.current, fileName, { title: '握力评估报告' });
+      if (hasLeft && hasRight && setActiveHand) {
+        // 左右手都有：依次切到左手、右手各截一次，合并进一个 PDF（左手在前、右手在后）
+        await exportHandsToPdf([
+          { prepare: async () => { setActiveHand('left'); await tick(); return containerRef?.current; } },
+          { prepare: async () => { setActiveHand('right'); await tick(); return containerRef?.current; } },
+        ], fileName, { title: '握力评估报告' });
+      } else {
+        await exportToPdf(containerRef?.current, fileName, { title: '握力评估报告' });
+      }
     } finally {
+      if (setActiveHand && prevHand) setActiveHand(prevHand);
       setExporting(false);
     }
   };
