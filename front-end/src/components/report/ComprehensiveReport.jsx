@@ -173,7 +173,14 @@ export default function ComprehensiveReport({ record, onClose }) {
         {/* 三、握力评估 */}
         <SectionDivider index="三" title="握力评估" />
         {gripData
-          ? <ReportBlock><GripReport patientInfo={patientInfo} patientName={patientInfo.name} reportData={gripData} /></ReportBlock>
+          ? (gripData.left && gripData.right ? (
+              <>
+                <ReportBlock><GripReport patientInfo={patientInfo} patientName={patientInfo.name} reportData={{ ...gripData, activeHand: '左手' }} /></ReportBlock>
+                <ReportBlock><GripReport patientInfo={patientInfo} patientName={patientInfo.name} reportData={{ ...gripData, activeHand: '右手' }} /></ReportBlock>
+              </>
+            ) : (
+              <ReportBlock><GripReport patientInfo={patientInfo} patientName={patientInfo.name} reportData={gripData} /></ReportBlock>
+            ))
           : <NotTested label="握力评估" />}
 
         {/* 四、起坐能力评估 */}
