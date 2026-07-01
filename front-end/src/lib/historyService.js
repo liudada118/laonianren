@@ -8,10 +8,43 @@ const STORAGE_KEY = 'sarcopenia_assessment_history';
 /**
  * 获取所有历史记录
  */
+/**
+ * 按 patientId 合并记录：同一编号的多次评估汇总成一条（ID 唯一）。
+ * 保留最早一条的基本信息与日期，合并各项 completed 的评估；无 ID 的记录保持独立。
+ */
+function mergeByPatientId(history) {
+  const result = [];
+  const idxById = new Map();
+  for (const r of history || []) {
+    const pid = String(r.patientId || '');
+    if (pid && idxById.has(pid)) {
+      const target = result[idxById.get(pid)];
+      target.assessments = target.assessments || {};
+      for (const [t, d] of Object.entries(r.assessments || {})) {
+        if (d?.completed && !target.assessments[t]?.completed) {
+          target.assessments[t] = d;
+        }
+      }
+      if (r.updatedAt && (!target.updatedAt || r.updatedAt > target.updatedAt)) target.updatedAt = r.updatedAt;
+    } else {
+      const copy = { ...r, assessments: { ...(r.assessments || {}) } };
+      if (pid) idxById.set(pid, result.length);
+      result.push(copy);
+    }
+  }
+  return result;
+}
+
 export function getHistory() {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const raw = data ? JSON.parse(data) : [];
+    const merged = mergeByPatientId(raw);
+    // 合并后条数减少则写回，清理历史遗留的同 ID 多条记录
+    if (merged.length !== raw.length) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    }
+    return merged;
   } catch (e) {
     console.error('读取历史记录失败:', e);
     return [];
@@ -73,10 +106,12 @@ export function saveAssessmentSession(patientInfo, institution, assessments, ses
     const now = new Date();
     const dateStr = formatDate(now);
 
-    // 按 sessionId 查找已有记录（同一次评估会话内的多次完成会更新同一条记录）
-    let existingIdx = sessionId
-      ? history.findIndex(r => r.sessionId === sessionId)
-      : -1;
+    // 优先按 patientId 合并：ID 唯一，同一人的多次评估（含不同会话）汇总成一条。
+    // 无 ID 时回退按 sessionId（同一次会话内多次完成更新同一条）。
+    const pid = patientInfo.id || '';
+    let existingIdx = pid
+      ? history.findIndex(r => String(r.patientId || '') === String(pid))
+      : (sessionId ? history.findIndex(r => r.sessionId === sessionId) : -1);
 
     if (existingIdx >= 0) {
       // 更新已有记录
