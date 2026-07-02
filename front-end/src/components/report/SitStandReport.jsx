@@ -736,10 +736,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
     : totalDur <= 20 ? { text: '偏慢', color: C.amber, bg: '#D9770615' }
     : { text: '异常', color: C.red, bg: '#DC262615' };
 
-  const samplingRate = rawStandTimes.length >= 2
-    ? Math.round(rawStandTimes.length / Math.max(0.001, rawStandTimes[rawStandTimes.length - 1] - rawStandTimes[0]))
-    : null;
-
   if (loading) return (
     <div className="flex items-center justify-center h-full">
       <div className="text-center">
@@ -821,11 +817,6 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
                 <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.purple} />
                 <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.blue} />
               </div>
-              {samplingRate && (
-                <div className="mt-2 text-right">
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>采样率: {samplingRate} Hz</span>
-                </div>
-              )}
             </section>
 
             {/* ═══════════ 3. 周期分析 ═══════════ */}

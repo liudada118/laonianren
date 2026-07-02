@@ -2023,15 +2023,16 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         window_end_time=display_window_end,
     )
 
-    # 总时长 = 前端时序图曲线的实际时间跨度：前端优先用 display_force_curves
-    # (裁到起坐窗口、已重置到0)，无则回退全量 force_curves。这里用同一份数据算跨度，
-    # 保证「总时长」数字 == 图上曲线的结束时间（按坐垫/足垫真实时间戳计）。
-    _curve_src = display_force_curves if display_force_curves else {
-        "stand_times": stand_time_list, "sit_times": sit_time_list,
-    }
-    _curve_times = list(_curve_src.get("stand_times") or []) + list(_curve_src.get("sit_times") or [])
-    if _curve_times and duration_stats is not None:
-        duration_stats['total_duration'] = round(max(_curve_times) - min(_curve_times), 2)
+    # 总时长 = 整段采集的真实时间跨度（覆盖全过程，含站着的时间），按慢的坐垫算：
+    # 取坐垫真实时间戳首尾差；不裁到起坐周期窗口，避免把站起后的时间丢掉。
+    # （坐垫无数据时回退足垫时间戳。）
+    if duration_stats is not None:
+        if len(sit_times) >= 2:
+            duration_stats['total_duration'] = round(
+                max((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 0.0), 2)
+        elif len(stand_times) >= 2:
+            duration_stats['total_duration'] = round(
+                max((stand_times.iloc[-1] - stand_times.iloc[0]).total_seconds(), 0.0), 2)
 
     stand_cycle_ranges = []
     sit_cycle_ranges = []
