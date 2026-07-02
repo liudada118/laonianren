@@ -815,8 +815,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
             <section id="ss-metrics">
               <SectionHeader title="基本信息" subtitle="Basic Information" />
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
-                <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.cyan} />
+                <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.blue} />
+                <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.cyan} />
                 <MetricCard label="完成周期数" value={`${durationStats.num_cycles || '--'}次`} color={C.green} />
                 <MetricCard label="平均周期时长" value={`${durationStats.avg_duration?.toFixed(2) || '--'}s`} color={C.purple} />
                 <MetricCard label="检测峰值数" value={`${d.stand_peaks || standPeaksIdx.length || '--'}`} color={C.blue} />
@@ -860,8 +860,8 @@ export default function SitStandReport({ patientInfo, reportData: propsReportDat
               ) : (
                 <div className="zeiss-card p-6">
                   <div className="grid grid-cols-3 gap-4">
-                    <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.blue} />
-                    <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.cyan} />
+                    <MetricCard label="坐垫接触总时长" value={`${seatContactDur.toFixed(1)}s`} color={C.blue} />
+                    <MetricCard label="总时长" value={`${totalDur.toFixed(1)}s`} color={C.cyan} />
                     <MetricCard label="周期数" value={`${durationStats.num_cycles || '--'}`} color={C.green} />
                   </div>
                 </div>

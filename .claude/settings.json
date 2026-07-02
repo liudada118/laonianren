@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C c:/Users/xpr12/Desktop/laonianren-express fetch origin express-python3)",
+      "Bash(echo \"=== index.js 里 generate_sit_stand_render_report 走哪 ===\")",
+      "Bash(grep -nE 'generate_sit_stand_render_report|generate_sit_stand' c:/Users/xpr12/Desktop/laonianren-express/back-end/code/algorithms/index.js)",
+      "Bash(grep -nE 'generate_sit_stand_pdf_v3|generate_report_from_content|total_duration|seat_contact|num_cycles|duration_stats|def generate_sit_stand_report|sit_peaks|坐垫' __TRACKED_VAR__/sit_stand_render_data.py)",
+      "Bash(git -C c:/Users/xpr12/Desktop/laonianren-express checkout origin/express-python3-beijing2 -- back-end/code/python/app/algorithms/generate_sit_stand_pdf_v3.py front-end/src/lib/sitstandReportGenerator.js front-end/src/components/report/SitStandReport.jsx front-end/src/pages/assessment/SitStandAssessment.jsx)",
+      "Bash(git -C c:/Users/xpr12/Desktop/laonianren-express diff --stat origin/express-python3-beijing2 -- back-end/code/python/app/algorithms/generate_sit_stand_pdf_v3.py front-end/src/lib/sitstandReportGenerator.js front-end/src/components/report/SitStandReport.jsx front-end/src/pages/assessment/SitStandAssessment.jsx)",
+      "Bash(echo '当前分支: __CMDSUB_OUTPUT__')",
+      "Bash(git -C c:/Users/xpr12/Desktop/laonianren-express checkout -b express-0702)"
+    ]
+  }
+}

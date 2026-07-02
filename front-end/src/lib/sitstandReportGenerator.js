@@ -123,13 +123,7 @@ export function generateSitStandReportData(
 
   const sitIntervalSec = getAverageIntervalSec(seatTimes, DEFAULT_INTERVAL_SEC);
   const minPeakDistance = Math.max(4, Math.round(2 / Math.max(sitIntervalSec, 0.001)));
-  let peaks = detectPeaks(sitForce, minPeakDistance);
-  // 双保险：坐垫压力波动很小（没有明显坐-起动作 = 纯空载零漂/没测）→ 清空峰值，判 0 次
-  {
-    const _mx = sitForce.length > 0 ? Math.max(...sitForce) : 0;
-    const _mn = sitForce.length > 0 ? Math.min(...sitForce) : 0;
-    if (!(_mx > 0 && (_mx - _mn) > _mx * 0.3)) peaks = [];
-  }
+  const peaks = detectPeaks(sitForce, minPeakDistance);
   const peakTimes = pickPeakTimes(seatTimes, peaks);
 
   const cycleDurations = [];
@@ -176,21 +170,12 @@ export function generateSitStandReportData(
   const displaySit = downsampleSeries(seatTimes, sitForce, options);
   const cycles = detectCycles(footpadPressureHistory);
 
-  // 坐垫接触总时长（兜底）：有起坐动作时，坐着(坐垫压力≥坐起半程)的帧数 × 帧间隔；无动作则 0
-  const _seatHi = sitForce.length > 0 ? Math.max(...sitForce) : 0;
-  const _seatLo = sitForce.length > 0 ? Math.min(...sitForce) : 0;
-  const _seatMid = (_seatHi + _seatLo) / 2;
-  const seatContactDuration = peaks.length > 0
-    ? roundTo(sitForce.filter((v) => v >= _seatMid).length * sitIntervalSec, 2)
-    : 0;
-
   return {
     test_date: new Date().toLocaleString('zh-CN'),
     duration_stats: {
       total_duration: totalDuration,
       num_cycles: numCycles,
       avg_duration: avgDuration,
-      seat_contact_duration: seatContactDuration,
       cycle_durations: cycleDurations,
       min_cycle_duration: roundTo(minCycleDuration, 2),
       max_cycle_duration: roundTo(maxCycleDuration, 2),
