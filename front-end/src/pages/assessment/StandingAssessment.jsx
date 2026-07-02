@@ -424,7 +424,12 @@ export default function StandingAssessment() {
   // ─── 串口数据回调 ───
   const handleSerialData = useCallback((matrix) => {
     // 更新 3D 可视化（通过 ref 直接更新，绕过 memo）
-    insoleDataRef.current = matrix;
+    // 北京设备：人走到步道尽头转身回来、站在最后一块垫子 foot4 上做静态站立，
+    // 采到的压力矩阵相对广州是左右反的。这里只对「喂给可视化的那份」做水平镜像
+    // （每行左右翻转），realtimeMatrix / COP / 存帧仍用原始 matrix，
+    // 做到「数据不变，只镜像展示」。
+    const mirrorViz = getDeviceRegion() === 'beijing';
+    insoleDataRef.current = mirrorViz ? matrix.map((row) => row.slice().reverse()) : matrix;
     setRealtimeMatrix(matrix);
 
     // 分离左右脚

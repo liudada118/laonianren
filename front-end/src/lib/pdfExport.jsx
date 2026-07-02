@@ -199,6 +199,34 @@ function renderCanvasSlice(sourceCanvas, startY, endY, quality) {
   };
 }
 
+// html2canvas 抓取 <canvas> 内容不稳定：ECharts 用 canvas 渲染，导出 PDF 时折线常丢失
+// （软件里能看到，PDF 里空白）。这里在 onclone 阶段把每个 ECharts(zrender) canvas 用其
+// toDataURL 快照替换成 <img>，保证曲线进入 PDF。只处理带 data-zr-dom-id 的 zrender canvas，
+// 不触碰 WebGL（如 3D 手模）——WebGL canvas toDataURL 多为空白，替换反而会弄丢。
+function replaceChartCanvasesWithImages(originalRoot, clonedRoot) {
+  if (!originalRoot || !clonedRoot) return;
+  const origCanvases = originalRoot.querySelectorAll('canvas');
+  const cloneCanvases = clonedRoot.querySelectorAll('canvas');
+  const view = originalRoot.ownerDocument.defaultView;
+  origCanvases.forEach((orig, i) => {
+    const clone = cloneCanvases[i];
+    if (!clone || !clone.parentNode) return;
+    // 仅处理 ECharts/zrender 的 2D canvas；WebGL 等其它 canvas 保持原样交给 html2canvas
+    if (!orig.hasAttribute('data-zr-dom-id')) return;
+    let dataUrl = '';
+    try { dataUrl = orig.toDataURL('image/png'); } catch (e) { return; }
+    if (!dataUrl || dataUrl.length < 32) return;
+    const cs = view.getComputedStyle(orig);
+    const img = clonedRoot.ownerDocument.createElement('img');
+    img.src = dataUrl;
+    img.style.cssText = clone.style.cssText || '';
+    img.style.width = cs.width;
+    img.style.height = cs.height;
+    img.style.display = 'block';
+    clone.parentNode.replaceChild(img, clone);
+  });
+}
+
 export async function exportToPdf(container, fileName = 'report', options = {}) {
   if (!container) {
     console.error('[PDF Export] container is missing');
@@ -247,6 +275,7 @@ export async function exportToPdf(container, fileName = 'report', options = {}) 
       windowHeight: viewportHeight,
       onclone: (clonedDoc) => {
         const clonedContainer = clonedDoc.querySelector(`[${TEMP_EXPORT_ATTR}="${exportId}"]`);
+        replaceChartCanvasesWithImages(container, clonedContainer);
         pageBreakRanges = prepareCloneForCapture(
           clonedContainer,
           captureWidth,
@@ -359,6 +388,7 @@ export async function exportHandsToPdf(steps, fileName = 'report', options = {})
           width: cw, height: ch, scrollX: 0, scrollY: 0, windowWidth: vw, windowHeight: vh,
           onclone: (doc) => {
             const c = doc.querySelector(`[${TEMP_EXPORT_ATTR}="${exportId}"]`);
+            replaceChartCanvasesWithImages(container, c);
             ranges = prepareCloneForCapture(c, cw, ch, pageBreakSelectors);
           },
         });
