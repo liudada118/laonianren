@@ -1,7 +1,7 @@
 const { configureLogging } = require('./util/configureLogging')
 configureLogging('progress')
 
-const { app, BrowserWindow, Menu } = require('electron')
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
 const path = require('path')
 const { fork, spawn, spawnSync } = require('child_process')
 const { getHardwareFingerprint } = require('./util/getWinConfig')
@@ -10,6 +10,7 @@ const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
 const { initAutoUpdater, registerUpdaterIpcHandlers, cleanupUpdater } = require('./updater')
+const { getPackagedPythonBinary, getPackagedPythonEnv } = require('./util/pythonRuntime')
 // const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
@@ -22,6 +23,60 @@ let viteProcess = null
 let apiChild = null  // serialServer 子进程引用
 let pythonAiChild = null
 const pythonAiPort = parseInt(process.env.PYTHON_API_PORT || '8765', 10)
+
+function registerExportFileIpcHandlers() {
+  ipcMain.handle('select-export-directory', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win || undefined, {
+      title: '选择导出文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    return {
+      canceled: result.canceled,
+      path: result.filePaths?.[0] || '',
+    }
+  })
+
+  ipcMain.handle('write-export-file', async (_event, payload = {}) => {
+    const directoryPath = typeof payload.directoryPath === 'string' ? payload.directoryPath : ''
+    const fileName = typeof payload.fileName === 'string' ? payload.fileName : ''
+    if (!directoryPath || !fileName) {
+      throw new Error('missing export path')
+    }
+
+    const safeFileName = path.basename(fileName)
+    if (!safeFileName || safeFileName !== fileName) {
+      throw new Error('invalid export file name')
+    }
+
+    const directory = path.resolve(directoryPath)
+    await fs.promises.mkdir(directory, { recursive: true })
+    const targetPath = path.resolve(directory, safeFileName)
+    const prefix = directory.endsWith(path.sep) ? directory : `${directory}${path.sep}`
+    if (!targetPath.startsWith(prefix)) {
+      throw new Error('invalid export target path')
+    }
+
+    const data = payload.data
+    let buffer
+    if (Buffer.isBuffer(data)) {
+      buffer = data
+    } else if (data instanceof ArrayBuffer) {
+      buffer = Buffer.from(data)
+    } else if (ArrayBuffer.isView(data)) {
+      buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+    } else if (Array.isArray(data)) {
+      buffer = Buffer.from(data)
+    } else if (typeof data === 'string') {
+      buffer = Buffer.from(data, 'base64')
+    } else {
+      throw new Error('invalid export file data')
+    }
+
+    await fs.promises.writeFile(targetPath, buffer)
+    return { path: targetPath }
+  })
+}
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const shouldOpenDevTools = process.env.OPEN_DEVTOOLS !== '0'
@@ -103,7 +158,7 @@ function startViteDevServer() {
   const clientDir = path.join(__dirname, '..', '..', 'front-end')
   console.log('[vite] frontend dir:', clientDir)
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const viteArgs = ['run', 'dev', '--', '--port', defaultDevPort]
+  const viteArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort']
   const viteBin = path.join(
     clientDir,
     'node_modules',
@@ -120,13 +175,13 @@ function startViteDevServer() {
     () => {
       if (!fs.existsSync(viteBin)) return null
       console.log('[vite] attempt 2: direct vite bin')
-      return spawn(viteBin, ['--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      return spawn(viteBin, ['--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
     },
     () => {
       // 最后兜底：用 npx vite
       console.log('[vite] attempt 3: npx vite')
       const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-      return spawn(npxCmd, ['vite', '--port', defaultDevPort], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      return spawn(npxCmd, ['vite', '--host', '127.0.0.1', '--port', defaultDevPort, '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
     }
   ]
 
@@ -226,7 +281,22 @@ function startViteDevServer() {
         finish()
       }
 
-      timer = setTimeout(ready, 15000)
+      timer = setTimeout(async () => {
+        const reachable = await checkDevServerOnce(devServerUrl, 1000)
+        if (reachable) {
+          ready()
+          return
+        }
+        cleanup()
+        console.log('[vite] dev server not reachable after startup wait:', devServerUrl)
+        viteProcess = null
+        if (attemptIndex + 1 < attempts.length) {
+          attemptIndex += 1
+          startAttempt()
+          return
+        }
+        finish()
+      }, 15000)
 
       child.stdout?.on('data', onData)
       child.stderr?.on('data', onData)
@@ -443,11 +513,11 @@ function pyBin() {
   if (process.platform === 'win32') {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-      : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe')
+      : getPackagedPythonBinary(process.resourcesPath)
   } else {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-      : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python')
+      : getPackagedPythonBinary(process.resourcesPath)
   }
 }
 function apiPy() {
@@ -463,22 +533,22 @@ function pyAiBin() {
     ? [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-          : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe'),
+          : getPackagedPythonBinary(process.resourcesPath),
         'python',
         'py'
       ]
     : [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python'),
+          : getPackagedPythonBinary(process.resourcesPath),
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python3')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python3'),
+          : null,
         'python3',
         'python'
       ]
 
-  return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
+  return candidates.filter(Boolean).find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
 }
 
 function aiApiPy() {
@@ -518,6 +588,13 @@ function checkPythonAiDeps(pythonBin) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       encoding: 'utf8',
+      env: app.isPackaged
+        ? getPackagedPythonEnv({ baseEnv: process.env, resourceBase: process.resourcesPath })
+        : {
+            ...process.env,
+            PYTHONUTF8: '1',
+            PYTHONIOENCODING: 'utf-8'
+          },
     })
 
     if (result.status === 0) {
@@ -568,8 +645,12 @@ async function startPythonAiChild() {
     cwd: path.dirname(scriptPath),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      ...process.env,
+      ...(app.isPackaged
+        ? getPackagedPythonEnv({ baseEnv: process.env, resourceBase: process.resourcesPath })
+        : process.env),
       PYTHONUNBUFFERED: '1',
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
       PYTHON_API_PORT: String(pythonAiPort)
     },
     shell: false,
@@ -707,6 +788,7 @@ app.whenReady().then(async () => {
 
   Menu.setApplicationMenu(null);
   registerUpdaterIpcHandlers()
+  registerExportFileIpcHandlers()
 
   // 初始化自动更新（仅在打包后的生产环境启用）
   if (isPackaged) {
