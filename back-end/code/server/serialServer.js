@@ -2775,7 +2775,12 @@ app.post('/getDbHeatmap', async (req, res) => {
     })
 
     if (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']) {
-      const sensor = dataArr['foot4'] || dataArr['foot1'] || dataArr['foot']
+      // 按地区取人实际站立的垫子：广州站 foot1、北京站 foot4。
+      // 广州 mode5 会同时采到四块垫子（含 foot4 空垫），不能无脑优先 foot4，
+      // 否则报告会取到 foot4 而非人站的 foot1，导致广州静态站立结果错乱。
+      const sensor = currentRegion === 'beijing'
+        ? (dataArr['foot4'] || dataArr['foot1'] || dataArr['foot'])
+        : (dataArr['foot1'] || dataArr['foot'] || dataArr['foot4'])
       // 北京设备数据方向不同，静态报告数据需上下翻转；广州不翻
       const reportSensor = currentRegion === 'beijing' ? sensor.map(flipReportFrameVertical) : sensor
       pdfArrData = reportSensor
