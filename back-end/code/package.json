@@ -6,10 +6,11 @@
   "scripts": {
     "start": "node scripts/start-electron.js",
     "test": "echo \"Error: no test specified\" && exit 1",
+    "build:python": "node scripts/ensure-python-runtime.js && node scripts/prepare-python-runtime.js",
     "build:renderer": "npm --prefix ../../front-end run build",
     "copy:renderer": "node scripts/copy-renderer.js",
-    "build": "npm run build:renderer && npm run copy:renderer && electron-builder -w",
-    "build:mac": "npm run build:renderer && npm run copy:renderer && electron-builder -m"
+    "build": "npm run build:python && npm run build:renderer && npm run copy:renderer && electron-builder -w",
+    "build:mac": "npm run build:python && npm run build:renderer && npm run copy:renderer && electron-builder -m"
   },
   "author": "",
   "license": "ISC",
@@ -30,10 +31,29 @@
   "build": {
     "asar": true,
     "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/evaluate"
+      }
+    ],
     "extraResources": [
       {
-        "from": "python/venv",
-        "to": "python/venv",
+        "from": "python/runtime",
+        "to": "python/runtime",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "python/requirements-electron.txt",
+        "to": "python/requirements-electron.txt"
+      },
+      {
+        "from": "algorithms/python",
+        "to": "algorithms/python",
         "filter": [
           "**/*",
           "!**/__pycache__/**",

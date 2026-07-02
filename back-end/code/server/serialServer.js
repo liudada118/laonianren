@@ -1,6 +1,15 @@
 ﻿
-const { configureLogging } = require('../util/configureLogging')
+const { configureLogging, initFileLogging } = require('../util/configureLogging')
 configureLogging('progress')
+
+// serialServer 子进程日志落盘：写入 userData/logs/serial.log（userData 由主进程 fork 时经 env 传入）
+try {
+  if (process.env.userData) {
+    initFileLogging({ dir: require('path').join(process.env.userData, 'logs'), fileName: 'serial.log' })
+  }
+} catch (logErr) {
+  // 日志落盘失败不影响启动
+}
 
 const express = require('express')
 const os = require('os')
