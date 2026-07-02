@@ -1,7 +1,7 @@
 /**
  * 自动更新模块
  * 使用 electron-updater 实现应用在线更新
- * 更新服务器: http://sensor.bodyta.com/evaluate
+ * 更新服务器: http://sensor.bodyta.com/evaluateGZ
  */
 const { autoUpdater } = require('electron-updater')
 const { ipcMain, BrowserWindow } = require('electron')
@@ -11,7 +11,7 @@ const http = require('http')
 const https = require('https')
 
 // 更新服务器地址
-const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluate'
+const UPDATE_SERVER_URL = 'http://sensor.bodyta.com/evaluateGZ'
 const UPDATE_INFO_FILE = process.platform === 'darwin' ? 'latest-mac.yml' : 'latest.yml'
 
 // 更新检查间隔（毫秒）- 默认每30分钟检查一次

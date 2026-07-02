@@ -34,7 +34,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "http://sensor.bodyta.com/evaluate"
+        "url": "http://sensor.bodyta.com/evaluateGZ"
       }
     ],
     "extraResources": [
