@@ -10,6 +10,7 @@ const { initDb, getCsvData } = require('./util/db')
 const http = require('http')
 const fs = require('fs')
 const { initAutoUpdater, registerUpdaterIpcHandlers, cleanupUpdater } = require('./updater')
+const { getPackagedPythonBinary, getPackagedPythonEnv } = require('./util/pythonRuntime')
 // const { startWorker, callPy } = require('./pyWorker')  // [已迁移到JS算法] Python子进程不再需要
 const isPackaged = app.isPackaged
 
@@ -512,11 +513,11 @@ function pyBin() {
   if (process.platform === 'win32') {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-      : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe')
+      : getPackagedPythonBinary(process.resourcesPath)
   } else {
     return isDev
       ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-      : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python')
+      : getPackagedPythonBinary(process.resourcesPath)
   }
 }
 function apiPy() {
@@ -532,22 +533,22 @@ function pyAiBin() {
     ? [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'Scripts', 'python.exe')
-          : path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe'),
+          : getPackagedPythonBinary(process.resourcesPath),
         'python',
         'py'
       ]
     : [
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python'),
+          : getPackagedPythonBinary(process.resourcesPath),
         isDev
           ? path.join(__dirname, 'python', 'venv', 'bin', 'python3')
-          : path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python3'),
+          : null,
         'python3',
         'python'
       ]
 
-  return candidates.find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
+  return candidates.filter(Boolean).find((candidate) => !candidate.includes(path.sep) || fs.existsSync(candidate))
 }
 
 function aiApiPy() {
@@ -587,6 +588,13 @@ function checkPythonAiDeps(pythonBin) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       encoding: 'utf8',
+      env: app.isPackaged
+        ? getPackagedPythonEnv({ baseEnv: process.env, resourceBase: process.resourcesPath })
+        : {
+            ...process.env,
+            PYTHONUTF8: '1',
+            PYTHONIOENCODING: 'utf-8'
+          },
     })
 
     if (result.status === 0) {
@@ -637,8 +645,12 @@ async function startPythonAiChild() {
     cwd: path.dirname(scriptPath),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      ...process.env,
+      ...(app.isPackaged
+        ? getPackagedPythonEnv({ baseEnv: process.env, resourceBase: process.resourcesPath })
+        : process.env),
       PYTHONUNBUFFERED: '1',
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
       PYTHON_API_PORT: String(pythonAiPort)
     },
     shell: false,
