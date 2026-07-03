@@ -590,13 +590,10 @@ export default function Dashboard() {
   const rsFailed = RS_TYPES.filter(t => rs[t] === 'failed');
   const rsDone = RS_TYPES.filter(t => rs[t] === 'done').length;
   const rsAttempted = RS_TYPES.filter(t => rs[t] && rs[t] !== 'idle').length;
-  // 还有未结算(排队/生成中/失败)的报告 → 盖收尾层、拦截换人
-  const reportSettling = rsQueued > 0 || rsGenerating > 0 || rsFailed.length > 0;
-
-  // 回到首页且队列里有待生成报告 → 自动顺序生成（一次一个，采集时不会触发）
-  useEffect(() => {
-    if (rsQueued > 0) runReportQueue();
-  }, [rsQueued, runReportQueue]);
+  // 生成中或有失败项 → 盖收尾层（显示进度/失败处理）。排队中(待生成)不盖层。
+  const reportSettling = rsGenerating > 0 || rsFailed.length > 0;
+  // 有已采集待生成的报告 → 首页显示「生成报告」按钮（手动点击才生成，不再自动跑）
+  const hasPendingReports = rsQueued > 0;
 
   // ─── 名单导入 / 切换 ───
   const handleImported = (list) => {
@@ -633,16 +630,7 @@ export default function Dashboard() {
     if (target) setSwitchTarget(target);
   };
 
-  // 做满四项后，名单模式自动提示切换下一位（同一会话只提示一次）
-  useEffect(() => {
-    if (completedCount === 4 && rosterCurrentId != null && roster.length) {
-      if (nextPromptedRef.current === sessionId) return;
-      nextPromptedRef.current = sessionId;
-      const idx = roster.findIndex(r => r.id === rosterCurrentId);
-      const next = idx >= 0 && idx + 1 < roster.length ? roster[idx + 1] : null;
-      setShowNextConfirm({ currentName: patientInfo?.name || '', next });
-    }
-  }, [completedCount, rosterCurrentId, sessionId, roster]);
+  // （已按需求移除"做满四项自动提示切换下一位"：不再每次自动弹提示，换人由操作员手动点「下一位」）
   const currentRecord = useMemo(() => {
     if (!patientInfo) return null;
     const now = new Date();
@@ -802,7 +790,15 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => goAdjacentPatient(1)}
+                  {hasPendingReports && (
+                    <button onClick={() => runReportQueue()}
+                      className="text-sm px-4 py-2 rounded-lg font-semibold"
+                      style={{ color: 'white', background: '#059669', border: 'none', cursor: 'pointer' }}>
+                      生成报告 ({rsQueued})
+                    </button>
+                  )}
+                  {/* 下一位：手动输入下一个对象的信息，不再按 Excel 名单顺序自动读取 */}
+                  <button onClick={() => setShowAddPatient(true)}
                     className="text-sm px-4 py-2 rounded-lg font-semibold"
                     style={{ color: 'white', background: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>
                     下一位 ›
