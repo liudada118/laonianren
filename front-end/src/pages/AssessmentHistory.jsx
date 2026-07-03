@@ -52,15 +52,15 @@ export default function AssessmentHistory() {
   const [expandedRow, setExpandedRow] = useState(null);
   const [loading, setLoading] = useState(false);
   const [exportingId, setExportingId] = useState(null);
+  const [selectedRecords, setSelectedRecords] = useState({});
+  const [batchExporting, setBatchExporting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
   const pageSize = 10;
 
   // 异步数据状态
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  // 批量导出（导出当前筛选下的全部记录到一个目录）
-  const [batchExporting, setBatchExporting] = useState(false);
-  const [batchProgress, setBatchProgress] = useState(null);
 
   // 异步加载数据
   useEffect(() => {
@@ -91,8 +91,16 @@ export default function AssessmentHistory() {
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, dateFilter]);
 
+  const selectedCount = Object.keys(selectedRecords).length;
+  const allVisibleSelected = items.length > 0 && items.every(item => selectedRecords[item.id]);
+
   const handleDelete = useCallback(async (id) => {
     await deleteRecord(id);
+    setSelectedRecords(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     setShowDeleteConfirm(null);
     setRefreshKey(k => k + 1);
   }, []);
@@ -100,8 +108,31 @@ export default function AssessmentHistory() {
   const handleClear = useCallback(async () => {
     await clearHistory();
     setShowClearConfirm(false);
+    setSelectedRecords({});
     setRefreshKey(k => k + 1);
   }, []);
+
+  const toggleRecordSelection = useCallback((record, checked) => {
+    if (!record?.id) return;
+    setSelectedRecords(prev => {
+      const next = { ...prev };
+      if (checked) next[record.id] = record;
+      else delete next[record.id];
+      return next;
+    });
+  }, []);
+
+  const toggleVisibleSelection = useCallback((checked) => {
+    setSelectedRecords(prev => {
+      const next = { ...prev };
+      items.forEach(item => {
+        if (!item?.id) return;
+        if (checked) next[item.id] = item;
+        else delete next[item.id];
+      });
+      return next;
+    });
+  }, [items]);
 
   const handleExportWorkbook = useCallback(async (record) => {
     if (!record || exportingId) return;
@@ -119,21 +150,15 @@ export default function AssessmentHistory() {
     }
   }, [exportingId]);
 
-  // 批量导出：拉取当前筛选下的「全部」记录（不止当前页），选目录后逐人写 xlsx
   const handleBatchExportWorkbook = useCallback(async () => {
-    if (batchExporting) return;
+    const records = Object.values(selectedRecords);
+    if (!records.length || batchExporting) return;
     setBatchExporting(true);
-    setBatchProgress({ current: 0, total: 0, message: '正在收集记录...', status: 'starting' });
+    setBatchProgress({ current: 0, total: records.length, message: '准备批量导出...', status: 'starting' });
     try {
-      const all = await searchHistory({ keyword: searchTerm, date: dateFilter, page: 1, pageSize: Math.max(total, 1) });
-      const records = all.items || [];
-      if (!records.length) {
-        setBatchProgress(null);
-        alert('没有可导出的记录');
-        return;
-      }
-      setBatchProgress({ current: 0, total: records.length, message: '准备批量导出...', status: 'starting' });
-      const result = await exportAssessmentBatchWorkbook(records, backendBridge, { onProgress: setBatchProgress });
+      const result = await exportAssessmentBatchWorkbook(records, backendBridge, {
+        onProgress: setBatchProgress,
+      });
       if (result.canceled) {
         setBatchProgress(null);
         return;
@@ -150,7 +175,7 @@ export default function AssessmentHistory() {
       setBatchExporting(false);
       setTimeout(() => setBatchProgress(null), 600);
     }
-  }, [batchExporting, searchTerm, dateFilter, total]);
+  }, [batchExporting, selectedRecords]);
 
   const getCompletedCount = (assessments) => {
     if (!assessments) return 0;
@@ -202,17 +227,35 @@ export default function AssessmentHistory() {
               </span>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              {selectedCount > 0 && (
+                <span className="text-xs px-2 py-1 rounded-md" style={{ background: '#ECFDF5', color: '#059669' }}>
+                  已选择 {selectedCount} 人
+                </span>
+              )}
+              <button
+                onClick={handleBatchExportWorkbook}
+                disabled={!selectedCount || batchExporting}
+                className="text-xs px-3 py-2 rounded-lg transition-colors"
+                style={{
+                  color: '#059669',
+                  background: '#ECFDF5',
+                  border: '1px solid #05966930',
+                  cursor: !selectedCount || batchExporting ? 'not-allowed' : 'pointer',
+                  opacity: !selectedCount || batchExporting ? 0.55 : 1,
+                }}>
+                {batchExporting ? '批量导出中...' : '批量导出数据'}
+              </button>
+              {selectedCount > 0 && (
+                <button onClick={() => setSelectedRecords({})}
+                  className="text-xs px-3 py-2 rounded-lg transition-colors"
+                  style={{ color: 'var(--text-muted)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', cursor: 'pointer' }}>
+                  清空选择
+                </button>
+              )}
               <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 160 }} />
               <input type="text" placeholder="搜索姓名 / 编号 / 地区" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 180 }} />
-              {total > 0 && (
-                <button onClick={handleBatchExportWorkbook} disabled={batchExporting}
-                  className="text-xs px-3 py-2 rounded-lg transition-colors"
-                  style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', cursor: batchExporting ? 'not-allowed' : 'pointer', opacity: batchExporting ? 0.55 : 1 }}>
-                  {batchExporting ? '批量导出中...' : '批量导出数据'}
-                </button>
-              )}
               {total > 0 && (
                 <button onClick={() => setShowClearConfirm(true)}
                   className="text-xs px-3 py-2 rounded-lg transition-colors"
@@ -225,7 +268,16 @@ export default function AssessmentHistory() {
 
           {/* Table Header */}
           <div className="grid grid-cols-12 gap-2 px-4 sm:px-6 py-3 text-xs font-semibold zeiss-table-header">
-            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>序号</div>
+            <div className="col-span-1 flex items-center justify-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={e => toggleVisibleSelection(e.target.checked)}
+                disabled={!items.length}
+                title="全选当前页"
+              />
+              <span>序号</span>
+            </div>
             <div className="col-span-2" style={{ color: 'var(--text-tertiary)' }}>患者信息</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>日期</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>步态</div>
@@ -263,7 +315,16 @@ export default function AssessmentHistory() {
                   <React.Fragment key={item.id}>
                     <div className="grid grid-cols-12 gap-2 px-4 sm:px-6 py-3.5 text-sm items-center zeiss-table-row cursor-pointer"
                       onClick={() => setExpandedRow(isExpanded ? null : item.id)}>
-                      <div className="col-span-1 text-center" style={{ color: 'var(--text-muted)' }}>{globalIdx}</div>
+                      <div className="col-span-1 flex items-center justify-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedRecords[item.id]}
+                          onChange={e => toggleRecordSelection(item, e.target.checked)}
+                          onClick={e => e.stopPropagation()}
+                          title="选择此记录"
+                        />
+                        <span>{globalIdx}</span>
+                      </div>
                       <div className="col-span-2 min-w-0">
                         <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.patientName}</div>
                         <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
@@ -502,28 +563,6 @@ export default function AssessmentHistory() {
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>powered by 矩侨工业</span>
       </div>
 
-      {/* 删除确认弹窗 */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
-          <div className="zeiss-dialog p-8 w-[400px] max-w-[90vw] animate-scaleIn text-center">
-            <div className="w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ background: 'var(--danger-light)' }}>
-              <svg className="w-6 h-6" style={{ color: 'var(--danger)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </div>
-            <p className="text-base mb-6" style={{ color: 'var(--text-primary)' }}>确认删除此条记录？</p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowDeleteConfirm(null)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
-              <button onClick={() => handleDelete(showDeleteConfirm)}
-                className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer"
-                style={{ background: 'var(--danger)' }}>
-                确认删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 批量导出进度 */}
       {batchProgress && (
         <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
@@ -551,6 +590,28 @@ export default function AssessmentHistory() {
             <div className="mt-3 flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
               <span>{batchProgress.current || 0} / {batchProgress.total || 0}</span>
               <span>{batchProgress.total ? Math.min(100, Math.round((batchProgress.current / batchProgress.total) * 100)) : 0}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除确认弹窗 */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[400px] max-w-[90vw] animate-scaleIn text-center">
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ background: 'var(--danger-light)' }}>
+              <svg className="w-6 h-6" style={{ color: 'var(--danger)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <p className="text-base mb-6" style={{ color: 'var(--text-primary)' }}>确认删除此条记录？</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDeleteConfirm(null)} className="zeiss-btn-secondary flex-1 py-3 text-sm">取消</button>
+              <button onClick={() => handleDelete(showDeleteConfirm)}
+                className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer"
+                style={{ background: 'var(--danger)' }}>
+                确认删除
+              </button>
             </div>
           </div>
         </div>
