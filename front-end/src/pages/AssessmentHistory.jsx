@@ -58,9 +58,12 @@ export default function AssessmentHistory() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  // 批量导出（导出当前筛选下的全部记录到一个目录）
+  // 批量导出（可勾选指定记录；未勾选时导出当前筛选下的全部记录）
   const [batchExporting, setBatchExporting] = useState(false);
   const [batchProgress, setBatchProgress] = useState(null);
+  // 勾选的记录：id -> 记录对象（跨分页保留）
+  const [selectedRecords, setSelectedRecords] = useState({});
+  const selectedCount = Object.keys(selectedRecords).length;
 
   // 异步加载数据
   useEffect(() => {
@@ -119,14 +122,38 @@ export default function AssessmentHistory() {
     }
   }, [exportingId]);
 
-  // 批量导出：拉取当前筛选下的「全部」记录（不止当前页），选目录后逐人写 xlsx
+  // 勾选/取消勾选单条记录（存整条记录，跨分页保留）
+  const toggleSelect = useCallback((record) => {
+    setSelectedRecords(prev => {
+      const next = { ...prev };
+      if (next[record.id]) delete next[record.id];
+      else next[record.id] = record;
+      return next;
+    });
+  }, []);
+
+  // 全选/取消全选当前页
+  const toggleSelectAllPage = useCallback((checked) => {
+    setSelectedRecords(prev => {
+      const next = { ...prev };
+      items.forEach(it => { if (checked) next[it.id] = it; else delete next[it.id]; });
+      return next;
+    });
+  }, [items]);
+
+  // 批量导出：勾选了就导选中的，没勾选就导当前筛选下的「全部」记录；选目录后逐人写 xlsx
   const handleBatchExportWorkbook = useCallback(async () => {
     if (batchExporting) return;
     setBatchExporting(true);
     setBatchProgress({ current: 0, total: 0, message: '正在收集记录...', status: 'starting' });
     try {
-      const all = await searchHistory({ keyword: searchTerm, date: dateFilter, page: 1, pageSize: Math.max(total, 1) });
-      const records = all.items || [];
+      let records;
+      if (selectedCount > 0) {
+        records = Object.values(selectedRecords);
+      } else {
+        const all = await searchHistory({ keyword: searchTerm, date: dateFilter, page: 1, pageSize: Math.max(total, 1) });
+        records = all.items || [];
+      }
       if (!records.length) {
         setBatchProgress(null);
         alert('没有可导出的记录');
@@ -150,7 +177,7 @@ export default function AssessmentHistory() {
       setBatchExporting(false);
       setTimeout(() => setBatchProgress(null), 600);
     }
-  }, [batchExporting, searchTerm, dateFilter, total]);
+  }, [batchExporting, searchTerm, dateFilter, total, selectedCount, selectedRecords]);
 
   const getCompletedCount = (assessments) => {
     if (!assessments) return 0;
@@ -206,11 +233,24 @@ export default function AssessmentHistory() {
                 className="zeiss-input py-2 text-sm" style={{ width: 160 }} />
               <input type="text" placeholder="搜索姓名 / 编号 / 地区" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 180 }} />
+              {total > 0 && selectedCount > 0 && (
+                <span className="text-xs px-2 py-1 rounded-md" style={{ background: '#ECFDF5', color: '#059669' }}>
+                  已选 {selectedCount} 人
+                </span>
+              )}
               {total > 0 && (
                 <button onClick={handleBatchExportWorkbook} disabled={batchExporting}
                   className="text-xs px-3 py-2 rounded-lg transition-colors"
+                  title={selectedCount > 0 ? '导出勾选的记录' : '未勾选则导出当前筛选下的全部记录'}
                   style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', cursor: batchExporting ? 'not-allowed' : 'pointer', opacity: batchExporting ? 0.55 : 1 }}>
-                  {batchExporting ? '批量导出中...' : '批量导出数据'}
+                  {batchExporting ? '批量导出中...' : (selectedCount > 0 ? `批量导出(${selectedCount})` : '批量导出数据')}
+                </button>
+              )}
+              {total > 0 && selectedCount > 0 && (
+                <button onClick={() => setSelectedRecords({})}
+                  className="text-xs px-3 py-2 rounded-lg transition-colors"
+                  style={{ color: 'var(--text-tertiary)', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)', cursor: 'pointer' }}>
+                  清除选择
                 </button>
               )}
               {total > 0 && (
@@ -225,7 +265,14 @@ export default function AssessmentHistory() {
 
           {/* Table Header */}
           <div className="grid grid-cols-12 gap-2 px-4 sm:px-6 py-3 text-xs font-semibold zeiss-table-header">
-            <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>序号</div>
+            <div className="col-span-1 flex items-center justify-center gap-1.5" style={{ color: 'var(--text-tertiary)' }}>
+              <input type="checkbox"
+                checked={items.length > 0 && items.every(it => selectedRecords[it.id])}
+                onChange={(e) => toggleSelectAllPage(e.target.checked)}
+                title="全选/取消本页"
+                style={{ width: 13, height: 13, accentColor: '#059669', cursor: 'pointer' }} />
+              序号
+            </div>
             <div className="col-span-2" style={{ color: 'var(--text-tertiary)' }}>患者信息</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>日期</div>
             <div className="col-span-1 text-center" style={{ color: 'var(--text-tertiary)' }}>步态</div>
@@ -263,7 +310,14 @@ export default function AssessmentHistory() {
                   <React.Fragment key={item.id}>
                     <div className="grid grid-cols-12 gap-2 px-4 sm:px-6 py-3.5 text-sm items-center zeiss-table-row cursor-pointer"
                       onClick={() => setExpandedRow(isExpanded ? null : item.id)}>
-                      <div className="col-span-1 text-center" style={{ color: 'var(--text-muted)' }}>{globalIdx}</div>
+                      <div className="col-span-1 flex items-center justify-center gap-1.5" style={{ color: 'var(--text-muted)' }}
+                        onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox"
+                          checked={!!selectedRecords[item.id]}
+                          onChange={() => toggleSelect(item)}
+                          style={{ width: 13, height: 13, accentColor: '#059669', cursor: 'pointer' }} />
+                        <span>{globalIdx}</span>
+                      </div>
                       <div className="col-span-2 min-w-0">
                         <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.patientName}</div>
                         <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
