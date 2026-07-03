@@ -23,23 +23,6 @@ import json
 import traceback
 
 # ============================================================
-# 限制底层库线程数：后台异步生成报告时，numpy/scipy/scikit-image/OpenCV 默认会占满
-# 所有 CPU 核心，把前台实时采集/3D/UI 饿到卡顿。这里与 Node 侧环境变量双保险，
-# 再显式把 OpenCV 线程池设为 1（cv2 有自己的线程池，不受 OMP 环境变量控制）。
-# ============================================================
-for _k in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
-    os.environ.setdefault(_k, '1')
-try:
-    _cv_threads = max(1, int(os.environ.get('OMP_NUM_THREADS', '1') or '1'))
-except Exception:
-    _cv_threads = 1
-try:
-    import cv2
-    cv2.setNumThreads(_cv_threads)  # 跟随 Node 传入的线程上限(全核-2)，OpenCV 有独立线程池
-except Exception:
-    pass
-
-# ============================================================
 # 路径设置
 # ============================================================
 

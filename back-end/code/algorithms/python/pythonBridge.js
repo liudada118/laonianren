@@ -1,16 +1,11 @@
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const {
   getPackagedPythonBinary,
   getPackagedPythonEnv,
 } = require('../../util/pythonRuntime');
-
-// 报告 Python 的计算线程数：全核减 2（至少 1），把 2 个核留给前台实时采集/UI，
-// 其余核给报告，配合「低优先级 + 串行」，做到边采边出报告两边都不卡。
-const REPORT_THREADS = String(Math.max(1, (os.cpus()?.length || 4) - 2));
 
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.PY_TIMEOUT_MS, 10) || 180000;
 const PY_PROBE_TIMEOUT_MS = parseInt(process.env.PY_PROBE_TIMEOUT_MS, 10) || 20000;
@@ -184,19 +179,11 @@ function getPythonEnv(extraEnv = {}) {
     PYTHONIOENCODING: 'utf-8',
     PYTHONUTF8: '1',
     MPLBACKEND: 'Agg',
-    // 限制科学计算库(numpy/scipy/scikit-image + MKL/OpenBLAS/OpenMP)的线程数为 1，
-    // 否则后台生成报告时会占满所有 CPU 核心，把前台实时采集/3D/UI 饿到卡顿。
-    // 报告在后台异步跑，单线程慢一点无所谓，换来前台流畅。
-    OMP_NUM_THREADS: REPORT_THREADS,
-    OPENBLAS_NUM_THREADS: REPORT_THREADS,
-    MKL_NUM_THREADS: REPORT_THREADS,
-    NUMEXPR_NUM_THREADS: REPORT_THREADS,
-    VECLIB_MAXIMUM_THREADS: REPORT_THREADS,
     ...extraEnv,
   };
 }
 
-async function callPythonImpl(funcName, params = {}, options = {}) {
+async function callPython(funcName, params = {}, options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const timeoutMs =
@@ -250,11 +237,6 @@ async function callPythonImpl(funcName, params = {}, options = {}) {
       fail(new Error(`Cannot spawn Python process (cmd: ${pythonCmd}): ${spawnErr.message}`));
       return;
     }
-
-    // 把报告进程降到「低于正常」优先级，保证前台实时采集/UI 抢得到 CPU，不被后台报告拖卡。
-    try {
-      os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
-    } catch {}
 
     timeoutTimer = setTimeout(() => {
       if (settled) return;
@@ -352,16 +334,6 @@ async function callPythonImpl(funcName, params = {}, options = {}) {
       fail(new Error(`Failed to write to Python stdin: ${writeErr.message}`));
     }
   });
-}
-
-// 串行化报告生成：一次只跑一个 Python 报告进程，避免操作员连做多项、多份报告
-// 叠着跑导致内存暴涨(曾观测到 ~15G)。实时 COP 是 JS 实现、不经过这里，不受影响。
-let _pyQueue = Promise.resolve();
-function callPython(funcName, params = {}, options = {}) {
-  const run = () => callPythonImpl(funcName, params, options);
-  const p = _pyQueue.then(run, run);
-  _pyQueue = p.then(() => {}, () => {});
-  return p;
 }
 
 module.exports = { callPython };
