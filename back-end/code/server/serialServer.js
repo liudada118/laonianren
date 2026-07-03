@@ -1832,6 +1832,11 @@ app.post('/getSitAndFootPdf', async (req, res) => {
       console.error('generate_sit_stand_render_report failed:', e)
     }
 
+    // 报告生成会长时间占用事件循环，期间坐垫一直发数据、积压在串口接收缓冲里，
+    // 生成完实时画面会一直落后（此前需重插设备才恢复）。这里生成结束立即清空坐垫串口接收缓冲，
+    // 丢弃积压、让实时立刻追上（等于自动“重插一下”）。
+    flushSitSerialBuffer()
+
     res.json(
       new HttpResult(
         0,
@@ -3541,6 +3546,27 @@ const socketSendData = (server, data) => {
       client.send(data);
     }
   });
+}
+
+// 清空坐垫串口接收缓冲：报告生成会长时间占用事件循环，期间坐垫仍在发数据、积压在串口 RX 缓冲，
+// 生成完实时画面会一直落后（此前需重插设备才恢复）。生成结束调用此函数丢弃积压、让实时立刻追上。
+// 只处理坐垫(dataMap[path].type==='sit' 或按波特率判为 sit)，不动脚垫/手套等其它设备。
+function flushSitSerialBuffer() {
+  try {
+    let n = 0;
+    for (const path of Object.keys(parserArr || {})) {
+      const item = parserArr[path];
+      const di = dataMap && dataMap[path];
+      const isSit = (di && di.type === 'sit') || (item && BAUD_DEVICE_MAP[item.baudRate] === 'sit');
+      if (isSit && item && item.port && item.port.isOpen && typeof item.port.flush === 'function') {
+        item.port.flush((err) => { if (err) console.warn('[flushSit] flush error:', path, err.message); });
+        n++;
+      }
+    }
+    if (n) console.log('[flushSit] 报告生成后已清空坐垫串口接收缓冲，端口数=' + n);
+  } catch (e) {
+    console.warn('[flushSit] 异常:', e.message);
+  }
 }
 
 /**
