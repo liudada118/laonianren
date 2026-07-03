@@ -123,13 +123,7 @@ export function generateSitStandReportData(
 
   const sitIntervalSec = getAverageIntervalSec(seatTimes, DEFAULT_INTERVAL_SEC);
   const minPeakDistance = Math.max(4, Math.round(2 / Math.max(sitIntervalSec, 0.001)));
-  let peaks = detectPeaks(sitForce, minPeakDistance);
-  // 双保险：坐垫压力波动很小（没有明显坐-起动作 = 纯空载零漂/没测）→ 清空峰值，判 0 次
-  {
-    const _mx = sitForce.length > 0 ? Math.max(...sitForce) : 0;
-    const _mn = sitForce.length > 0 ? Math.min(...sitForce) : 0;
-    if (!(_mx > 0 && (_mx - _mn) > _mx * 0.3)) peaks = [];
-  }
+  const peaks = detectPeaks(sitForce, minPeakDistance);
   const peakTimes = pickPeakTimes(seatTimes, peaks);
 
   const cycleDurations = [];

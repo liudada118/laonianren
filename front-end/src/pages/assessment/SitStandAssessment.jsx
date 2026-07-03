@@ -6,7 +6,7 @@ import EChart from '../../components/ui/EChart';
 import SitStandReport from '../../components/report/SitStandReport';
 import { generateSitStandReportData } from '../../lib/sitstandReportGenerator';
 import { backendBridge } from '../../lib/BackendBridge';
-import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL, isAllAssessmentsCompleted } from '../../lib/assessmentNav';
+import { getNextAssessmentType, ASSESSMENT_PATH, ASSESSMENT_LABEL } from '../../lib/assessmentNav';
 
 /* ─── 图表样式常量 ─── */
 const C = { text: '#6B7B8D', grid: '#EDF0F4', blue: '#0066CC', green: '#059669', red: '#DC2626', amber: '#D97706' };

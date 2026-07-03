@@ -298,11 +298,6 @@ def load_stand_data(file_path):
     return tensor, times
 
 
-# ─── 坐垫力值/接触判定阈值（不影响热力图；热力图用 load_sit_data 的低阈值保留低压细节）───
-SIT_POINT_THR = 100         # 单点 ADC 阈值：>此值的点才计入力值求和（滤空载零漂点）
-# 双保险：坐垫总力 > 100N（ADC总和 > 此值）才算「真的坐上去」，用于坐姿判定/次数/坐垫接触
-SEAT_FORCE_MIN_ADC = 100 * 26.18  # = 2618（坐垫牛顿 = ADC总和 / 26.18）
-
 def load_sit_data(file_path):
     """加载并去噪坐姿数据"""
     print(f" 正在读取 Sit 文件: {file_path}")
@@ -312,7 +307,7 @@ def load_sit_data(file_path):
 
     final_matrix = []
     for frame in tensor:
-        frame[frame <= 10] = 0  # 坐垫热力图去噪：仅滤极小噪声，保留低压细节（力值/接触另用 SIT_POINT_THR 滤空载）
+        frame[frame <= 10] = 0
         
         if np.max(frame) > 0:
             mask = (frame > 0).astype(np.uint8)
@@ -537,7 +532,7 @@ def detect_sit_peak_cycles(sit_data, sit_times):
             "cycle_windows": [],
         }
 
-    sit_force = np.sum(np.where(sit_data > SIT_POINT_THR, sit_data, 0), axis=(1, 2)).astype(np.float64)  # 力值/分段：单点>阈值才计入，滤空载零漂
+    sit_force = np.sum(sit_data, axis=(1, 2)).astype(np.float64)
     frame_dt = _estimate_frame_interval_seconds(sit_times)
     sigma_frames = max(1.0, min(6.0, 0.18 / max(frame_dt, 1e-3)))
     smooth_force = (
@@ -548,19 +543,35 @@ def detect_sit_peak_cycles(sit_data, sit_times):
     low = float(np.percentile(smooth_force, 15))
     high = float(np.percentile(smooth_force, 85))
     dynamic_range = max(0.0, high - low)
-    threshold = low + dynamic_range * 0.45 if dynamic_range > 0 else float(np.mean(smooth_force))
-    # 双保险：坐垫总力必须 > 100N（ADC总和 > SEAT_FORCE_MIN_ADC）才算坐；没坐/零漂一律不算
-    threshold = max(threshold, SEAT_FORCE_MIN_ADC)
+    # 迟滞双阈值判"坐着"：坐下用高阈值确认（压力升过它才算真的坐下），
+    # 站起用低阈值确认（压力掉到它以下、人真正离开垫子才算站起）。
+    # 坐着时调整姿势导致的压力波动，只要没跌破低阈值，就一律维持"坐着"——
+    # 避免把一次连续坐着切成多段（虚增次数），也不漏算坐姿调整时的接触时间。
+    if dynamic_range > 0:
+        high_thr = low + dynamic_range * 0.65
+        low_thr = low + dynamic_range * 0.25
+    else:
+        high_thr = low_thr = float(np.mean(smooth_force))
+    threshold = low_thr  # 返回值沿用低阈值作为代表阈值
 
-    seated_mask = smooth_force >= threshold
+    seated_mask = np.zeros(len(smooth_force), dtype=bool)
+    _is_seated = False
+    for _i in range(len(smooth_force)):
+        _v = smooth_force[_i]
+        if not _is_seated:
+            if _v >= high_thr:
+                _is_seated = True
+        else:
+            if _v <= low_thr:
+                _is_seated = False
+        seated_mask[_i] = _is_seated
     gap_frames = max(1, int(round(0.25 / max(frame_dt, 1e-3))))
     min_segment_frames = max(3, int(round(0.35 / max(frame_dt, 1e-3))))
     seated_mask = _fill_short_gaps(seated_mask, gap_frames)
     seated_mask = _remove_short_segments(seated_mask, min_segment_frames)
 
     sit_segments = _mask_to_segments(seated_mask)
-    # 兜底仅在确有坐姿（峰值总力 > 100N）时补一段；纯零漂/没坐则保持空 → 峰值数/次数=0
-    if len(sit_segments) == 0 and len(smooth_force) > 0 and float(np.max(smooth_force)) >= SEAT_FORCE_MIN_ADC:
+    if len(sit_segments) == 0 and len(smooth_force) > 0:
         peak_idx = int(np.argmax(smooth_force))
         half_width = max(1, min_segment_frames // 2)
         sit_segments = [(
@@ -1755,6 +1766,16 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     sit_peaks = sit_cycle_info.get("sit_peaks", [])
     sit_segments = sit_cycle_info.get("sit_segments", [])
     cycle_windows = sit_cycle_info.get("cycle_windows", [])
+    # 客户定制：坐垫防噪总开关——整段坐垫 ADC 总和的波动幅度(max-min) < 2000，
+    # 视为没真坐下(空载/轻碰/纯噪声)，直接清空坐姿段与峰值，令下游
+    # 完成次数 / 坐垫峰值数 / 坐垫接触总时长 全部为 0，避免噪声虚增次数。
+    _sit_adc_sum = np.sum(sit_data, axis=(1, 2)) if len(sit_data) > 0 else np.array([])
+    _sit_adc_range = float(np.max(_sit_adc_sum) - np.min(_sit_adc_sum)) if len(_sit_adc_sum) > 0 else 0.0
+    if _sit_adc_range < 2000:
+        print(f"  [防噪开关] 坐垫ADC波动={_sit_adc_range:.0f} < 2000 → 判定未真坐下，坐姿段/峰值清0")
+        sit_peaks = []
+        sit_segments = []
+        cycle_windows = []
     raw_timing_cycles = build_sit_timing_cycles(sit_times, sit_segments, sit_peaks)
     timing_cycles, lead_in_cycle, tail_out_cycle = split_edge_baseline_cycles(raw_timing_cycles)
     duration_stats = calculate_cycle_stats_from_timing_cycles(timing_cycles)
@@ -1784,31 +1805,13 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     num_stands = max(plateau_count - 1, 0)
     if duration_stats is not None:
         duration_stats['num_cycles'] = num_stands
-        # 平均帧间隔（由整段 sit_times 首尾推得）
-        _dt = 0.0
-        if len(sit_times) > 1:
-            _span = (sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds()
-            _dt = _span / max(len(sit_times) - 1, 1)
-        # 坐垫接触总时长 = 坐垫压力 > 阈值的全部帧 × 帧间隔（单独接触坐垫的累计时间）。
-        # 直接数「压力>阈值」的帧，不经过分段/去短段/噪声过滤，稳定必有值。
-        # 坐垫接触总时长 = 帧内单点最大 ADC > SIT_POINT_THR 的帧数 × 帧间隔
-        # （帧里有点超过阈值=真的坐上去了；纯零漂帧不超阈值，不计入）
-        # 坐垫接触总时长 = 坐垫总力 > 100N（ADC总和 > SEAT_FORCE_MIN_ADC）的帧数 × 帧间隔
-        _sit_force_raw = sit_cycle_info.get('sit_force')
-        _seat_contact = 0.0
-        _contact_frames = 0
-        if _sit_force_raw is not None and len(_sit_force_raw) > 0 and _dt > 0:
-            _contact_frames = int(np.sum(np.asarray(_sit_force_raw, dtype=float) > SEAT_FORCE_MIN_ADC))
-            _seat_contact = _contact_frames * _dt
-        duration_stats['seat_contact_duration'] = round(_seat_contact, 2)
-        # 测试次数开关：整段没有任何帧总力>100N（没测/纯零漂）→ 强制 0 次
-        if _contact_frames == 0:
-            duration_stats['num_cycles'] = 0
-        print(f"   [坐垫接触] 总力>100N的帧={_contact_frames}, 接触时长={duration_stats['seat_contact_duration']}s")
-        # 总时长 = 整个起坐评估的采集时长（从采集开始到结束）
-        if len(sit_times) > 1:
-            duration_stats['total_duration'] = round((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 2)
-        print(f"   [时长] 坐垫接触(压力>{SEAT_FORCE_MIN_ADC:.0f})={duration_stats.get('seat_contact_duration')}s, 采集总时长={duration_stats.get('total_duration')}s")
+        # 坐垫接触总时长 = 坐着的帧数 × 坐垫真实帧间隔（只算坐姿段，站起来的那段不计）。
+        # sit_segments 已由迟滞双阈值划出「人坐着」的连续帧区间；帧间隔取真实时间戳中位数差。
+        _sit_dt = _estimate_frame_interval_seconds(sit_times)
+        _seated_frames = int(sum(max(int(seg[1]) - int(seg[0]), 0) for seg in sit_segments))
+        duration_stats['seat_contact_duration'] = round(_seated_frames * _sit_dt, 2)
+        # 总时长不在此处定；改到力-时间曲线构建后，按前端时序图曲线的实际跨度赋值，
+        # 保证「总时长」数字与图上曲线的结束时间完全一致（见 display_force_curves 之后）。
         if len(sit_peaks) >= 2:
             _peak_times = [sit_times.iloc[int(p)] for p in sit_peaks]
             _stand_durations = [
@@ -1986,9 +1989,8 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     # 4.5 力-时间曲线原始数据（前端用 EChart 渲染，前端侧做 LTTB 降采样）
     # ADC→牛顿转换: 足底逐像素转换后求和, 坐垫ADC总和/26.18
     stand_force_arr = np.array([adc_to_newton_foot_sum(f) for f in stand_data])
-    sit_adc_arr = np.sum(np.where(sit_data > SIT_POINT_THR, sit_data, 0), axis=(1, 2))  # 前端坐垫力曲线：滤空载零漂
+    sit_adc_arr = np.sum(sit_data, axis=(1, 2))
     sit_force_arr = sit_adc_arr / 26.18  # 坐垫 ADC→牛顿
-    sit_force_arr = np.where(sit_force_arr >= 100, sit_force_arr, 0.0)  # 双保险：坐垫力<100N 视为没坐，归 0（力曲线不显示零漂）
     stand_force = stand_force_arr.tolist()
     sit_force = sit_force_arr.tolist()
     t0_stand = stand_times.iloc[0] if len(stand_times) > 0 else None
@@ -2020,6 +2022,17 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
         window_start_time=display_window_start,
         window_end_time=display_window_end,
     )
+
+    # 总时长 = 整段采集的真实时间跨度（覆盖全过程，含站着的时间），按慢的坐垫算：
+    # 取坐垫真实时间戳首尾差；不裁到起坐周期窗口，避免把站起后的时间丢掉。
+    # （坐垫无数据时回退足垫时间戳。）
+    if duration_stats is not None:
+        if len(sit_times) >= 2:
+            duration_stats['total_duration'] = round(
+                max((sit_times.iloc[-1] - sit_times.iloc[0]).total_seconds(), 0.0), 2)
+        elif len(stand_times) >= 2:
+            duration_stats['total_duration'] = round(
+                max((stand_times.iloc[-1] - stand_times.iloc[0]).total_seconds(), 0.0), 2)
 
     stand_cycle_ranges = []
     sit_cycle_ranges = []
@@ -2059,6 +2072,26 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
             )
             if sit_range is not None:
                 sit_cycle_ranges.append(sit_range)
+
+    # 客户定制：各周期(站起)范围按坐垫高平台的相邻峰对齐，使周期数 = 站起次数(坐垫平台-1)，
+    # 与「完成次数」「各周期时长」「各峰值力分布」一致。否则会沿用 split_edge_baseline_cycles
+    # 裁剪首尾后的周期数，导致峰值力柱数偏少(如 4 个坐垫峰却只画 2 个柱)。
+    if len(sit_peaks) >= 2:
+        rebuilt_stand_ranges = []
+        rebuilt_sit_ranges = []
+        for i in range(len(sit_peaks) - 1):
+            t_start = sit_times.iloc[int(sit_peaks[i])]
+            t_end = sit_times.iloc[int(sit_peaks[i + 1])]
+            sr = time_window_to_index_range(stand_times, t_start, t_end)
+            si = time_window_to_index_range(sit_times, t_start, t_end)
+            if sr is not None:
+                rebuilt_stand_ranges.append(sr)
+            if si is not None:
+                rebuilt_sit_ranges.append(si)
+        if rebuilt_stand_ranges:
+            stand_cycle_ranges = rebuilt_stand_ranges
+            sit_cycle_ranges = rebuilt_sit_ranges
+            print(f"   [周期对齐] 各峰值力/周期范围按坐垫相邻峰重建为 {len(stand_cycle_ranges)} 个站起")
 
     # ====== 4.6 补充前端所需的额外字段 ======
 
@@ -2330,6 +2363,8 @@ def generate_report_from_content(stand_csv_content, sit_csv_content, output_dir=
     result = {
         'duration_stats': {
             'total_duration': round(duration_stats['total_duration'], 2),
+            # 坐垫接触总时长：坐着的帧数 × 坐垫真实帧间隔（此前未带入 result，前端恒为0，已修复）
+            'seat_contact_duration': round(float(duration_stats.get('seat_contact_duration', 0.0) or 0.0), 2),
             'num_cycles': duration_stats['num_cycles'],
             'avg_duration': round(duration_stats['avg_duration'], 2),
             'cycle_durations': duration_stats.get('cycle_durations', []),

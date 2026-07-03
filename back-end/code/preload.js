@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   // 获取当前版本信息
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // ====== 批量导出 CSV/Excel ======
   // 选择批量导出目录
   selectExportDirectory: () => ipcRenderer.invoke('select-export-directory'),
   // 写入批量导出的 xlsx 文件
