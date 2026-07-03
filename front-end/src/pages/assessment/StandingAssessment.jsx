@@ -319,7 +319,7 @@ function LeftDataPanel({ leftPressure, rightPressure, realtimeData, copTrajector
 export default function StandingAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, enqueueReport, deviceConnStatus, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.standing?.completed;
   const isGlobalConnected = deviceConnStatus === 'connected';
@@ -840,15 +840,18 @@ export default function StandingAssessment() {
       setPhase('idle');
       setShowCompleteDialog(true);
 
-      (async () => {
-        // 报告生成：优先后端算法（第1阶段双脚站立数据），失败回退前端
-        const finalBase = await generateBaseStandingReport() || baseStandingReportData || makeMinimalStandingReport(nextResults);
-        const finalReport = attachStandingStageScore(finalBase, nextResults);
-        if (finalReport) {
-          setReportData(finalReport);
-          completeAssessment('standing', { completed: true, reportData: finalReport }, null, assessmentIdRef.current);
+      // 报告不在此处生成，改为入队，采完4项回首页统一生成。
+      // 站立报告主体只用第一阶段双脚站立数据（已落库，按 assessmentId 取），
+      // 采完这刻捕获四阶段结果 nextResults，交给 thunk（保持报告结构与原来一致）。
+      const aid = assessmentIdRef.current;
+      const stageResults = nextResults;
+      enqueueReport('standing', async () => {
+        const resp = await backendBridge.getStandingReport({ timestamp: Date.now(), assessmentId: aid });
+        if (resp?.code === 0 && resp?.data?.render_data) {
+          return attachStandingStageScore(resp.data.render_data, stageResults);
         }
-      })();
+        throw new Error(resp?.msg || '静态站立报告未取到有效数据');
+      }, aid);
       return;
     }
 

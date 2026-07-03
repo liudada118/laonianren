@@ -140,7 +140,7 @@ function LeftDataPanel({ leftData, rightData, leftStats, rightStats, phase, time
 export default function GripAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
+  const { patientInfo, institution, completeAssessment, enqueueReport, deviceConnStatus, backendBridge: globalBridge, assessments } = useAssessment();
   // 从 Dashboard "查看报告" 跳转过来时，直接显示报告
   const viewReportMode = location.state?.viewReport && assessments.grip?.completed;
   // 如果首页已一键连接，自动进入后端模式
@@ -732,53 +732,24 @@ export default function GripAssessment() {
       setShowGripInstruction(true);
       setTimer(0);
     } else {
-      // 右手采集结束：立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+      // 右手采集结束：立即弹完成窗，操作员可直接点「下一项」
       setShowCompleteDialog(true);
       const gripAssessmentId = [leftAssessmentIdRef.current, rightAssessmentIdRef.current].filter(Boolean).join(',');
-
-      (async () => {
-        let report = null;
-        // 生成报告数据：优先调用后端JS算法接口，失败时回退到前端算法
-        try {
-          if (isBackendMode) {
-            // 后端模式：等待数据存储完成后调用后端报告接口
-            await new Promise(r => setTimeout(r, 1000));
-            const resp = await backendBridge.getGripReport({
-              timestamp: Date.now(),
-              collectName: patientInfo?.name || 'test',
-              leftAssessmentId: leftAssessmentIdRef.current,
-              rightAssessmentId: rightAssessmentIdRef.current,
-              assessmentId: gripAssessmentId,
-            });
-            if (resp?.code === 0 && resp?.data?.render_data) {
-              console.log('[GripAssessment] 后端报告数据已获取:', resp.data);
-              report = resp.data.render_data;
-            } else {
-              console.warn('[GripAssessment] 后端报告接口返回异常，回退到前端算法:', resp?.msg);
-            }
-          }
-        } catch (e) {
-          console.warn('[GripAssessment] 后端报告接口调用失败，回退到前端算法:', e.message);
-        }
-        // 前端算法 fallback
-        if (!report) {
-          try {
-            report = generateGripReportData(
-              leftFullDataRef.current, rightFullDataRef.current,
-              leftRawFramesRef.current, rightRawFramesRef.current,
-              patientInfo?.name || ''
-            );
-            console.log('[GripAssessment] 前端报告数据已生成:', report);
-          } catch (e) {
-            console.error('[GripAssessment] 报告生成失败:', e);
-          }
-        }
-        // 报告成功才写入历史，避免重复/空报告
-        if (report) {
-          setGripReportData(report);
-          completeAssessment('grip', { completed: true, reportData: report }, { leftData, rightData }, gripAssessmentId);
-        }
-      })();
+      const leftAid = leftAssessmentIdRef.current;
+      const rightAid = rightAssessmentIdRef.current;
+      const collectName = patientInfo?.name || 'test';
+      // 报告不在此处生成，改为入队，采完4项回首页统一生成（数据已落库，按 id 取数即可）
+      enqueueReport('grip', async () => {
+        const resp = await backendBridge.getGripReport({
+          timestamp: Date.now(),
+          collectName,
+          leftAssessmentId: leftAid,
+          rightAssessmentId: rightAid,
+          assessmentId: gripAssessmentId,
+        });
+        if (resp?.code === 0 && resp?.data?.render_data) return resp.data.render_data;
+        throw new Error(resp?.msg || '握力报告未取到有效数据');
+      }, gripAssessmentId);
     }
   };
 

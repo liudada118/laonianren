@@ -629,7 +629,7 @@ export function GaitReportContent({ patientInfo, pythonResult: externalResult, o
 export default function GaitAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, completeAssessment, enqueueReport, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.gait?.completed;
 
@@ -970,34 +970,23 @@ export default function GaitAssessment() {
   /* ─── 停止采集 ─── */
   const stop = async () => {
     clearInterval(timerRef.current);
-    // 立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+    // 立即弹完成窗，操作员可直接点「下一项」
     setShowComplete(true);
 
-    (async () => {
-      try {
-        await backendBridge.endCol();
-        const resp = await backendBridge.getGaitReport({
-          timestamp: new Date().toISOString(),
-          assessmentId: assessmentIdRef.current,
-          collectName: 'gait_assessment',
-          body_weight_kg: patientInfo?.weight || 60,
-        });
-        if (resp?.data?.render_data) {
-          setPythonResult(resp.data.render_data);
-          completeAssessment('gait', { completed: true, reportData: resp.data.render_data }, { pythonResult: resp.data.render_data }, assessmentIdRef.current);
-        } else {
-          console.warn('[Gait] 后端未返回报告数据');
-          setShowComplete(false);
-          alert('步态报告生成失败：未取到有效数据。\n常见原因是 4 块步道未全部连接或采集数据不足。\n请检查步道连接后重新测量此项。');
-          setPhase('idle');
-        }
-      } catch (e) {
-        console.error('报告生成失败:', e);
-        setShowComplete(false);
-        alert('步态报告生成失败：' + (e?.message || '未知错误') + '\n请重新测量此项。');
-        setPhase('idle');
-      }
-    })();
+    const aid = assessmentIdRef.current;
+    const bodyWeight = patientInfo?.weight || 60;
+    // 结束采集、把数据落库；报告不在此处生成，改为入队，采完4项回首页统一生成（避免采集阶段跑 Python 拖卡）
+    try { await backendBridge.endCol(); } catch (e) { console.warn('[Gait] endCol 失败:', e?.message); }
+    enqueueReport('gait', async () => {
+      const resp = await backendBridge.getGaitReport({
+        timestamp: new Date().toISOString(),
+        assessmentId: aid,
+        collectName: 'gait_assessment',
+        body_weight_kg: bodyWeight,
+      });
+      if (resp?.data?.render_data) return resp.data.render_data;
+      throw new Error('步态报告未取到有效数据（可能 4 块步道未全部连接或采集数据不足）');
+    }, aid);
   };
 
   // 清理

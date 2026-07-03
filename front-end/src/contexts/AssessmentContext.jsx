@@ -43,7 +43,13 @@ const INITIAL_STATE = {
     sitstand: { completed: false, report: null, data: null },
     standing: { completed: false, report: null, data: null },
     gait: { completed: false, report: null, data: null }
-  }
+  },
+
+  // 报告延后生成的状态：采集阶段只入队不算，采完4项回首页统一生成。
+  // 取值：idle(未采) | queued(已采待生成) | generating(生成中) | done(已完成) | failed(生成失败) | skipped(跳过)
+  reportStatuses: {
+    grip: 'idle', sitstand: 'idle', standing: 'idle', gait: 'idle',
+  },
 };
 
 export function AssessmentProvider({ children }) {
@@ -254,7 +260,8 @@ export function AssessmentProvider({ children }) {
         }
       }
 
-      return { ...prev, assessments };
+      const reportStatuses = { ...prev.reportStatuses, [type]: 'done' };
+      return { ...prev, assessments, reportStatuses };
     });
   }, []);
 
@@ -262,12 +269,68 @@ export function AssessmentProvider({ children }) {
     setState(prev => {
       const assessments = { ...prev.assessments };
       assessments[type] = { completed: false, report: null, data: null };
-      return { ...prev, assessments };
+      const reportStatuses = { ...prev.reportStatuses, [type]: 'idle' };
+      return { ...prev, assessments, reportStatuses };
     });
   }, []);
 
+  // ─── 报告延后生成：队列 + 顺序执行（采集只入队，采完4项回首页统一生成）───
+  const reportQueueRef = useRef([]);        // [{ type, thunk, assessmentId }]
+  const reportDrainingRef = useRef(false);
+
+  const setReportStatus = useCallback((type, status) => {
+    setState(prev => ({ ...prev, reportStatuses: { ...prev.reportStatuses, [type]: status } }));
+  }, []);
+
+  // 采集结束时调用：把"生成这份报告的动作"打包入队，不立即执行
+  const enqueueReport = useCallback((type, thunk, assessmentId) => {
+    reportQueueRef.current = reportQueueRef.current.filter(it => it.type !== type);
+    reportQueueRef.current.push({ type, thunk, assessmentId });
+    setReportStatus(type, 'queued');
+  }, [setReportStatus]);
+
+  // 顺序执行队列（首页触发）：一次只跑一个报告，避免并发抢 CPU
+  const runReportQueue = useCallback(async () => {
+    if (reportDrainingRef.current) return;
+    reportDrainingRef.current = true;
+    try {
+      while (reportQueueRef.current.length > 0) {
+        const item = reportQueueRef.current.shift();
+        if (!item) continue;
+        setReportStatus(item.type, 'generating');
+        try {
+          const report = await item.thunk();
+          if (report) {
+            // completeAssessment 内会把 reportStatus 置为 done 并写入历史
+            completeAssessment(item.type, { completed: true, reportData: report }, null, item.assessmentId);
+          } else {
+            setReportStatus(item.type, 'failed');
+          }
+        } catch (e) {
+          console.error(`[报告队列] ${item.type} 生成失败:`, e);
+          setReportStatus(item.type, 'failed');
+        }
+      }
+    } finally {
+      reportDrainingRef.current = false;
+    }
+  }, [setReportStatus, completeAssessment]);
+
+  // 失败项：跳过（标记 skipped=未测/生成失败，可补测，允许放行下一位）
+  const skipReport = useCallback((type) => {
+    reportQueueRef.current = reportQueueRef.current.filter(it => it.type !== type);
+    setReportStatus(type, 'skipped');
+  }, [setReportStatus]);
+
+  // 失败项：重测（清空该项，回去重新采集）
+  const retryReport = useCallback((type) => {
+    reportQueueRef.current = reportQueueRef.current.filter(it => it.type !== type);
+    resetAssessment(type);
+  }, [resetAssessment]);
+
   // 开始新的一次评估：重置所有评估状态和患者信息，生成新 sessionId，保留登录和设备连接
   const startNewSession = useCallback(() => {
+    reportQueueRef.current = [];
     setState(prev => ({
       ...prev,
       patientInfo: null,
@@ -278,6 +341,7 @@ export function AssessmentProvider({ children }) {
         standing: { completed: false, report: null, data: null },
         gait: { completed: false, report: null, data: null },
       },
+      reportStatuses: { grip: 'idle', sitstand: 'idle', standing: 'idle', gait: 'idle' },
     }));
   }, []);
 
@@ -305,6 +369,7 @@ export function AssessmentProvider({ children }) {
   const switchToPatient = useCallback((p) => {
     if (!p) return;
     rosterService.setCurrentId(p.id || null);
+    reportQueueRef.current = [];
     setState(prev => ({
       ...prev,
       patientInfo: {
@@ -323,6 +388,7 @@ export function AssessmentProvider({ children }) {
         standing: { completed: false, report: null, data: null },
         gait: { completed: false, report: null, data: null },
       },
+      reportStatuses: { grip: 'idle', sitstand: 'idle', standing: 'idle', gait: 'idle' },
     }));
   }, []);
 
@@ -381,6 +447,11 @@ export function AssessmentProvider({ children }) {
     setPatientInfo,
     completeAssessment,
     resetAssessment,
+    // 报告延后生成
+    enqueueReport,
+    runReportQueue,
+    skipReport,
+    retryReport,
     startNewSession,
     importRoster,
     clearRoster,

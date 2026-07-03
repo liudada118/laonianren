@@ -532,6 +532,7 @@ export default function Dashboard() {
     deviceConnStatus, deviceOnlineMap, macInfo, connectAllDevices, disconnectAllDevices,
     rescanDevices, rescanLoading,
     sessionId, roster, rosterCurrentId, importRoster, switchToPatient, updateCurrentExtra, clearRoster,
+    reportStatuses, runReportQueue, skipReport, retryReport,
   } = useAssessment();
   const [showResetConfirm, setShowResetConfirm] = useState(null);
   const [showGripTip, setShowGripTip] = useState(false);
@@ -578,6 +579,24 @@ export default function Dashboard() {
 
   const completedCount = Object.values(assessments).filter(a => a.completed).length;
   const comprehensiveReady = completedCount === 4;
+
+  // ─── 报告收尾闸：采集只入队，回首页统一顺序生成；未全部生成完不放行下一位 ───
+  const RS_TYPES = ['gait', 'standing', 'grip', 'sitstand'];
+  const RS_LABEL = { gait: '行走步态', standing: '静态站立', grip: '握力', sitstand: '起坐能力' };
+  const RS_PATH = { gait: '/assessment/gait', standing: '/assessment/standing', grip: '/assessment/grip', sitstand: '/assessment/sitstand' };
+  const rs = reportStatuses || {};
+  const rsQueued = RS_TYPES.filter(t => rs[t] === 'queued').length;
+  const rsGenerating = RS_TYPES.filter(t => rs[t] === 'generating').length;
+  const rsFailed = RS_TYPES.filter(t => rs[t] === 'failed');
+  const rsDone = RS_TYPES.filter(t => rs[t] === 'done').length;
+  const rsAttempted = RS_TYPES.filter(t => rs[t] && rs[t] !== 'idle').length;
+  // 还有未结算(排队/生成中/失败)的报告 → 盖收尾层、拦截换人
+  const reportSettling = rsQueued > 0 || rsGenerating > 0 || rsFailed.length > 0;
+
+  // 回到首页且队列里有待生成报告 → 自动顺序生成（一次一个，采集时不会触发）
+  useEffect(() => {
+    if (rsQueued > 0) runReportQueue();
+  }, [rsQueued, runReportQueue]);
 
   // ─── 名单导入 / 切换 ───
   const handleImported = (list) => {
@@ -948,6 +967,58 @@ export default function Dashboard() {
       {/* 切换/补填评估对象弹窗 */}
       <PatientSwitchDialog open={!!switchTarget} patient={switchTarget}
         onClose={() => setSwitchTarget(null)} onConfirm={handleSwitchConfirm} />
+
+      {/* 报告收尾闸：采完4项回首页统一生成报告，未生成完/未处理失败项前盖屏，不放行下一位 */}
+      {reportSettling && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[460px] max-w-[92vw] animate-scaleIn">
+            <div className="flex items-center gap-3 mb-5">
+              {rsFailed.length === 0 ? (
+                <svg className="w-8 h-8 animate-spin" style={{ color: 'var(--zeiss-blue)' }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#FEF2F2' }}>
+                  <svg className="w-5 h-5" style={{ color: '#DC2626' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-3l-7.07-12a2 2 0 00-3.48 0l-7.07 12a2 2 0 001.74 3z" /></svg>
+                </div>
+              )}
+              <div>
+                <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+                  {rsFailed.length ? '部分报告生成失败' : '正在生成本次筛查报告'}
+                </h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {rsFailed.length ? '请对失败项选择「重测」或「跳过」后再进入下一位' : '请稍候，全部生成完成后才能进入下一个用户'}
+                </p>
+              </div>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden mb-1" style={{ background: 'var(--border-light)' }}>
+              <div className="h-full rounded-full transition-all"
+                style={{ width: `${rsAttempted ? Math.round((rsDone / rsAttempted) * 100) : 0}%`, background: 'linear-gradient(135deg, #0891B2, #06B6D4)' }} />
+            </div>
+            <div className="text-right text-xs mb-3" style={{ color: 'var(--text-muted)' }}>已完成 {rsDone}/{rsAttempted}</div>
+            <div className="space-y-2">
+              {RS_TYPES.filter(t => rs[t] && rs[t] !== 'idle').map(t => (
+                <div key={t} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
+                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{RS_LABEL[t]}</span>
+                  {rs[t] === 'done' && <span className="text-xs" style={{ color: '#059669' }}>✓ 已生成</span>}
+                  {rs[t] === 'skipped' && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>已跳过（未测）</span>}
+                  {rs[t] === 'generating' && <span className="text-xs" style={{ color: 'var(--zeiss-blue)' }}>生成中…</span>}
+                  {rs[t] === 'queued' && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>排队中</span>}
+                  {rs[t] === 'failed' && (
+                    <span className="flex items-center gap-2">
+                      <button onClick={() => { retryReport(t); navigate(RS_PATH[t]); }}
+                        className="text-xs px-2.5 py-1 rounded-md" style={{ color: '#fff', background: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>重测</button>
+                      <button onClick={() => skipReport(t)}
+                        className="text-xs px-2.5 py-1 rounded-md" style={{ color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', cursor: 'pointer' }}>跳过</button>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 做满四项后自动提示切换下一位 */}
       {showNextConfirm && (

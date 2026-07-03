@@ -160,7 +160,7 @@ function SceneControlPanel({ config, onConfigChange }) {
 export default function SitStandAssessment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { patientInfo, institution, completeAssessment, assessments, deviceConnStatus } = useAssessment();
+  const { patientInfo, institution, completeAssessment, enqueueReport, assessments, deviceConnStatus } = useAssessment();
   const isGlobalConnected = deviceConnStatus === 'connected';
   const viewReportMode = location.state?.viewReport && assessments.sitstand?.completed;
 
@@ -294,49 +294,24 @@ export default function SitStandAssessment() {
     isRecordingRef.current = false;
     clearInterval(timerRef.current);
     stopSimulation(); // 停止模拟数据更新
-    // 立即弹完成窗，操作员可直接点「下一项」；报告在后台生成并写入历史
+    // 立即弹完成窗，操作员可直接点「下一项」
     setShowComplete(true);
 
-    (async () => {
-      // 结束后端采集
-      if (isBackendMode) {
-        try { await backendBridge.endCol(); } catch (e) { console.warn('[SitStand] endCol 失败:', e.message); }
-      }
-      // 生成报告：优先后端算法，失败回退前端
-      let report = null;
-      try {
-        if (isBackendMode) {
-          await new Promise(r => setTimeout(r, 500));
-          const resp = await backendBridge.getSitStandReport({
-            timestamp: Date.now(),
-            assessmentId: assessmentIdRef.current,
-            collectName: patientInfo?.name || 'test',
-          });
-          if (resp?.code === 0 && resp?.data?.render_data) report = resp.data.render_data;
-          else console.warn('[SitStand] 后端报告异常，回退前端:', resp?.msg);
-        }
-      } catch (e) {
-        console.warn('[SitStand] 后端报告失败，回退前端:', e.message);
-      }
-      if (!report) {
-        try {
-          report = generateSitStandReportData(
-            seatPressureFullRef.current, footpadPressureFullRef.current,
-            seatStats, footpadStats, seatCoP, footpadCoP, timer,
-            { seatTimestamps: seatTimeFullRef.current, footpadTimestamps: footpadTimeFullRef.current, displayIntervalSec: 0.3, maxDisplayPoints: 48 }
-          );
-        } catch (e) { console.error('[SitStand] 报告生成失败:', e); }
-      }
-      if (report) {
-        setSitstandReportData(report);
-        completeAssessment('sitstand', { completed: true, reportData: report }, {
-          seatPressureHistory: seatPressureFullRef.current,
-          footpadPressureHistory: footpadPressureFullRef.current,
-          seatTimestamps: seatTimeFullRef.current,
-          footpadTimestamps: footpadTimeFullRef.current,
-        }, assessmentIdRef.current);
-      }
-    })();
+    const aid = assessmentIdRef.current;
+    const collectName = patientInfo?.name || 'test';
+    // 结束采集、落库；报告不在此处生成，改为入队，采完4项回首页统一生成
+    if (isBackendMode) {
+      try { await backendBridge.endCol(); } catch (e) { console.warn('[SitStand] endCol 失败:', e.message); }
+    }
+    enqueueReport('sitstand', async () => {
+      const resp = await backendBridge.getSitStandReport({
+        timestamp: Date.now(),
+        assessmentId: aid,
+        collectName,
+      });
+      if (resp?.code === 0 && resp?.data?.render_data) return resp.data.render_data;
+      throw new Error(resp?.msg || '起坐报告未取到有效数据');
+    }, aid);
   };
 
   const viewReport = () => {
