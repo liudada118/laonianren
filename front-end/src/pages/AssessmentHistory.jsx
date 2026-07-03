@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
-import { searchHistory, deleteRecord, clearHistory } from '../lib/historyService';
+import { searchHistory, deleteRecord, clearHistory, updateRecordReport } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
 import { exportAssessmentWorkbook, exportAssessmentBatchWorkbook } from '../lib/assessmentWorkbookExport';
 
@@ -186,6 +186,53 @@ export default function AssessmentHistory() {
 
   const viewReport = (recordId, type) => {
     navigate(`/history/report?id=${recordId}&type=${type}`);
+  };
+
+  // 用已存的原始数据(按 assessmentId)重新生成某项报告的 render_data
+  const genReportRenderData = async (type, assessment, record) => {
+    const aid = assessment?.assessmentId;
+    if (!aid) return null;
+    const name = record?.patientName || 'test';
+    if (type === 'gait') {
+      const resp = await backendBridge.getGaitReport({ timestamp: new Date().toISOString(), assessmentId: aid, collectName: 'gait_assessment', body_weight_kg: record?.patientWeight || 60 });
+      return resp?.data?.render_data || null;
+    }
+    if (type === 'standing') {
+      const resp = await backendBridge.getStandingReport({ timestamp: Date.now(), assessmentId: aid });
+      return (resp?.code === 0 && resp?.data?.render_data) ? resp.data.render_data : null;
+    }
+    if (type === 'sitstand') {
+      const resp = await backendBridge.getSitStandReport({ timestamp: Date.now(), assessmentId: aid, collectName: name });
+      return (resp?.code === 0 && resp?.data?.render_data) ? resp.data.render_data : null;
+    }
+    if (type === 'grip') {
+      const ids = String(aid).split(',').filter(Boolean);
+      const resp = await backendBridge.getGripReport({ timestamp: Date.now(), collectName: name, leftAssessmentId: ids[0], rightAssessmentId: ids[1] || ids[0], assessmentId: aid });
+      return (resp?.code === 0 && resp?.data?.render_data) ? resp.data.render_data : null;
+    }
+    return null;
+  };
+
+  // 补全报告：用已存原始数据生成报告并写回该历史记录
+  const [generatingKey, setGeneratingKey] = useState(null);
+  const handleGenerateReport = async (record, type) => {
+    const gk = `${record.id}:${type}`;
+    if (generatingKey) return;
+    setGeneratingKey(gk);
+    try {
+      const renderData = await genReportRenderData(type, record.assessments?.[type], record);
+      if (!renderData) {
+        alert('补全失败：未取到有效数据（原始数据可能不足，或该项采集异常）。可尝试「重测」。');
+        return;
+      }
+      updateRecordReport(record.id, type, { completed: true, reportData: renderData });
+      setRefreshKey(k => k + 1);
+    } catch (e) {
+      console.error('补全报告失败:', e);
+      alert('补全报告失败：' + (e?.message || '未知错误'));
+    } finally {
+      setGeneratingKey(null);
+    }
   };
 
   return (
@@ -381,7 +428,10 @@ export default function AssessmentHistory() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3">
                           {ASSESSMENT_KEYS.map(key => {
                             const assessment = item.assessments?.[key];
-                            const completed = assessment?.completed;
+                            const hasReport = !!(assessment?.report?.reportData);
+                            const hasData = !!(assessment?.assessmentId);
+                            const completed = hasReport;
+                            const generating = generatingKey === `${item.id}:${key}`;
                             return (
                               <div key={key} className="zeiss-card p-4 flex flex-col">
                                 <div className="flex items-center justify-between mb-3">
@@ -397,22 +447,26 @@ export default function AssessmentHistory() {
                                       {ASSESSMENT_LABELS[key]}
                                     </h4>
                                   </div>
-                                  {completed ? (
+                                  {hasReport ? (
                                     <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--success-light)', color: 'var(--success)' }}>已完成</span>
+                                  ) : hasData ? (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: '#FEF3C7', color: '#D97706' }}>待出报告</span>
                                   ) : (
                                     <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: '#FEE2E2', color: '#DC2626' }}>未测</span>
                                   )}
                                 </div>
-                                {completed && assessment.completedAt && (
+                                {hasReport && assessment.completedAt && (
                                   <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
                                     完成时间: {new Date(assessment.completedAt).toLocaleString('zh-CN')}
                                   </p>
                                 )}
-                                {!completed && (
+                                {!hasReport && hasData && (
+                                  <p className="text-[11px] mb-3" style={{ color: '#D97706' }}>已有采集数据、报告未生成，可补全报告或重测</p>
+                                )}
+                                {!hasData && (
                                   <p className="text-[11px] mb-3" style={{ color: '#DC2626' }}>该项未测，可点下方补测</p>
                                 )}
-                                {/* 查看报告按钮 */}
-                                {completed ? (
+                                {hasReport ? (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); viewReport(item.id, key); }}
                                     className="mt-auto w-full py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
@@ -422,6 +476,22 @@ export default function AssessmentHistory() {
                                     </svg>
                                     查看报告
                                   </button>
+                                ) : hasData ? (
+                                  <div className="mt-auto flex gap-2">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleGenerateReport(item, key); }}
+                                      disabled={generating}
+                                      className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                                      style={{ background: '#059669', color: 'white', border: 'none', cursor: generating ? 'wait' : 'pointer', opacity: generating ? 0.6 : 1 }}>
+                                      {generating ? '生成中…' : '补全报告'}
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); resumeSession(item); navigate(`/assessment/${key}`); }}
+                                      className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                                      style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FCA5A5', cursor: 'pointer' }}>
+                                      重测
+                                    </button>
+                                  </div>
                                 ) : (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); resumeSession(item); navigate(`/assessment/${key}`); }}

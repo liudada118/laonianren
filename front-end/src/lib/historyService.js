@@ -220,6 +220,34 @@ export function clearHistory() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+/**
+ * 补全/更新某条历史记录中某评估项的报告（用已存原始数据重新生成后写回）。
+ * @param {string} recordId 记录 id
+ * @param {string} type gait|standing|grip|sitstand
+ * @param {Object} reportObj 形如 { completed:true, reportData:<render_data> }
+ * @returns {Object|null} 更新后的记录
+ */
+export function updateRecordReport(recordId, type, reportObj) {
+  try {
+    const history = getHistory();
+    const idx = history.findIndex(r => r.id === recordId);
+    if (idx < 0) return null;
+    const record = history[idx];
+    record.assessments = record.assessments || {};
+    record.assessments[type] = {
+      ...(record.assessments[type] || {}),
+      completed: true,
+      report: reportObj,
+    };
+    record.updatedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    return record;
+  } catch (e) {
+    console.error('更新历史报告失败:', e);
+    return null;
+  }
+}
+
 // ==================== 工具函数 ====================
 
 function generateId() {
@@ -240,4 +268,5 @@ export default {
   deleteRecord,
   searchHistory,
   clearHistory,
+  updateRecordReport,
 };
