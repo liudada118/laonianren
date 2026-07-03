@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
 import { searchHistory, deleteRecord, clearHistory } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
-import { exportAssessmentWorkbook } from '../lib/assessmentWorkbookExport';
+import { exportAssessmentWorkbook, exportAssessmentBatchWorkbook } from '../lib/assessmentWorkbookExport';
 
 const ASSESSMENT_LABELS = {
   grip: '握力评估',
@@ -58,6 +58,9 @@ export default function AssessmentHistory() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  // 批量导出（导出当前筛选下的全部记录到一个目录）
+  const [batchExporting, setBatchExporting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
 
   // 异步加载数据
   useEffect(() => {
@@ -116,6 +119,39 @@ export default function AssessmentHistory() {
     }
   }, [exportingId]);
 
+  // 批量导出：拉取当前筛选下的「全部」记录（不止当前页），选目录后逐人写 xlsx
+  const handleBatchExportWorkbook = useCallback(async () => {
+    if (batchExporting) return;
+    setBatchExporting(true);
+    setBatchProgress({ current: 0, total: 0, message: '正在收集记录...', status: 'starting' });
+    try {
+      const all = await searchHistory({ keyword: searchTerm, date: dateFilter, page: 1, pageSize: Math.max(total, 1) });
+      const records = all.items || [];
+      if (!records.length) {
+        setBatchProgress(null);
+        alert('没有可导出的记录');
+        return;
+      }
+      setBatchProgress({ current: 0, total: records.length, message: '准备批量导出...', status: 'starting' });
+      const result = await exportAssessmentBatchWorkbook(records, backendBridge, { onProgress: setBatchProgress });
+      if (result.canceled) {
+        setBatchProgress(null);
+        return;
+      }
+      if (result.skipped.length) {
+        alert(`已导出 ${result.exportedRecords}/${result.records} 人，共 ${result.exported} 个项目。\n目录：${result.directoryPath}\n未导出：\n${result.skipped.join('\n')}`);
+      } else {
+        alert(`已导出 ${result.exportedRecords}/${result.records} 人，共 ${result.exported} 个项目。\n目录：${result.directoryPath}`);
+      }
+    } catch (error) {
+      console.error('批量导出评估数据失败:', error);
+      alert('批量导出失败: ' + (error?.message || '未知错误'));
+    } finally {
+      setBatchExporting(false);
+      setTimeout(() => setBatchProgress(null), 600);
+    }
+  }, [batchExporting, searchTerm, dateFilter, total]);
+
   const getCompletedCount = (assessments) => {
     if (!assessments) return 0;
     return ASSESSMENT_KEYS.filter(k => assessments[k]?.completed).length;
@@ -170,6 +206,13 @@ export default function AssessmentHistory() {
                 className="zeiss-input py-2 text-sm" style={{ width: 160 }} />
               <input type="text" placeholder="搜索姓名 / 编号 / 地区" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 180 }} />
+              {total > 0 && (
+                <button onClick={handleBatchExportWorkbook} disabled={batchExporting}
+                  className="text-xs px-3 py-2 rounded-lg transition-colors"
+                  style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', cursor: batchExporting ? 'not-allowed' : 'pointer', opacity: batchExporting ? 0.55 : 1 }}>
+                  {batchExporting ? '批量导出中...' : '批量导出数据'}
+                </button>
+              )}
               {total > 0 && (
                 <button onClick={() => setShowClearConfirm(true)}
                   className="text-xs px-3 py-2 rounded-lg transition-colors"
@@ -476,6 +519,38 @@ export default function AssessmentHistory() {
                 style={{ background: 'var(--danger)' }}>
                 确认删除
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量导出进度 */}
+      {batchProgress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-8 w-[460px] max-w-[90vw] animate-scaleIn">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: '#ECFDF5' }}>
+                <svg className="w-5 h-5" style={{ color: '#059669' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>批量导出数据</h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{batchProgress.message}</p>
+              </div>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border-light)' }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${batchProgress.total ? Math.min(100, Math.round((batchProgress.current / batchProgress.total) * 100)) : 0}%`,
+                  background: 'linear-gradient(135deg, #059669, #10B981)',
+                }}
+              />
+            </div>
+            <div className="mt-3 flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+              <span>{batchProgress.current || 0} / {batchProgress.total || 0}</span>
+              <span>{batchProgress.total ? Math.min(100, Math.round((batchProgress.current / batchProgress.total) * 100)) : 0}%</span>
             </div>
           </div>
         </div>
