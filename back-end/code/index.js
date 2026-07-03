@@ -790,15 +790,15 @@ app.whenReady().then(async () => {
   registerUpdaterIpcHandlers()
   registerExportFileIpcHandlers()
 
-  // 初始化自动更新（仅在打包后的生产环境启用）
-  if (isPackaged) {
-    const allWindows = BrowserWindow.getAllWindows()
-    if (allWindows.length > 0) {
-      initAutoUpdater(allWindows[0])
-    }
-  } else {
-    console.log('[updater] 开发模式，跳过自动更新初始化')
-  }
+  // 自动更新已按需求关闭：现场无网络、不需要更新，且公用更新服务器上的版本会误覆盖本版本。
+  // 如需恢复：取消下面注释，并把 updater.js 的 UPDATE_SERVER_URL 指向本分支专属的更新服务器。
+  // if (isPackaged) {
+  //   const allWindows = BrowserWindow.getAllWindows()
+  //   if (allWindows.length > 0) {
+  //     initAutoUpdater(allWindows[0])
+  //   }
+  // }
+  console.log('[updater] 自动更新已关闭')
 
   // const data1 = await getCsvData('D:/jqtoolsWin - 副本/python/app/静态数据集1.csv')
 

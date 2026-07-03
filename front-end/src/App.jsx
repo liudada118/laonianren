@@ -12,7 +12,8 @@ import AssessmentHistory from './pages/AssessmentHistory';
 import HistoryReportView from './pages/HistoryReportView';
 import HistoryComprehensiveView from './pages/HistoryComprehensiveView';
 import NotFound from './pages/NotFound';
-import UpdateNotification from './components/ui/UpdateNotification';
+// 自动更新已按需求关闭（现场无网络、不需要），不再挂载 UpdateNotification
+// import UpdateNotification from './components/ui/UpdateNotification';
 
 // Assessment Pages
 import GripAssessment from './pages/assessment/GripAssessment';
@@ -25,7 +26,6 @@ function App() {
     <ThemeProvider defaultTheme="light">
       <AssessmentProvider>
         <ToastProvider>
-          <UpdateNotification />
           <DeviceAlertOverlay />
           <Routes>
             <Route path="/" element={<Login />} />
