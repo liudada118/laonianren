@@ -797,8 +797,8 @@ export default function Dashboard() {
                       生成报告 ({rsQueued})
                     </button>
                   )}
-                  {/* 下一位：手动输入下一个对象的信息，不再按 Excel 名单顺序自动读取 */}
-                  <button onClick={() => setShowAddPatient(true)}
+                  {/* 下一位：打开右侧名单面板，支持按姓名/编号模糊搜索 + 选择 + 手动新增，不再按 Excel 顺序自动读取 */}
+                  <button onClick={() => setShowRosterPanel(true)}
                     className="text-sm px-4 py-2 rounded-lg font-semibold"
                     style={{ color: 'white', background: 'var(--zeiss-blue)', border: 'none', cursor: 'pointer' }}>
                     下一位 ›

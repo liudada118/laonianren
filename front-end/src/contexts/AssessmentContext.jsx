@@ -226,40 +226,36 @@ export function AssessmentProvider({ children }) {
     setState(prev => ({ ...prev, patientInfo: info }));
   }, []);
 
+  // 把当前会话写入历史（本地 + 后端双写）。只发送 completed/report/assessmentId，
+  // 过滤 data（原始传感器数据太大）。只要采到数据就写，哪怕报告还没生成，历史里就能看到这个人。
+  const persistAssessments = (patientInfo, institution, assessments, sessionId) => {
+    if (!patientInfo) return;
+    const assessmentsForSave = {};
+    for (const [key, val] of Object.entries(assessments)) {
+      assessmentsForSave[key] = {
+        completed: val.completed,
+        report: val.report,
+        assessmentId: val.assessmentId || null,
+      };
+    }
+    try {
+      saveAssessmentSession(patientInfo, institution, assessmentsForSave, sessionId);
+    } catch (e) {
+      console.error('自动保存历史记录失败:', e);
+    }
+    try {
+      backendBridge.saveHistory({ patientInfo, institution, assessments: assessmentsForSave })
+        .catch(e => console.warn('后端历史保存失败:', e?.message || e));
+    } catch (e) {
+      console.warn('后端历史保存异常:', e);
+    }
+  };
+
   const completeAssessment = useCallback((type, report, data, assessmentId) => {
     setState(prev => {
       const assessments = { ...prev.assessments };
       assessments[type] = { completed: true, report, data, assessmentId };
-
-      // 自动保存到后端数据库历史记录
-      // 注意：只发送 completed 和 report，过滤掉 data 字段（原始传感器数据可能非常大，会导致请求体超过限制）
-      if (prev.patientInfo) {
-        const assessmentsForSave = {};
-        for (const [key, val] of Object.entries(assessments)) {
-          assessmentsForSave[key] = {
-            completed: val.completed,
-            report: val.report,
-            assessmentId: val.assessmentId || null,
-            // 不发送 data 字段（原始传感器数据）
-          };
-        }
-        try {
-          saveAssessmentSession(prev.patientInfo, prev.institution, assessmentsForSave, prev.sessionId);
-        } catch (e) {
-          console.error('自动保存历史记录失败:', e);
-        }
-        // 双写：同时存入后端 SQLite 数据库（失败不影响本地保存）
-        try {
-          backendBridge.saveHistory({
-            patientInfo: prev.patientInfo,
-            institution: prev.institution,
-            assessments: assessmentsForSave,
-          }).catch(e => console.warn('后端历史保存失败:', e?.message || e));
-        } catch (e) {
-          console.warn('后端历史保存异常:', e);
-        }
-      }
-
+      persistAssessments(prev.patientInfo, prev.institution, assessments, prev.sessionId);
       const reportStatuses = { ...prev.reportStatuses, [type]: 'done' };
       return { ...prev, assessments, reportStatuses };
     });
@@ -282,12 +278,20 @@ export function AssessmentProvider({ children }) {
     setState(prev => ({ ...prev, reportStatuses: { ...prev.reportStatuses, [type]: status } }));
   }, []);
 
-  // 采集结束时调用：把"生成这份报告的动作"打包入队，不立即执行
+  // 采集结束时调用：把"生成这份报告的动作"打包入队，不立即执行。
+  // 同时把该项标记为 completed（采完即算做完，report 待队列后填）——
+  // 这样换页导航/「全部完成」判断/历史都认它；并立即写入历史（有原始数据就有这个人）。
   const enqueueReport = useCallback((type, thunk, assessmentId) => {
     reportQueueRef.current = reportQueueRef.current.filter(it => it.type !== type);
     reportQueueRef.current.push({ type, thunk, assessmentId });
-    setReportStatus(type, 'queued');
-  }, [setReportStatus]);
+    setState(prev => {
+      const assessments = { ...prev.assessments };
+      assessments[type] = { ...(assessments[type] || {}), completed: true, report: null, assessmentId };
+      persistAssessments(prev.patientInfo, prev.institution, assessments, prev.sessionId);
+      const reportStatuses = { ...prev.reportStatuses, [type]: 'queued' };
+      return { ...prev, assessments, reportStatuses };
+    });
+  }, []);
 
   // 顺序执行队列（首页触发）：一次只跑一个报告，避免并发抢 CPU
   const runReportQueue = useCallback(async () => {
