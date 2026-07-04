@@ -1854,6 +1854,49 @@ app.post('/getSitAndFootPdf', async (req, res) => {
   }
 })
 
+// 导入分析：接收前端从导出 xlsx 重建好的原始帧数据(不经数据库)，调用与正常采集相同的一套算法
+// 生成 render_data。按地区取哪块垫由前端在重建时决定(广州 foot1 / 北京 foot4)，此处只跑算法。
+app.post('/generateReportFromRaw', async (req, res) => {
+  try {
+    const b = req.body || {}
+    const type = b.type
+    const region = b.region === 'beijing' ? 'beijing' : 'guangzhou'
+    let renderData = null
+    if (type === 'gait') {
+      renderData = await callAlgorithm('generate_gait_render_report', {
+        board_data: b.board_data, board_times: b.board_times,
+        body_weight_kg: Number(b.body_weight_kg ?? 80),
+      })
+    } else if (type === 'standing') {
+      // 与 getDbHeatmap 一致：北京设备数据方向不同，静态报告需上下翻转；广州不翻。
+      const dataArr = Array.isArray(b.data_array) ? b.data_array : []
+      const reportSensor = region === 'beijing' ? dataArr.map(flipReportFrameVertical) : dataArr
+      renderData = await callAlgorithm('generate_standing_render_report', {
+        data_array: reportSensor, fps: Number(b.fps ?? 42), threshold_ratio: Number(b.threshold_ratio ?? 0.8),
+      })
+    } else if (type === 'sitstand') {
+      renderData = await callAlgorithm('generate_sit_stand_render_report', {
+        stand_data: b.stand_data, sit_data: b.sit_data,
+        stand_times: b.stand_times, sit_times: b.sit_times, username: b.username || '',
+      })
+    } else if (type === 'grip') {
+      const left = (Array.isArray(b.leftArr) && b.leftArr.length)
+        ? await callAlgorithm('generate_grip_render_report', { sensor_data: b.leftArr, hand_type: '左手', times: b.leftTimes, imu_data: null })
+        : null
+      const right = (Array.isArray(b.rightArr) && b.rightArr.length)
+        ? await callAlgorithm('generate_grip_render_report', { sensor_data: b.rightArr, hand_type: '右手', times: b.rightTimes, imu_data: null })
+        : null
+      renderData = { left, right }
+    } else {
+      res.json(new HttpResult(1, {}, 'unknown type: ' + type)); return
+    }
+    res.json(new HttpResult(0, { render_data: renderData }, 'success'))
+  } catch (e) {
+    console.error('[generateReportFromRaw] failed:', e)
+    res.json(new HttpResult(1, {}, 'generateReportFromRaw failed: ' + (e?.message || e)))
+  }
+})
+
 app.post('/getFootPdf', async (req, res) => {
   try {
     const rawTimestamp =

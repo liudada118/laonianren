@@ -302,6 +302,20 @@ class BackendBridge {
   }
 
   /**
+   * 导入分析：把从导出 xlsx 重建好的某项原始帧数据发给后端，跑同一套算法生成 render_data。
+   * @param {object} params - { type, board_data/board_times | data_array/fps | stand_data/sit_data/... | leftArr/rightArr/... }
+   * @returns {Promise<object>} { code, data: { render_data }, msg }
+   */
+  async generateReportFromRaw(params = {}) {
+    const res = await fetch(`${this.httpUrl}/generateReportFromRaw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /**
    * 导出采集数据为CSV文件
    * @param {object} params - { assessmentId, assessmentIds, sampleType }
    * @returns {Promise<object>} { code, data: { fileName, filePath, rowCount, dataKeys }, msg }

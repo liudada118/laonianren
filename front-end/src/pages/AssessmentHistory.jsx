@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAssessment } from '../contexts/AssessmentContext';
-import { searchHistory, deleteRecord, clearHistory, updateRecordReport } from '../lib/historyService';
+import { searchHistory, deleteRecord, clearHistory, updateRecordReport, saveAssessmentSession } from '../lib/historyService';
 import { backendBridge } from '../lib/BackendBridge';
 import { exportAssessmentWorkbook, exportAssessmentBatchWorkbook } from '../lib/assessmentWorkbookExport';
+import { analyzeImportedWorkbook, previewImportedWorkbook } from '../lib/importAnalysis';
 
 const ASSESSMENT_LABELS = {
   grip: '握力评估',
@@ -64,6 +65,15 @@ export default function AssessmentHistory() {
   // 勾选的记录：id -> 记录对象（跨分页保留）
   const [selectedRecords, setSelectedRecords] = useState({});
   const selectedCount = Object.keys(selectedRecords).length;
+
+  // 导入数据分析：选一份导出 xlsx，按线序重建原始帧 -> 后端跑算法 -> 存为历史记录
+  const importInputRef = useRef(null);
+  const [importFile, setImportFile] = useState(null);       // 选中的文件
+  const [importName, setImportName] = useState('');         // 姓名（默认取自文件名，可改）
+  const [importRegion, setImportRegion] = useState('guangzhou');
+  const [importPresent, setImportPresent] = useState([]);   // 文件里含哪些项目
+  const [importAnalyzing, setImportAnalyzing] = useState(false);
+  const [importProgress, setImportProgress] = useState(null); // {label,index,total,status}
 
   // 异步加载数据
   useEffect(() => {
@@ -235,6 +245,70 @@ export default function AssessmentHistory() {
     }
   };
 
+  // 从文件名推断姓名：去扩展名与「_日期_四项评估数据」等尾部
+  const guessNameFromFile = (fileName) => {
+    let base = String(fileName || '').replace(/\.[^.]+$/, '');
+    base = base.replace(/_四项评估数据.*$/, '').replace(/_\d{4}[-_/]?\d{2}[-_/]?\d{2}.*$/, '');
+    return base.trim() || '导入用户';
+  };
+
+  // 选择文件后：预览（检测线序 + 包含项目），打开确认弹窗
+  const handleImportFileChosen = async (e) => {
+    const file = e.target.files?.[0];
+    if (importInputRef.current) importInputRef.current.value = ''; // 允许重复选同一文件
+    if (!file) return;
+    try {
+      const { detectedRegion, present } = await previewImportedWorkbook(file);
+      if (!present.length) {
+        alert('该文件里没有可识别的评估项 sheet（应为导出的「四项评估数据」xlsx）。');
+        return;
+      }
+      setImportFile(file);
+      setImportName(guessNameFromFile(file.name));
+      setImportRegion(detectedRegion || 'guangzhou');
+      setImportPresent(present);
+      setImportProgress(null);
+    } catch (err) {
+      console.error('读取导入文件失败:', err);
+      alert('读取文件失败：' + (err?.message || '未知错误'));
+    }
+  };
+
+  // 确认开始分析：逐项重建 -> 后端算法 -> 存为一条历史记录
+  const handleStartImport = async () => {
+    if (!importFile || importAnalyzing) return;
+    setImportAnalyzing(true);
+    setImportProgress({ label: '准备中', index: 0, total: importPresent.length, status: 'running' });
+    try {
+      const { assessments, region, done, failed } = await analyzeImportedWorkbook(importFile, {
+        region: importRegion,
+        username: importName,
+        onProgress: setImportProgress,
+      });
+      if (!Object.keys(assessments).length) {
+        alert('导入分析失败：所有项目都未能生成报告。\n' + (failed.join('\n') || ''));
+        return;
+      }
+      const ok = saveAssessmentSession(
+        { name: importName || '导入用户', id: '', region: region === 'beijing' ? '北京' : '广州' },
+        institution,
+        assessments,
+        `import_${importFile.name}`,
+      );
+      if (!ok) { alert('保存历史记录失败'); return; }
+      setImportFile(null);
+      setImportProgress(null);
+      setRefreshKey(k => k + 1);
+      const msg = `导入完成：已生成 ${done.join('、')} ${done.length} 项报告，已存入历史记录。`;
+      alert(failed.length ? `${msg}\n未能生成：${failed.join('、')}` : msg);
+    } catch (err) {
+      console.error('导入分析失败:', err);
+      alert('导入分析失败：' + (err?.message || '未知错误'));
+    } finally {
+      setImportAnalyzing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen w-full flex flex-col" style={{ background: 'var(--bg-primary)' }}>
       {/* Header */}
@@ -280,6 +354,13 @@ export default function AssessmentHistory() {
                 className="zeiss-input py-2 text-sm" style={{ width: 160 }} />
               <input type="text" placeholder="搜索姓名 / 编号 / 地区" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 className="zeiss-input py-2 text-sm" style={{ width: 180 }} />
+              <input ref={importInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFileChosen} style={{ display: 'none' }} />
+              <button onClick={() => importInputRef.current?.click()}
+                className="text-xs px-3 py-2 rounded-lg transition-colors"
+                title="导入导出的「四项评估数据」xlsx，按线序重新生成报告并存入历史"
+                style={{ color: 'var(--zeiss-blue)', background: 'var(--zeiss-blue-light)', border: '1px solid var(--zeiss-blue)30', cursor: 'pointer' }}>
+                导入数据分析
+              </button>
               {total > 0 && selectedCount > 0 && (
                 <span className="text-xs px-2 py-1 rounded-md" style={{ background: '#ECFDF5', color: '#059669' }}>
                   已选 {selectedCount} 人
@@ -697,6 +778,77 @@ export default function AssessmentHistory() {
                 className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none cursor-pointer"
                 style={{ background: 'var(--danger)' }}>
                 确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导入数据分析弹窗 */}
+      {importFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center zeiss-overlay animate-fadeIn">
+          <div className="zeiss-dialog p-7 w-[480px] max-w-[92vw] animate-scaleIn">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'var(--zeiss-blue-light)' }}>
+                <svg className="w-5 h-5" style={{ color: 'var(--zeiss-blue)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>导入数据分析</h3>
+                <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }} title={importFile.name}>{importFile.name}</p>
+              </div>
+            </div>
+
+            {/* 姓名 */}
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>姓名</label>
+            <input type="text" value={importName} onChange={e => setImportName(e.target.value)}
+              disabled={importAnalyzing}
+              className="zeiss-input py-2 text-sm w-full mb-4" placeholder="用于历史记录显示的姓名" />
+
+            {/* 线序（地区） */}
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>线序（地区）</label>
+            <div className="flex gap-2 mb-4">
+              {[['guangzhou', '广州（foot1）'], ['beijing', '北京（foot4）']].map(([val, label]) => (
+                <button key={val} onClick={() => !importAnalyzing && setImportRegion(val)}
+                  className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
+                  style={importRegion === val
+                    ? { background: 'var(--zeiss-blue)', color: 'white', border: '1px solid var(--zeiss-blue)' }
+                    : { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)', cursor: importAnalyzing ? 'not-allowed' : 'pointer' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] mb-4" style={{ color: 'var(--text-muted)' }}>
+              识别到项目：{importPresent.map(t => ASSESSMENT_LABELS[t]).join('、') || '无'}。
+              线序默认已按数据自动判断，如不对请手动切换（仅影响站立/起坐所用脚垫）。
+            </p>
+
+            {/* 进度 */}
+            {importAnalyzing && importProgress && (
+              <div className="mb-4">
+                <div className="flex items-center justify-between text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
+                  <span>正在生成：{importProgress.label}</span>
+                  <span>{importProgress.index}/{importProgress.total}</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border-light)' }}>
+                  <div className="h-full rounded-full transition-all"
+                    style={{ width: `${importProgress.total ? Math.round((importProgress.index / importProgress.total) * 100) : 0}%`, background: 'var(--zeiss-blue)' }} />
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button onClick={() => { if (!importAnalyzing) { setImportFile(null); setImportProgress(null); } }}
+                disabled={importAnalyzing}
+                className="zeiss-btn-secondary flex-1 py-3 text-sm"
+                style={{ opacity: importAnalyzing ? 0.5 : 1, cursor: importAnalyzing ? 'not-allowed' : 'pointer' }}>
+                取消
+              </button>
+              <button onClick={handleStartImport} disabled={importAnalyzing}
+                className="flex-1 py-3 rounded-[10px] text-sm font-semibold text-white border-none"
+                style={{ background: 'var(--zeiss-blue)', cursor: importAnalyzing ? 'wait' : 'pointer', opacity: importAnalyzing ? 0.7 : 1 }}>
+                {importAnalyzing ? '分析中…' : '开始分析'}
               </button>
             </div>
           </div>
