@@ -2505,6 +2505,12 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
         peak_val = float(loads[peak_idx]) if loads[peak_idx] > 0 else 0.0001
         total_frames = len(loads)
 
+        # 防越界：下面选帧的下标基于 loads 计算，但 frames 与 loads 长度若不一致（某些采集数据会出现）
+        # 会导致 frames[idx] 越界崩溃、整份步态报告生成失败。这里统一夹紧到 frames 的合法范围。
+        _NF = len(frames)
+        def _fg(i):
+            return frames[max(0, min(int(i), _NF - 1))]
+
         # 定位真实的"落地"和"离地"帧：第一个/最后一个 load >= 5% 峰值的帧
         # 这样"落地 0ms"那帧就是脚实际接触地面、画面已经有数据的瞬间，不会是空黑帧
         contact_threshold = peak_val * 0.05
@@ -2522,7 +2528,7 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
         time_at = lambda idx: (idx - start_offset) * frame_ms
 
         # Frame 1: 落地（第一个有数据的帧，时间 0ms）
-        selected_frames.append(frames[start_offset])
+        selected_frames.append(_fg(start_offset))
         selected_titles.append("落地\n0ms")
 
         # Frames 2-5: 上升段（4 档：40%/50%/60%/85% 峰值）
@@ -2536,12 +2542,12 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
             else:
                 sub = loads[lo:hi]
                 idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
-            selected_frames.append(frames[idx])
+            selected_frames.append(_fg(idx))
             selected_titles.append(f"{time_at(idx)}ms")
             last_idx = idx
 
         # Frame 6: 峰值
-        selected_frames.append(frames[peak_idx])
+        selected_frames.append(_fg(peak_idx))
         selected_titles.append(f"峰值\n{time_at(peak_idx)}ms")
 
         # Frames 7-9: 下降段（3 档：85%/70%/50% 峰值），同样强制时间单调
@@ -2554,12 +2560,12 @@ def build_pressure_evolution_data(total_matrix, left_on, left_off, right_on, rig
             else:
                 sub = loads[lo:hi]
                 idx = lo + int(np.argmin(np.abs(sub - peak_val * r)))
-            selected_frames.append(frames[idx])
+            selected_frames.append(_fg(idx))
             selected_titles.append(f"{time_at(idx)}ms")
             last_idx = idx
 
         # Frame 10: 离地（最后一个有数据的帧）
-        selected_frames.append(frames[end_offset])
+        selected_frames.append(_fg(end_offset))
         selected_titles.append(f"离地\n{time_at(end_offset)}ms")
 
         # 裁剪 + 插值平滑（渲染用smooth，tooltip用raw）
