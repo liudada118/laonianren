@@ -1,6 +1,6 @@
 {
   "name": "samsystemGZCOL",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "JQ",
   "main": "index.js",
   "scripts": {
@@ -31,6 +31,14 @@
   "build": {
     "asar": true,
     "npmRebuild": false,
+    "files": [
+      "**/*",
+      "!db/**",
+      "!db_local_bak/**",
+      "!data/**",
+      "!OneStep/**",
+      "!img/**"
+    ],
     "extraResources": [
       {
         "from": "python/runtime",

@@ -225,7 +225,7 @@ export default function AssessmentHistory() {
         alert('补全失败：未取到有效数据（原始数据可能不足，或该项采集异常）。可尝试「重测」。');
         return;
       }
-      updateRecordReport(record.id, type, { completed: true, reportData: renderData });
+      await updateRecordReport(record.id, type, { completed: true, reportData: renderData });
       setRefreshKey(k => k + 1);
     } catch (e) {
       console.error('补全报告失败:', e);
@@ -234,6 +234,60 @@ export default function AssessmentHistory() {
       setGeneratingKey(null);
     }
   };
+
+  // 批量生成报告：勾选了就对选中的，没勾选就对当前筛选下的全部；
+  // 逐条记录、逐项对「有采集数据但无报告」的项生成 render_data 并写回(IndexedDB)。
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const handleBatchGenerateReports = useCallback(async () => {
+    if (batchGenerating || batchExporting) return;
+    setBatchGenerating(true);
+    setBatchProgress({ current: 0, total: 0, message: '正在收集记录...', status: 'starting' });
+    try {
+      let records;
+      if (selectedCount > 0) {
+        records = Object.values(selectedRecords);
+      } else {
+        const all = await searchHistory({ keyword: searchTerm, date: dateFilter, page: 1, pageSize: Math.max(total, 1) });
+        records = all.items || [];
+      }
+      // 收集所有「有数据、无报告」的 (记录,项目)
+      const tasks = [];
+      for (const rec of records) {
+        for (const type of ASSESSMENT_KEYS) {
+          const a = rec.assessments?.[type];
+          if (a?.assessmentId && !(a?.report?.reportData)) tasks.push({ rec, type });
+        }
+      }
+      if (!tasks.length) {
+        setBatchProgress(null);
+        alert('没有需要生成的报告（选中的记录报告都已生成，或没有可用采集数据）');
+        return;
+      }
+      let done = 0, ok = 0, fail = 0;
+      setBatchProgress({ current: 0, total: tasks.length, message: '开始生成报告...', status: 'running' });
+      for (const { rec, type } of tasks) {
+        setBatchProgress({ current: done, total: tasks.length, message: `正在生成 ${rec.patientName || ''} · ${ASSESSMENT_LABELS[type]}`, status: 'running' });
+        try {
+          const renderData = await genReportRenderData(type, rec.assessments?.[type], rec);
+          if (renderData) { await updateRecordReport(rec.id, type, { completed: true, reportData: renderData }); ok++; }
+          else fail++;
+        } catch (e) {
+          console.error('批量生成失败', rec.patientName, type, e);
+          fail++;
+        }
+        done++;
+        setBatchProgress({ current: done, total: tasks.length, message: `已生成 ${done}/${tasks.length}`, status: 'running' });
+      }
+      setRefreshKey(k => k + 1);
+      alert(`批量生成完成：成功 ${ok} 项${fail ? `，失败 ${fail} 项（原始数据不足/采集异常，可单独重测）` : ''}。`);
+    } catch (e) {
+      console.error('批量生成报告失败:', e);
+      alert('批量生成报告失败：' + (e?.message || '未知错误'));
+    } finally {
+      setBatchGenerating(false);
+      setTimeout(() => setBatchProgress(null), 600);
+    }
+  }, [batchGenerating, batchExporting, selectedCount, selectedRecords, searchTerm, dateFilter, total]);
 
   return (
     <div className="min-h-screen w-full flex flex-col" style={{ background: 'var(--bg-primary)' }}>
@@ -291,6 +345,14 @@ export default function AssessmentHistory() {
                   title={selectedCount > 0 ? '导出勾选的记录' : '未勾选则导出当前筛选下的全部记录'}
                   style={{ color: '#059669', background: '#ECFDF5', border: '1px solid #05966930', cursor: batchExporting ? 'not-allowed' : 'pointer', opacity: batchExporting ? 0.55 : 1 }}>
                   {batchExporting ? '批量导出中...' : (selectedCount > 0 ? `批量导出(${selectedCount})` : '批量导出数据')}
+                </button>
+              )}
+              {total > 0 && (
+                <button onClick={handleBatchGenerateReports} disabled={batchGenerating || batchExporting}
+                  className="text-xs px-3 py-2 rounded-lg transition-colors"
+                  title={selectedCount > 0 ? '为勾选的记录批量生成缺失的报告' : '为当前筛选下全部记录批量生成缺失的报告'}
+                  style={{ color: 'var(--zeiss-blue)', background: 'var(--zeiss-blue-light)', border: '1px solid var(--zeiss-blue)30', cursor: (batchGenerating || batchExporting) ? 'not-allowed' : 'pointer', opacity: batchGenerating ? 0.55 : 1 }}>
+                  {batchGenerating ? '批量生成中...' : (selectedCount > 0 ? `批量生成报告(${selectedCount})` : '批量生成报告')}
                 </button>
               )}
               {total > 0 && selectedCount > 0 && (

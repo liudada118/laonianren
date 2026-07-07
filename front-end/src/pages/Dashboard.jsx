@@ -312,7 +312,13 @@ function RosterPanel({ open, roster, currentId, onClose, onPick, onClear, onAddP
   const [sortBy, setSortBy] = useState('id');
   const [statusFilter, setStatusFilter] = useState('all');
   const [regionFilter, setRegionFilter] = useState('all');
-  const statusMap = useMemo(() => deriveStatusMap(roster, getHistory()), [roster, open]);
+  const [statusMap, setStatusMap] = useState({});
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    getHistory().then(h => { if (!cancelled) setStatusMap(deriveStatusMap(roster, h)); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [roster, open]);
 
   if (!open) return null;
 
@@ -652,11 +658,17 @@ export default function Dashboard() {
     () => currentRecord ? buildComprehensiveScoreResult(assessments, patientInfo || {}) : null,
     [currentRecord, assessments, patientInfo],
   );
-  // 名单中尚未完成四项筛查的人（缺检提醒）
-  const pendingPatients = useMemo(() => {
-    if (!roster.length) return [];
-    const statusMap = deriveStatusMap(roster, getHistory());
-    return roster.filter(p => (statusMap[p.id]?.completed || 0) < 4);
+  // 名单中尚未完成四项筛查的人（缺检提醒）——getHistory 现为异步
+  const [pendingPatients, setPendingPatients] = useState([]);
+  useEffect(() => {
+    if (!roster.length) { setPendingPatients([]); return undefined; }
+    let cancelled = false;
+    getHistory().then(h => {
+      if (cancelled) return;
+      const statusMap = deriveStatusMap(roster, h);
+      setPendingPatients(roster.filter(p => (statusMap[p.id]?.completed || 0) < 4));
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [roster, assessments]);
 
   return (

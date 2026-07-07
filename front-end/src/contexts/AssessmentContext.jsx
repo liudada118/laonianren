@@ -238,11 +238,9 @@ export function AssessmentProvider({ children }) {
         assessmentId: val.assessmentId || null,
       };
     }
-    try {
-      saveAssessmentSession(patientInfo, institution, assessmentsForSave, sessionId);
-    } catch (e) {
-      console.error('自动保存历史记录失败:', e);
-    }
+    // saveAssessmentSession 现为异步(写 IndexedDB)，fire-and-forget
+    Promise.resolve(saveAssessmentSession(patientInfo, institution, assessmentsForSave, sessionId))
+      .catch(e => console.error('自动保存历史记录失败:', e));
     try {
       backendBridge.saveHistory({ patientInfo, institution, assessments: assessmentsForSave })
         .catch(e => console.warn('后端历史保存失败:', e?.message || e));
@@ -255,8 +253,9 @@ export function AssessmentProvider({ children }) {
     setState(prev => {
       const assessments = { ...prev.assessments };
       assessments[type] = { completed: true, report, data, assessmentId };
-      persistAssessments(prev.patientInfo, prev.institution, assessments, prev.sessionId);
       const reportStatuses = { ...prev.reportStatuses, [type]: 'done' };
+      // 持久化是异步副作用，移出 reducer：状态更新后再执行
+      Promise.resolve().then(() => persistAssessments(prev.patientInfo, prev.institution, assessments, prev.sessionId));
       return { ...prev, assessments, reportStatuses };
     });
   }, []);
