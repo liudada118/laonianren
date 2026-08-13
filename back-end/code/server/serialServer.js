@@ -4499,6 +4499,17 @@ function ensureMatrixNameColumn(db) {
           if (e) console.error('ALTER TABLE add select failed:', e)
         })
       }
+      // 关键性能索引：缺索引时 assessment_id 查询会全表扫描(数据量大后 68 万行约需 10 秒)，
+      // 导致报告生成极慢、且长时间阻塞后端事件循环使实时采集(步道等)卡顿。加索引后查询≈0ms。
+      // IF NOT EXISTS 幂等：老库首次建(几秒)、之后跳过；新库建空索引。
+      db.run('CREATE INDEX IF NOT EXISTS idx_matrix_aid_st ON matrix(assessment_id, sample_type)', (e) => {
+        if (e) console.error('CREATE INDEX idx_matrix_aid_st failed:', e)
+        else console.log('[db] matrix(assessment_id,sample_type) 索引已就绪')
+      })
+      // 部分流程按日期定位数据(WHERE date=?)，同样避免全表扫描
+      db.run('CREATE INDEX IF NOT EXISTS idx_matrix_date ON matrix(date)', (e) => {
+        if (e) console.error('CREATE INDEX idx_matrix_date failed:', e)
+      })
     })
   })
 }
